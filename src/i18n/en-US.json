@@ -37,6 +37,8 @@
   "status.processing": "Processing...",
   "status.success": "Completed",
   "status.copied": "Copied!",
+  "status.unsupported": "Browser not supported",
+  "status.copy_failed": "Copy failed",
   "status.failed": "Failed",
   "info.size": "Size",
   "info.watermark": "Detected Watermark",

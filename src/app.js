@@ -210,7 +210,10 @@ function createImageCard(item) {
                 </div>
             </div>
             <div class="w-full md:w-auto ml-auto flex-shrink-0 p-2 md:p-4 flex flex-col md:flex-row items-center justify-center gap-2">
-                <button id="copy-${item.id}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs md:text-sm hidden">${i18n.t('btn.copy')}</button>
+                <button id="copy-${item.id}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs md:text-sm hidden flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-1 10H8m4-3H8m1.5 6H8"></path></svg>
+                    <span data-i18n="btn.copy">${i18n.t('btn.copy')}</span>
+                </button>
                 <button id="download-${item.id}" class="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-xs md:text-sm hidden">${i18n.t('btn.download')}</button>
             </div>
         </div>
@@ -297,17 +300,32 @@ function updateDynamicTexts() {
 }
 
 async function copyImage(item, targetBtn = copyBtn) {
+    if (!navigator.clipboard || !window.ClipboardItem) {
+        setStatusMessage(i18n.t('status.unsupported'), 'warn');
+        return;
+    }
+
     try {
         if (!item.processedBlob) return;
         const data = [new ClipboardItem({ [item.processedBlob.type]: item.processedBlob })];
         await navigator.clipboard.write(data);
-        const originalText = targetBtn.innerHTML;
-        targetBtn.innerHTML = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> <span>${i18n.t('status.copied')}</span>`;
+        
+        const span = targetBtn.querySelector('span');
+        const svg = targetBtn.querySelector('svg');
+        const originalText = span.textContent;
+        const originalSvgPath = svg.innerHTML;
+
+        span.textContent = i18n.t('status.copied');
+        svg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
+        
         setTimeout(() => {
-            targetBtn.innerHTML = originalText;
+            // Restore using i18n to handle potential language switch during timeout
+            span.textContent = i18n.t('btn.copy');
+            svg.innerHTML = originalSvgPath;
         }, 2000);
     } catch (err) {
         console.error('Failed to copy image: ', err);
+        setStatusMessage(i18n.t('status.copy_failed'), 'warn');
     }
 }
 

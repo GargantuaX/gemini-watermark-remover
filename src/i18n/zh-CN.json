@@ -37,6 +37,8 @@
   "status.processing": "处理中...",
   "status.success": "处理完成",
   "status.copied": "已复制！",
+  "status.unsupported": "浏览器不支持",
+  "status.copy_failed": "复制失败",
   "status.failed": "处理失败",
   "info.size": "尺寸",
   "info.watermark": "检测到的水印",
