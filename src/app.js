@@ -19,7 +19,6 @@ const imageList = document.getElementById('imageList');
 const progressText = document.getElementById('progressText');
 const downloadAllBtn = document.getElementById('downloadAllBtn');
 const originalImage = document.getElementById('originalImage');
-const processedSection = document.getElementById('processedSection');
 const processedImage = document.getElementById('processedImage');
 const originalInfo = document.getElementById('originalInfo');
 const processedInfo = document.getElementById('processedInfo');
@@ -33,12 +32,14 @@ async function init() {
     try {
         await i18n.init();
         setupLanguageSwitch();
+        setupDarkMode();
         showLoading(i18n.t('status.loading'));
 
         engine = await WatermarkEngine.create();
 
         hideLoading();
         setupEventListeners();
+        setupSlider();
 
         zoom = mediumZoom('[data-zoomable]', {
             margin: 24,
@@ -72,19 +73,36 @@ function setupEventListeners() {
     uploadArea.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelect);
 
-    uploadArea.addEventListener('dragover', (e) => {
+    // Global drag & drop
+    document.addEventListener('dragover', (e) => {
         e.preventDefault();
-        uploadArea.classList.add('dragover');
+        uploadArea.classList.add('border-primary', 'bg-emerald-50', 'dark:bg-gray-700/50');
     });
 
-    uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
+    document.addEventListener('dragleave', (e) => {
+        if (e.clientX === 0 && e.clientY === 0) {
+            uploadArea.classList.remove('border-primary', 'bg-emerald-50', 'dark:bg-gray-700/50');
+        }
     });
 
-    uploadArea.addEventListener('drop', (e) => {
+    document.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadArea.classList.remove('dragover');
-        handleFiles(Array.from(e.dataTransfer.files));
+        uploadArea.classList.remove('border-primary', 'bg-emerald-50', 'dark:bg-gray-700/50');
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFiles(Array.from(e.dataTransfer.files));
+        }
+    });
+
+    // Paste support
+    document.addEventListener('paste', (e) => {
+        const items = e.clipboardData.items;
+        const files = [];
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
+                files.push(items[i].getAsFile());
+            }
+        }
+        if (files.length > 0) handleFiles(files);
     });
 
     downloadAllBtn.addEventListener('click', downloadAll);
@@ -169,7 +187,13 @@ async function processSingle(item) {
 
         item.processedUrl = URL.createObjectURL(blob);
         processedImage.src = item.processedUrl;
-        processedSection.style.display = 'block';
+
+        const overlay = document.getElementById('processedOverlay');
+        const handle = document.getElementById('sliderHandle');
+        overlay.style.display = 'block';
+        handle.style.display = 'flex';
+        processedInfo.style.display = 'block';
+
         downloadBtn.style.display = 'flex';
         downloadBtn.onclick = () => downloadImage(item);
 
@@ -178,10 +202,7 @@ async function processSingle(item) {
             <p>${i18n.t('info.status')}: ${i18n.t('info.removed')}</p>
         `;
 
-        zoom.detach();
-        zoom.attach('[data-zoomable]');
-
-        processedSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('comparisonContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) {
         console.error(error);
     }
@@ -306,6 +327,53 @@ async function downloadAll() {
     a.href = URL.createObjectURL(blob);
     a.download = `unwatermarked_${Date.now()}.zip`;
     a.click();
+}
+
+function setupDarkMode() {
+    const themeToggle = document.getElementById('themeToggle');
+    const html = document.documentElement;
+
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        html.classList.add('dark');
+    }
+
+    themeToggle.addEventListener('click', () => {
+        if (html.classList.contains('dark')) {
+            html.classList.remove('dark');
+            localStorage.theme = 'light';
+        } else {
+            html.classList.add('dark');
+            localStorage.theme = 'dark';
+        }
+    });
+}
+
+function setupSlider() {
+    const container = document.getElementById('comparisonContainer');
+    const overlay = document.getElementById('processedOverlay');
+    const handle = document.getElementById('sliderHandle');
+    let isDown = false;
+
+    function move(e) {
+        if (!isDown) return;
+        const rect = container.getBoundingClientRect();
+        const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+        if (!clientX) return;
+
+        const x = clientX - rect.left;
+        const percent = Math.min(Math.max(x / rect.width, 0), 1) * 100;
+
+        overlay.style.width = `${percent}%`;
+        handle.style.left = `${percent}%`;
+    }
+
+    container.addEventListener('mousedown', (e) => { isDown = true; move(e); });
+    window.addEventListener('mouseup', () => { isDown = false; });
+    window.addEventListener('mousemove', move);
+
+    container.addEventListener('touchstart', (e) => { isDown = true; move(e); });
+    window.addEventListener('touchend', () => { isDown = false; });
+    window.addEventListener('touchmove', move);
 }
 
 init();
