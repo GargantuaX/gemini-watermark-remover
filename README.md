@@ -219,3 +219,15 @@ The Reverse Alpha Blending method and calibrated watermark masks are based on th
 ## License
 
 [MIT License](./LICENSE)
+
+## Custom Domain
+
+This project is configured for Cloudflare Pages. To use a custom domain:
+
+1.  Go to your Cloudflare Pages dashboard.
+2.  Select your project.
+3.  Go to **Custom Domains**.
+4.  Click **Set up a custom domain**.
+5.  Enter your domain name (e.g., `gemini-watermark-remover.com`) and follow the instructions.
+
+If you are deploying to GitHub Pages, the `public/CNAME` file is used for the custom domain. Update it with your domain name.

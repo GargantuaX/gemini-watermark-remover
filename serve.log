@@ -1,0 +1,14 @@
+
+> gemini-watermark-remover@1.0.0 serve /app
+> npx serve dist
+
+npm warn Unknown env config "verify-deps-before-run". This will stop working in the next major version of npm.
+npm warn Unknown env config "_jsr-registry". This will stop working in the next major version of npm.
+npm warn exec The following package was not found and will be installed: serve@14.2.5
+ INFO  Accepting connections at http://localhost:3000
+ HTTP  2/13/2026 11:57:02 AM ::1 GET /
+ HTTP  2/13/2026 11:57:02 AM ::1 Returned 200 in 397 ms
+ HTTP  2/13/2026 11:57:02 AM ::1 GET /app.js
+ HTTP  2/13/2026 11:57:02 AM ::1 Returned 200 in 9 ms
+ HTTP  2/13/2026 11:57:04 AM ::1 GET /i18n/en-US.json?_=1770983824180
+ HTTP  2/13/2026 11:57:04 AM ::1 Returned 200 in 3 ms
