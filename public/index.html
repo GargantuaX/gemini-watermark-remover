@@ -95,8 +95,6 @@
       <nav class="flex gap-2 md:gap-6 text-sm font-medium text-gray-600 items-center">
         <a href="userscript/gemini-watermark-remover.user.js" target="_blank" class="hidden md:inline-block hover:text-primary transition-colors" data-i18n="nav.userscript">油猴脚本</a>
         <a href="https://allenkuo.medium.com/removing-gemini-ai-watermarks-a-deep-dive-into-reverse-alpha-blending-bbbd83af2a3f" target="_blank" rel="noopener noreferrer" class="hidden md:inline-block hover:text-primary transition-colors" data-i18n="nav.principle">去水印原理</a>
-        <a href="https://github.com/journey-ad/gemini-watermark-remover" target="_blank" rel="noopener noreferrer" class="hover:text-primary transition-colors">GitHub</a>
-        <button id="langSwitch" class="px-3 py-1 text-nowrap border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">EN</button>
         <button id="themeToggle" class="p-2 text-gray-500 hover:text-primary transition-colors rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 dark:text-gray-400">
             <svg class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
             <svg class="w-5 h-5 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
@@ -256,31 +254,16 @@
     </section>
   </main>
 
-  <footer class="bg-emerald-600 text-white py-6 md:pt-12 md:pb-8">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-8">
-        <div class="col-span-1 sm:col-span-2 lg:col-span-2">
-          <h5 class="text-2xl font-bold mb-4" data-i18n="header.title">Gemini Watermark Remover</h5>
-          <p class="text-emerald-100 text-sm max-w-sm" data-i18n="footer.desc">
-            Gemini 无损去水印工具，本工具仅供学习交流使用
-          </p>
-        </div>
-        <div>
-          <h6 class="font-bold mb-2 md:mb-4 text-emerald-100" data-i18n="footer.links">链接</h6>
-          <ul class="space-y-1 md:space-y-2 text-sm text-emerald-50">
-            <li><a href="terms.html" class="hover:text-white" data-i18n="footer.terms">使用条款</a></li>
-            <li><a href="https://github.com/journey-ad/gemini-watermark-remover" target="_blank" rel="noopener noreferrer" class="hover:text-white" data-i18n="footer.github">Github</a></li>
-            <li><a href="userscript/gemini-watermark-remover.user.js" target="_blank" class="hover:text-white" data-i18n="nav.userscript">油猴脚本</a></li>
-          </ul>
-        </div>
-        <div>
-          <h6 class="font-bold mb-2 md:mb-4 text-emerald-100" data-i18n="footer.tech">技术</h6>
-          <ul class="space-y-1 md:space-y-2 text-sm text-emerald-50">
-            <li><a href="https://allenkuo.medium.com/removing-gemini-ai-watermarks-a-deep-dive-into-reverse-alpha-blending-bbbd83af2a3f" target="_blank" rel="noopener noreferrer" class="hover:text-white" data-i18n="nav.principle">去水印原理</a></li>
-          </ul>
-        </div>
+  <footer class="bg-emerald-600 text-white py-8 mt-auto">
+    <div class="max-w-7xl mx-auto px-4 text-center">
+      <p class="text-emerald-100 text-sm mb-4" data-i18n="footer.desc">
+        Gemini Watermark Remover, for educational purposes only
+      </p>
+      <div class="space-x-4 text-sm font-medium">
+        <a href="terms.html" class="hover:text-white transition-colors" data-i18n="footer.terms">Terms of Use</a>
+        <a href="https://allenkuo.medium.com/removing-gemini-ai-watermarks-a-deep-dive-into-reverse-alpha-blending-bbbd83af2a3f" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors" data-i18n="nav.principle">How It Works?</a>
       </div>
-      <div class="border-t border-emerald-500 pt-8 text-center text-sm text-emerald-200">
+      <div class="mt-8 text-xs text-emerald-200 border-t border-emerald-500 pt-4">
         <p data-i18n="footer.copyright">&copy; Gemini Watermark Remover. All rights reserved.</p>
       </div>
     </div>
