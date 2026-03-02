@@ -1,5 +1,5 @@
 const i18n = {
-  locale: 'en-US',
+  locale: localStorage.getItem('locale') || (navigator.language.startsWith('zh') ? 'zh-CN' : 'en-US'),
   translations: {},
 
   async init() {
@@ -12,6 +12,7 @@ const i18n = {
     const res = await fetch(`./i18n/${locale}.json?_=${Date.now()}`);
     this.translations = await res.json();
     this.locale = locale;
+    localStorage.setItem('locale', locale);
   },
 
   t(key) {
@@ -33,6 +34,11 @@ const i18n = {
         el.textContent = this.t(key);
       }
     });
+  },
+
+  async switchLocale(locale) {
+    await this.loadTranslations(locale);
+    this.applyTranslations();
   }
 };
 

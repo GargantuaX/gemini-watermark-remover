@@ -31,6 +31,7 @@ const resetBtn = document.getElementById('resetBtn');
 async function init() {
     try {
         await i18n.init();
+        setupLanguageSwitch();
         setupDarkMode();
         showLoading(i18n.t('status.loading'));
 
@@ -49,6 +50,21 @@ async function init() {
         hideLoading();
         console.error('initialize error:', error);
     }
+}
+
+/**
+ * setup language switch
+ */
+function setupLanguageSwitch() {
+    const btn = document.getElementById('langSwitch');
+    if (!btn) return;
+    btn.textContent = i18n.locale === 'zh-CN' ? 'EN' : '中文';
+    btn.addEventListener('click', async () => {
+        const newLocale = i18n.locale === 'zh-CN' ? 'en-US' : 'zh-CN';
+        await i18n.switchLocale(newLocale);
+        btn.textContent = newLocale === 'zh-CN' ? 'EN' : '中文';
+        updateDynamicTexts();
+    });
 }
 
 /**
@@ -282,6 +298,12 @@ function updateStatus(id, text, isHtml = false) {
 
 function updateProgress() {
     progressText.textContent = `${i18n.t('progress.text')}: ${processedCount}/${imageQueue.length}`;
+}
+
+function updateDynamicTexts() {
+    if (progressText.textContent) {
+        updateProgress();
+    }
 }
 
 function downloadImage(item) {
