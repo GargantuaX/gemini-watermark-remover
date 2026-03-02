@@ -5,6 +5,11 @@
 
 import { calculateAlphaMap } from './alphaMap.js';
 import { removeWatermark } from './blendModes.js';
+import {
+    detectAdaptiveWatermarkRegion,
+    interpolateAlphaMap,
+    shouldAttemptAdaptiveFallback
+} from './adaptiveDetector.js';
 import BG_48_PATH from '../assets/bg_48.png';
 import BG_96_PATH from '../assets/bg_96.png';
 
@@ -87,6 +92,15 @@ export class WatermarkEngine {
      * @returns {Promise<Float32Array>} Alpha map
      */
     async getAlphaMap(size) {
+        // For non-standard watermark size, interpolate from 96x96 alpha map.
+        if (size !== 48 && size !== 96) {
+            if (this.alphaMaps[size]) return this.alphaMaps[size];
+            const alpha96 = await this.getAlphaMap(96);
+            const interpolated = interpolateAlphaMap(alpha96, 96, size);
+            this.alphaMaps[size] = interpolated;
+            return interpolated;
+        }
+
         // If cached, return directly
         if (this.alphaMaps[size]) {
             return this.alphaMaps[size];
@@ -118,7 +132,9 @@ export class WatermarkEngine {
      * @param {HTMLImageElement|HTMLCanvasElement} image - Input image
      * @returns {Promise<HTMLCanvasElement>} Processed canvas
      */
-    async removeWatermarkFromImage(image) {
+    async removeWatermarkFromImage(image, options = {}) {
+        const adaptiveMode = options.adaptiveMode || 'auto';
+
         // Create canvas to process image
         const canvas = document.createElement('canvas');
         canvas.width = image.width;
@@ -129,20 +145,71 @@ export class WatermarkEngine {
         ctx.drawImage(image, 0, 0);
 
         // Get image data
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
         // Detect watermark configuration
         const config = detectWatermarkConfig(canvas.width, canvas.height);
-        const position = calculateWatermarkPosition(canvas.width, canvas.height, config);
+        let position = calculateWatermarkPosition(canvas.width, canvas.height, config);
+        let alphaMap = await this.getAlphaMap(config.logoSize);
 
-        // Get alpha map for watermark size
-        const alphaMap = await this.getAlphaMap(config.logoSize);
+        // First pass: keep the fast fixed-rule path.
+        const fixedImageData = new ImageData(
+            new Uint8ClampedArray(originalImageData.data),
+            originalImageData.width,
+            originalImageData.height
+        );
+        removeWatermark(fixedImageData, alphaMap, position);
 
-        // Remove watermark from image data
-        removeWatermark(imageData, alphaMap, position);
+        let finalImageData = fixedImageData;
+        const shouldFallback = adaptiveMode === 'always'
+            ? true
+            : shouldAttemptAdaptiveFallback({
+                processedImageData: fixedImageData,
+                alphaMap,
+                position,
+                originalImageData,
+                originalSpatialMismatchThreshold: 0
+            });
+
+        // Fallback: run adaptive search only when residual signal remains high.
+        if (shouldFallback) {
+            const alpha96 = await this.getAlphaMap(96);
+            const adaptive = detectAdaptiveWatermarkRegion({
+                imageData: originalImageData,
+                alpha96,
+                defaultConfig: config
+            });
+
+            if (adaptive.found) {
+                const size = adaptive.region.size;
+                const adaptivePosition = {
+                    x: adaptive.region.x,
+                    y: adaptive.region.y,
+                    width: size,
+                    height: size
+                };
+                const positionDelta =
+                    Math.abs(adaptivePosition.x - position.x) +
+                    Math.abs(adaptivePosition.y - position.y) +
+                    Math.abs(adaptivePosition.width - position.width);
+
+                // Re-run on original pixels only when adaptive result differs materially.
+                if (positionDelta >= 4) {
+                    position = adaptivePosition;
+                    alphaMap = await this.getAlphaMap(size);
+                    const adaptiveImageData = new ImageData(
+                        new Uint8ClampedArray(originalImageData.data),
+                        originalImageData.width,
+                        originalImageData.height
+                    );
+                    removeWatermark(adaptiveImageData, alphaMap, position);
+                    finalImageData = adaptiveImageData;
+                }
+            }
+        }
 
         // Write processed image data back to canvas
-        ctx.putImageData(imageData, 0, 0);
+        ctx.putImageData(finalImageData, 0, 0);
 
         return canvas;
     }

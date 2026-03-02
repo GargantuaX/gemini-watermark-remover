@@ -23,6 +23,7 @@ const processedImage = document.getElementById('processedImage');
 const originalInfo = document.getElementById('originalInfo');
 const processedInfo = document.getElementById('processedInfo');
 const downloadBtn = document.getElementById('downloadBtn');
+const copyBtn = document.getElementById('copyBtn');
 const resetBtn = document.getElementById('resetBtn');
 
 /**
@@ -116,6 +117,8 @@ function reset() {
     imageQueue = [];
     processedCount = 0;
     fileInput.value = '';
+    copyBtn.style.display = 'none';
+    downloadBtn.style.display = 'none';
 }
 
 function handleFileSelect(e) {
@@ -188,12 +191,14 @@ async function processSingle(item) {
 
         item.processedUrl = URL.createObjectURL(blob);
         processedImage.src = item.processedUrl;
-
         const overlay = document.getElementById('processedOverlay');
         const handle = document.getElementById('sliderHandle');
         overlay.style.display = 'block';
         handle.style.display = 'flex';
         processedInfo.style.display = 'block';
+        
+        copyBtn.style.display = 'flex';
+        copyBtn.onclick = () => copyImage(item);
 
         downloadBtn.style.display = 'flex';
         downloadBtn.onclick = () => downloadImage(item);
@@ -224,7 +229,11 @@ function createImageCard(item) {
                     <div class="text-xs text-gray-500" id="status-${item.id}">${i18n.t('status.pending')}</div>
                 </div>
             </div>
-            <div class="w-full md:w-auto ml-auto flex-shrink-0 p-2 md:p-4 flex items-center justify-center">
+            <div class="w-full md:w-auto ml-auto flex-shrink-0 p-2 md:p-4 flex flex-col md:flex-row items-center justify-center gap-2">
+                <button id="copy-${item.id}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs md:text-sm hidden flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-1 10H8m4-3H8m1.5 6H8"></path></svg>
+                    <span data-i18n="btn.copy">${i18n.t('btn.copy')}</span>
+                </button>
                 <button id="download-${item.id}" class="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-xs md:text-sm hidden">${i18n.t('btn.download')}</button>
             </div>
         </div>
@@ -263,6 +272,10 @@ async function processQueue() {
                 updateStatus(item.id, `<p>${i18n.t('info.size')}: ${item.originalImg.width}×${item.originalImg.height}</p>
             <p>${i18n.t('info.watermark')}: ${watermarkInfo.size}×${watermarkInfo.size}</p>
             <p>${i18n.t('info.position')}: (${watermarkInfo.position.x},${watermarkInfo.position.y})</p>`, true);
+
+                const copyBtn = document.getElementById(`copy-${item.id}`);
+                copyBtn.classList.remove('hidden');
+                copyBtn.onclick = () => copyImage(item, copyBtn);
 
                 const downloadBtn = document.getElementById(`download-${item.id}`);
                 downloadBtn.classList.remove('hidden');
@@ -303,6 +316,36 @@ function updateProgress() {
 function updateDynamicTexts() {
     if (progressText.textContent) {
         updateProgress();
+    }
+}
+
+async function copyImage(item, targetBtn = copyBtn) {
+    if (!navigator.clipboard || !window.ClipboardItem) {
+        setStatusMessage(i18n.t('status.unsupported'), 'warn');
+        return;
+    }
+
+    try {
+        if (!item.processedBlob) return;
+        const data = [new ClipboardItem({ [item.processedBlob.type]: item.processedBlob })];
+        await navigator.clipboard.write(data);
+        
+        const span = targetBtn.querySelector('span');
+        const svg = targetBtn.querySelector('svg');
+        const originalText = span.textContent;
+        const originalSvgPath = svg.innerHTML;
+
+        span.textContent = i18n.t('status.copied');
+        svg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
+        
+        setTimeout(() => {
+            // Restore using i18n to handle potential language switch during timeout
+            span.textContent = i18n.t('btn.copy');
+            svg.innerHTML = originalSvgPath;
+        }, 2000);
+    } catch (err) {
+        console.error('Failed to copy image: ', err);
+        setStatusMessage(i18n.t('status.copy_failed'), 'warn');
     }
 }
 

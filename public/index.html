@@ -191,6 +191,11 @@
             <h4 class="text-lg font-bold text-gray-900 dark:text-white mb-6" data-i18n="panel.title">操作面板</h4>
 
             <div class="space-y-3">
+              <button id="copyBtn" class="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2" style="display: none;">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-1 10H8m4-3H8m1.5 6H8"></path></svg>
+                <span data-i18n="btn.copy">复制结果</span>
+              </button>
+
               <button id="downloadBtn" class="w-full py-3.5 px-4 bg-gray-900 hover:bg-black dark:bg-primary dark:hover:bg-primary-hover text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2" style="display: none;">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                 <span data-i18n="btn.download">下载结果</span>

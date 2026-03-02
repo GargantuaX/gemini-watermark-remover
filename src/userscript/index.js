@@ -54,7 +54,7 @@ async function processImage(imgElement) {
     const normalSizeBlob = await fetchBlob(replaceWithNormalSize(originalSrc));
     const normalSizeBlobUrl = URL.createObjectURL(normalSizeBlob);
     const normalSizeImg = await loadImage(normalSizeBlobUrl);
-    const processedCanvas = await engine.removeWatermarkFromImage(normalSizeImg);
+    const processedCanvas = await engine.removeWatermarkFromImage(normalSizeImg, { adaptiveMode: 'always' });
     const processedBlob = await canvasToBlob(processedCanvas);
 
     URL.revokeObjectURL(normalSizeBlobUrl);
@@ -89,7 +89,7 @@ const setupMutationObserver = () => {
 async function processImageBlob(blob) {
   const blobUrl = URL.createObjectURL(blob);
   const img = await loadImage(blobUrl);
-  const canvas = await engine.removeWatermarkFromImage(img);
+  const canvas = await engine.removeWatermarkFromImage(img, { adaptiveMode: 'always' });
   URL.revokeObjectURL(blobUrl);
   return canvasToBlob(canvas);
 }
