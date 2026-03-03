@@ -40,6 +40,7 @@ const userscriptBanner = `// ==UserScript==
 // @author       journey-ad
 // @license      MIT
 // @match        https://gemini.google.com/*
+// @match        https://business.gemini.google/*
 // @connect      googleusercontent.com
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
