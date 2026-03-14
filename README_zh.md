@@ -99,6 +99,45 @@ pnpm build
 pnpm serve
 ```
 
+## SDK 用法
+
+现在包根已经暴露了一层较稳定的公共 SDK，第三方可直接调用：
+
+```javascript
+import {
+  createWatermarkEngine,
+  removeWatermarkFromImage,
+  removeWatermarkFromImageData,
+} from 'gemini-watermark-remover';
+```
+
+如果你已经拿到了 `ImageData`，优先用纯数据接口：
+
+```javascript
+const result = await removeWatermarkFromImageData(imageData, {
+  adaptiveMode: 'auto',
+  maxPasses: 4,
+});
+
+console.log(result.meta.decisionTier);
+```
+
+如果你在浏览器里拿到的是 `HTMLImageElement` 或 `HTMLCanvasElement`，可直接用图像接口：
+
+```javascript
+const { canvas, meta } = await removeWatermarkFromImage(imageElement);
+document.body.append(canvas);
+console.log(meta.applied, meta.decisionTier);
+```
+
+如果要批量处理，建议复用同一个 engine 实例，让 alpha map 保持缓存：
+
+```javascript
+const engine = await createWatermarkEngine();
+const first = await removeWatermarkFromImageData(imageDataA, { engine });
+const second = await removeWatermarkFromImageData(imageDataB, { engine });
+```
+
 ## Gemini 水印去除算法原理
 
 ### Gemini 添加水印的方式
@@ -123,10 +162,32 @@ $$original = \frac{watermarked - \alpha \cdot logo}{1 - \alpha}$$
 
 ## 水印检测规则
 
-| 图像尺寸条件 | 水印尺寸 | 右边距 | 下边距 |
+现在的检测已经不再只是“48/96 + 32/64”的粗粒度 if/else 规则。
+
+当前策略分层如下：
+
+- 先使用 Gemini 官方尺寸目录作为主要锚点先验
+- 对接近官方尺寸的导出图，按最近的官方尺寸族反推锚点
+- 围绕默认锚点和目录锚点一起做局部搜索
+- 只有在 restoration validation 确认压制真实发生后，才接受去水印结果
+
+默认回退配置仍然是：
+
+| 默认条件 | 水印尺寸 | 右边距 | 下边距 |
 |------------|---------|--------|--------|
-| 宽 > 1024 **且** 高 > 1024 | 96×96 | 64px | 64px |
-| 其他情况 | 48×48 | 32px | 32px |
+| 较大的官方或推断尺寸 | 96×96 | 64px | 64px |
+| 较小的官方或推断尺寸 | 48×48 | 32px | 32px |
+
+## 测试
+
+```bash
+# 运行全部测试
+pnpm test
+```
+
+回归测试会使用 `src/assets/samples/` 下的源样本。
+源样本文件应保留在 git 中。
+本地生成的 `*-fix.*` 只是人工回归快照，不进入 git，也不作为 CI 必须存在的基线。
 
 ## 项目结构
 

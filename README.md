@@ -100,6 +100,45 @@ pnpm build
 pnpm serve
 ```
 
+## SDK Usage
+
+The package root now exposes a small public SDK for third-party integrations:
+
+```javascript
+import {
+  createWatermarkEngine,
+  removeWatermarkFromImage,
+  removeWatermarkFromImageData,
+} from 'gemini-watermark-remover';
+```
+
+Use the pure-data API when you already have decoded `ImageData`:
+
+```javascript
+const result = await removeWatermarkFromImageData(imageData, {
+  adaptiveMode: 'auto',
+  maxPasses: 4,
+});
+
+console.log(result.meta.decisionTier);
+```
+
+Use the browser image API when you have an `HTMLImageElement` or `HTMLCanvasElement`:
+
+```javascript
+const { canvas, meta } = await removeWatermarkFromImage(imageElement);
+document.body.append(canvas);
+console.log(meta.applied, meta.decisionTier);
+```
+
+If you need to process many images, reuse a single engine instance so alpha maps stay cached:
+
+```javascript
+const engine = await createWatermarkEngine();
+const first = await removeWatermarkFromImageData(imageDataA, { engine });
+const second = await removeWatermarkFromImageData(imageDataB, { engine });
+```
+
 ## Testing
 
 ```bash
@@ -108,7 +147,8 @@ pnpm test
 ```
 
 Regression tests include image fixtures from `src/assets/samples/`.
-These fixture files are part of the repository and should be kept in git so collaborators and CI can run the same checks.
+Source samples stay in git.
+Local `*-fix.*` files are optional snapshot outputs for manual regression checks and are intentionally not tracked by git.
 
 ## How Gemini Watermark Removal Works
 
@@ -134,10 +174,21 @@ By capturing the watermark on a known solid background, we reconstruct the exact
 
 ## Detection Rules
 
-| Image Dimension Condition | Watermark Size | Right Margin | Bottom Margin |
+The engine no longer relies on a single coarse `48/96 + 32/64` heuristic.
+
+Current detection is layered:
+
+- Use an official Gemini size catalog as the primary prior for anchor selection
+- Project near-official exports back onto the closest documented size family
+- Search locally around both default anchors and catalog-derived anchors
+- Accept removal only after restoration validation confirms suppression is real
+
+The fallback default configs are still:
+
+| Default Condition | Watermark Size | Right Margin | Bottom Margin |
 | :--- | :--- | :--- | :--- |
-| Width > 1024 **AND** Height > 1024 | 96×96 | 64px | 64px |
-| Otherwise | 48×48 | 32px | 32px |
+| large documented / inferred outputs | 96×96 | 64px | 64px |
+| smaller documented / inferred outputs | 48×48 | 32px | 32px |
 
 ## Project Structure
 
