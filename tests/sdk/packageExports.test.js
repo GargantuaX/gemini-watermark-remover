@@ -19,6 +19,7 @@ test('package should expose browser and image-data sdk subpaths', async () => {
     assert.equal(typeof browserSdk.removeWatermarkFromImage, 'function');
     assert.equal(typeof browserSdk.createWatermarkEngine, 'function');
     assert.equal(typeof imageDataSdk.removeWatermarkFromImageData, 'function');
+    assert.equal(typeof imageDataSdk.removeWatermarkFromImageDataSync, 'function');
     assert.equal(typeof imageDataSdk.createWatermarkEngine, 'function');
 });
 

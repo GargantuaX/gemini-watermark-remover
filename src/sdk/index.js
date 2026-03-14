@@ -1,5 +1,5 @@
 export { createWatermarkEngine, removeWatermarkFromImage } from './browser.js';
-export { removeWatermarkFromImageData } from './image-data.js';
+export { removeWatermarkFromImageData, removeWatermarkFromImageDataSync } from './image-data.js';
 export {
     WatermarkEngine,
     calculateWatermarkPosition,

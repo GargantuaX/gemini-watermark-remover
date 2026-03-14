@@ -7,6 +7,7 @@ export {
     ImageDataRemovalResult,
     createWatermarkEngine,
     removeWatermarkFromImageData,
+    removeWatermarkFromImageDataSync,
     detectWatermarkConfig,
     calculateWatermarkPosition,
     removeRepeatedWatermarkLayers

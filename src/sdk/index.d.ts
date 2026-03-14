@@ -39,6 +39,9 @@ export interface RemoveOptions {
     adaptiveMode?: 'auto' | 'always' | 'never' | 'off';
     maxPasses?: number;
     engine?: WatermarkEngine;
+    alpha48?: Float32Array;
+    alpha96?: Float32Array;
+    getAlphaMap?: (size: number) => Float32Array;
 }
 
 export interface ImageDataRemovalResult {
@@ -78,6 +81,10 @@ export function removeWatermarkFromImageData(
     imageData: ImageData | { width: number; height: number; data: Uint8ClampedArray },
     options?: RemoveOptions
 ): Promise<ImageDataRemovalResult>;
+export function removeWatermarkFromImageDataSync(
+    imageData: ImageData | { width: number; height: number; data: Uint8ClampedArray },
+    options?: Omit<RemoveOptions, 'engine'>
+): ImageDataRemovalResult;
 export function detectWatermarkConfig(imageWidth: number, imageHeight: number): WatermarkConfig;
 export function calculateWatermarkPosition(
     imageWidth: number,
