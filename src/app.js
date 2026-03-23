@@ -198,7 +198,7 @@ function createImageCard(item) {
                     <img id="result-${item.id}" class="max-w-full max-h-24 md:max-h-full rounded" data-zoomable />
                 </div>
                 <div class="flex-1 p-4 flex flex-col min-w-0">
-                    <h4 class="font-semibold text-sm text-gray-900 mb-2 truncate">${item.name}</h4>
+                    <h4 class="image-name font-semibold text-sm text-gray-900 mb-2 truncate"></h4>
                     <div class="text-xs text-gray-500" id="status-${item.id}">${i18n.t('status.pending')}</div>
                 </div>
             </div>
@@ -208,6 +208,7 @@ function createImageCard(item) {
         </div>
     `;
     imageList.appendChild(card);
+    card.querySelector('.image-name').textContent = item.name;
 }
 
 async function processQueue() {
