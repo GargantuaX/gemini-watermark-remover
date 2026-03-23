@@ -1,0 +1,6 @@
+[build]
+  command = "pnpm install --frozen-lockfile && pnpm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"

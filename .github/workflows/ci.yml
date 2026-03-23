@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate sample fixtures
+        run: |
+          if [ ! -d src/assets/samples ] || [ -z "$(ls -A src/assets/samples)" ]; then
+            echo "Missing regression fixtures in src/assets/samples"
+            exit 1
+          fi
+
+      - name: Build
+        run: pnpm build
+
+      - name: SDK publish smoke
+        run: pnpm test:sdk-smoke
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test
+        run: pnpm test

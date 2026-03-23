@@ -1,8 +1,16 @@
 [English](README.md)
 
-# Gemini 无损去水印工具 - [banana.ovo.re](https://banana.ovo.re)
+# Gemini 去水印工具 — 无损去除 Gemini AI 图片水印
 
-基于 Javascript 的纯浏览器端 Gemini AI 图像无损去水印工具，使用数学精确的反向 Alpha 混合算法
+开源的 **Gemini 水印去除工具**，可无损去除 Gemini AI 生成图片中的水印。基于纯 JavaScript 实现，使用数学精确的反向 Alpha 混合算法，而非 AI 修复，确保像素级精准的 Gemini 图片去水印效果。
+
+> **🚀 想快速去除 Gemini 水印？直接使用在线去水印工具：[pilio.ai/gemini-watermark-remover](https://pilio.ai/gemini-watermark-remover)** — 免费、无需安装，浏览器即可使用。
+
+<p align="center">
+  <a href="https://pilio.ai/gemini-watermark-remover"><img src="https://img.shields.io/badge/🛠️_在线工具-pilio.ai-blue?style=for-the-badge" alt="在线工具"></a>&nbsp;
+  <a href="https://gemini.pilio.ai/userscript/gemini-watermark-remover.user.js"><img src="https://img.shields.io/badge/🐒_油猴脚本-安装-green?style=for-the-badge" alt="油猴脚本"></a>&nbsp;
+  <a href="https://gemini.pilio.ai"><img src="https://img.shields.io/badge/🧪_开发者预览-gemini.pilio.ai-gray?style=for-the-badge" alt="开发者预览"></a>
+</p>
 
 <p align="center">
   <img src="https://count.getloli.com/@gemini-watermark-remover?name=gemini-watermark-remover&theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
@@ -17,7 +25,7 @@
 - ✅ **易于使用** - 拖拽选择图片，一键处理
 - ✅ **跨平台** - 支持所有现代浏览器
 
-## 效果示例
+## Gemini 去水印效果示例
 
 <details open>
 <summary>点击查看/收起示例</summary>
@@ -51,13 +59,15 @@
 > 作者对任何形式的数据丢失、图像损坏或非预期的修改结果不承担法律责任。使用本工具即代表您已了解并接受上述风险。
 
 > [!NOTE]
-> 另请注意：使用此工具需禁用 Canvas 指纹防护扩展（如 Canvas Fingerprint Defender），否则可能会导致处理结果错误。 https://github.com/journey-ad/gemini-watermark-remover/issues/3
+> 另请注意：使用此工具需禁用 Canvas 指纹防护扩展（如 Canvas Fingerprint Defender），否则可能会导致处理结果错误。 https://github.com/GargantuaX/gemini-watermark-remover/issues/3
 
-## 使用方法
+## 如何去除 Gemini 水印
 
-### 在线使用
+### 在线 Gemini 去水印工具（推荐）
 
-1. 浏览器打开 [banana.ovo.re](https://banana.ovo.re)
+所有用户均可使用 — 最简单快速的 Gemini 图片去水印方式：
+
+1. 浏览器打开 **[pilio.ai/gemini-watermark-remover](https://pilio.ai/gemini-watermark-remover)**
 2. 拖拽或点击选择带水印的 Gemini 图片
 3. 图片会自动开始处理，移除水印
 4. 下载处理后的图片
@@ -65,9 +75,23 @@
 ### 油猴脚本
 
 1. 安装油猴插件（如 Tampermonkey 或 Greasemonkey）
-2. 打开 [gemini-watermark-remover.user.js](https://banana.ovo.re/userscript/gemini-watermark-remover.user.js)
+2. 打开 [gemini-watermark-remover.user.js](https://gemini.pilio.ai/userscript/gemini-watermark-remover.user.js)
 3. 脚本会自动安装到浏览器中
-4. Gemini 对话页面点击复制或者下载图片时，会自动移除水印
+4. 打开 Gemini 对话页面
+5. 页面里可处理的 Gemini 预览图会在处理后直接替换显示
+6. 点击原生“复制图片”或“下载图片”时，脚本也会在下载流里自动返回去水印结果
+
+当前油猴模式的边界是：
+
+- 不注入页面按钮
+- 不提供弹窗 UI 或批量操作入口
+- 当源图可获取时，会同时处理页面预览图和原生复制/下载链路
+- 处理预览图时会保留原图显示，并叠加克制的 `Processing...` 状态遮罩
+- 如果预览图处理失败，不会把页面原图隐藏掉或替换成空白
+
+### 开发者预览
+
+如果你是开发者或贡献者，可以通过 [gemini.pilio.ai](https://gemini.pilio.ai) 预览最新的开发版本。这个站点是独立的在线预览/本地处理界面，和油猴脚本是两条不同产品线。该版本可能包含实验性功能，不建议普通用户日常使用。
 
 ## 开发
 
@@ -85,7 +109,59 @@ pnpm build
 pnpm serve
 ```
 
-## 算法原理
+## SDK 用法
+
+现在包根已经暴露了一层较稳定的公共 SDK，第三方可直接调用：
+
+```javascript
+import {
+  createWatermarkEngine,
+  removeWatermarkFromImage,
+  removeWatermarkFromImageData,
+  removeWatermarkFromImageDataSync,
+} from 'gemini-watermark-remover';
+```
+
+如果你已经拿到了 `ImageData`，优先用纯数据接口：
+
+```javascript
+const result = await removeWatermarkFromImageData(imageData, {
+  adaptiveMode: 'auto',
+  maxPasses: 4,
+});
+
+console.log(result.meta.decisionTier);
+```
+
+如果你在浏览器里拿到的是 `HTMLImageElement` 或 `HTMLCanvasElement`，可直接用图像接口：
+
+```javascript
+const { canvas, meta } = await removeWatermarkFromImage(imageElement);
+document.body.append(canvas);
+console.log(meta.applied, meta.decisionTier);
+```
+
+如果要批量处理，建议复用同一个 engine 实例，让 alpha map 保持缓存：
+
+```javascript
+const engine = await createWatermarkEngine();
+const first = await removeWatermarkFromImageData(imageDataA, { engine });
+const second = await removeWatermarkFromImageData(imageDataB, { engine });
+```
+
+如果你在 Node.js 里接入，可使用专门的子入口，并注入自己的解码/编码器：
+
+```javascript
+import { removeWatermarkFromBuffer } from 'gemini-watermark-remover/node';
+
+const result = await removeWatermarkFromBuffer(inputBuffer, {
+  mimeType: 'image/png',
+  decodeImageData: yourDecodeFn,
+  encodeImageData: yourEncodeFn,
+});
+```
+
+## Gemini 水印去除算法原理
 
 ### Gemini 添加水印的方式
 
@@ -109,10 +185,36 @@ $$original = \frac{watermarked - \alpha \cdot logo}{1 - \alpha}$$
 
 ## 水印检测规则
 
-| 图像尺寸条件 | 水印尺寸 | 右边距 | 下边距 |
+现在的检测已经不再只是“48/96 + 32/64”的粗粒度 if/else 规则。
+
+当前策略分层如下：
+
+- 先使用 Gemini 官方尺寸目录作为主要锚点先验
+- 对接近官方尺寸的导出图，按最近的官方尺寸族反推锚点
+- 围绕默认锚点和目录锚点一起做局部搜索
+- 只有在 restoration validation 确认压制真实发生后，才接受去水印结果
+
+默认回退配置仍然是：
+
+| 默认条件 | 水印尺寸 | 右边距 | 下边距 |
 |------------|---------|--------|--------|
-| 宽 > 1024 **且** 高 > 1024 | 96×96 | 64px | 64px |
-| 其他情况 | 48×48 | 32px | 32px |
+| 较大的官方或推断尺寸 | 96×96 | 64px | 64px |
+| 较小的官方或推断尺寸 | 48×48 | 32px | 32px |
+
+## 测试
+
+```bash
+# 运行全部测试
+pnpm test
+```
+
+回归测试会使用 `src/assets/samples/` 下的源样本。
+源样本文件应保留在 git 中。
+本地生成的 `*-fix.*` 只是人工回归快照，不进入 git，也不作为 CI 必须存在的基线。
+
+## 发版说明
+
+版本变更请看 [CHANGELOG_zh.md](CHANGELOG_zh.md)，本地发版清单见 [RELEASE_zh.md](RELEASE_zh.md)。
 
 ## 项目结构
 

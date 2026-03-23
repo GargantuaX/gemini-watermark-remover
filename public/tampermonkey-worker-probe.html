@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'"
+  >
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tampermonkey Worker Probe</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", sans-serif;
+      background: #f5f1e8;
+      color: #1d1b19;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top right, rgba(196, 132, 73, 0.22), transparent 24rem),
+        linear-gradient(180deg, #f9f5ee 0%, #efe7da 100%);
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 40px;
+      line-height: 1.1;
+    }
+
+    p {
+      line-height: 1.7;
+      max-width: 72ch;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 24px 0 32px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(41, 34, 25, 0.14);
+      background: rgba(255, 255, 255, 0.72);
+      color: inherit;
+      text-decoration: none;
+      font-weight: 600;
+      backdrop-filter: blur(10px);
+    }
+
+    .panel-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .panel {
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(41, 34, 25, 0.08);
+      box-shadow: 0 18px 40px rgba(61, 44, 28, 0.08);
+    }
+
+    .label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #7e6850;
+    }
+
+    .value {
+      font-size: 18px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    pre {
+      margin-top: 28px;
+      padding: 18px;
+      border-radius: 18px;
+      background: #201914;
+      color: #f5eee6;
+      overflow: auto;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Tampermonkey DOM Sandbox Worker Probe</h1>
+    <p>
+      这个页面模拟 Gemini 类约束中的 <code>worker-src 'self'</code>，因此页面自身的 Blob Worker 应该失败。
+      如果 Tampermonkey 能以 DOM sandbox 运行，就应该还能在隔离上下文里拉起 Worker，并通过桥接把结果回发给页面。
+    </p>
+    <div class="actions">
+      <a class="button" href="/tampermonkey-worker-probe.user.js">安装 / 更新 Probe Userscript</a>
+      <a class="button" href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank" rel="noreferrer">打开 Tampermonkey 商店页</a>
+    </div>
+    <div class="panel-grid">
+      <section class="panel">
+        <span class="label">Page Blob Worker</span>
+        <div class="value" id="page-worker-status">等待中</div>
+      </section>
+      <section class="panel">
+        <span class="label">Userscript Sandbox Worker</span>
+        <div class="value" id="sandbox-worker-status">等待中</div>
+      </section>
+      <section class="panel">
+        <span class="label">Bridge Roundtrip</span>
+        <div class="value" id="bridge-status">等待中</div>
+      </section>
+      <section class="panel">
+        <span class="label">Overall</span>
+        <div class="value" id="overall-status">启动中</div>
+      </section>
+    </div>
+    <pre id="report">waiting...</pre>
+  </main>
+
+  <script>
+    (() => {
+      const state = {
+        startedAt: new Date().toISOString(),
+        completed: false,
+        userscriptDetected: false,
+        pageDirectBlobWorker: null,
+        userscriptSandboxWorker: null,
+        bridgeRoundtrip: null,
+        errors: []
+      };
+
+      let handshakeTimer = 0;
+      let bridgeTimer = 0;
+      let bridgeRequested = false;
+
+      const reportNode = document.querySelector('#report');
+      const pageWorkerNode = document.querySelector('#page-worker-status');
+      const sandboxWorkerNode = document.querySelector('#sandbox-worker-status');
+      const bridgeNode = document.querySelector('#bridge-status');
+      const overallNode = document.querySelector('#overall-status');
+
+      window.__gwrTampermonkeyProbeState = state;
+
+      const render = () => {
+        pageWorkerNode.textContent = formatStatus(state.pageDirectBlobWorker);
+        sandboxWorkerNode.textContent = formatStatus(state.userscriptSandboxWorker);
+        bridgeNode.textContent = formatStatus(state.bridgeRoundtrip);
+        overallNode.textContent = state.completed
+          ? (state.bridgeRoundtrip?.ok ? '完成' : '失败')
+          : (state.userscriptDetected ? '桥接测试中' : '等待 Userscript');
+        reportNode.textContent = JSON.stringify(state, null, 2);
+        document.documentElement.dataset.gwrTmProbeStatus = state.completed ? 'complete' : 'running';
+      };
+
+      const formatStatus = (value) => {
+        if (!value) return '等待中';
+        if (value.ok === true) return value.summary || 'OK';
+        if (value.ok === false) return value.summary || value.message || 'FAILED';
+        return JSON.stringify(value);
+      };
+
+      const complete = () => {
+        if (state.completed) return;
+        state.completed = true;
+        state.completedAt = new Date().toISOString();
+        clearInterval(handshakeTimer);
+        clearTimeout(bridgeTimer);
+        render();
+      };
+
+      const requestHandshake = () => {
+        window.postMessage({ type: 'gwr:tm-probe-handshake' }, '*');
+      };
+
+      const requestBridge = () => {
+        if (bridgeRequested || !state.userscriptDetected) return;
+        bridgeRequested = true;
+        clearTimeout(bridgeTimer);
+        bridgeTimer = window.setTimeout(() => {
+          if (!state.bridgeRoundtrip) {
+            state.bridgeRoundtrip = {
+              ok: false,
+              summary: 'Bridge timeout',
+              error: 'Timed out waiting for gwr:tm-bridge-response'
+            };
+            complete();
+          }
+        }, 5000);
+        window.postMessage({
+          type: 'gwr:tm-bridge-request',
+          payload: {
+            text: 'ping-from-page',
+            sentAt: Date.now()
+          }
+        }, '*');
+      };
+
+      const probePageBlobWorker = async () => {
+        let worker = null;
+        let workerUrl = '';
+        try {
+          workerUrl = URL.createObjectURL(new Blob([
+            'self.onmessage = () => self.postMessage({ ok: true, from: "page-worker" });'
+          ], { type: 'text/javascript' }));
+          worker = new Worker(workerUrl);
+          const response = await new Promise((resolve, reject) => {
+            const timeoutId = window.setTimeout(() => reject(new Error('Page worker timed out')), 1500);
+            worker.addEventListener('message', (event) => {
+              window.clearTimeout(timeoutId);
+              resolve(event.data);
+            }, { once: true });
+            worker.addEventListener('error', (event) => {
+              window.clearTimeout(timeoutId);
+              reject(event.error || new Error(event.message || 'Page worker crashed'));
+            }, { once: true });
+            worker.postMessage({ ping: true });
+          });
+          state.pageDirectBlobWorker = {
+            ok: true,
+            summary: 'Unexpectedly succeeded',
+            response
+          };
+        } catch (error) {
+          state.pageDirectBlobWorker = {
+            ok: false,
+            summary: error?.name || 'Expected failure',
+            message: error?.message || String(error)
+          };
+        } finally {
+          if (worker) worker.terminate();
+          if (workerUrl) URL.revokeObjectURL(workerUrl);
+        }
+      };
+
+      window.addEventListener('message', (event) => {
+        if (event.source !== window) return;
+        const payload = event.data || {};
+        if (payload.type === 'gwr:tm-probe-ready') {
+          state.userscriptDetected = true;
+          state.userscriptSandboxWorker = payload.payload || {
+            ok: false,
+            summary: 'Userscript ready payload missing',
+            message: 'No payload received'
+          };
+          requestBridge();
+          render();
+          return;
+        }
+
+        if (payload.type === 'gwr:tm-bridge-response') {
+          state.bridgeRoundtrip = payload;
+          complete();
+        }
+      });
+
+      window.addEventListener('load', async () => {
+        await probePageBlobWorker();
+        render();
+        requestHandshake();
+        handshakeTimer = window.setInterval(requestHandshake, 700);
+        window.setTimeout(() => {
+          if (!state.userscriptDetected) {
+            state.errors.push('Tampermonkey probe userscript not detected');
+            complete();
+          }
+        }, 5000);
+      }, { once: true });
+    })();
+  </script>
+</body>
+</html>

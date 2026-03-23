@@ -16,3 +16,9 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+.artifacts
+.npm-cache-local
+.npm-tmp-cache
+src/assets/samples/*-fix.*
+.tmp-*.png
+.chrome-debug

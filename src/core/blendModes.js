@@ -4,9 +4,10 @@
  */
 
 // Constants definition
-const ALPHA_THRESHOLD = 0.002;  // Ignore very small alpha values (noise)
-const MAX_ALPHA = 0.99;          // Avoid division by near-zero values
-const LOGO_VALUE = 255;          // Color value for white watermark
+const ALPHA_NOISE_FLOOR = 3 / 255; // Remove low-level quantization noise from alpha map
+const ALPHA_THRESHOLD = 0.002;     // Ignore very small alpha values after noise floor removal
+const MAX_ALPHA = 0.99;            // Avoid division by near-zero values
+const LOGO_VALUE = 255;            // Color value for white watermark
 
 /**
  * Remove watermark using reverse alpha blending
@@ -18,9 +19,14 @@ const LOGO_VALUE = 255;          // Color value for white watermark
  * @param {ImageData} imageData - Image data to process (will be modified in place)
  * @param {Float32Array} alphaMap - Alpha channel data
  * @param {Object} position - Watermark position {x, y, width, height}
+ * @param {Object} [options] - Optional settings
+ * @param {number} [options.alphaGain=1] - Gain multiplier for alpha map strength
  */
-export function removeWatermark(imageData, alphaMap, position) {
+export function removeWatermark(imageData, alphaMap, position, options = {}) {
     const { x, y, width, height } = position;
+    const alphaGain = Number.isFinite(options.alphaGain) && options.alphaGain > 0
+        ? options.alphaGain
+        : 1;
 
     // Process each pixel in the watermark area
     for (let row = 0; row < height; row++) {
@@ -32,15 +38,18 @@ export function removeWatermark(imageData, alphaMap, position) {
             const alphaIdx = row * width + col;
 
             // Get alpha value
-            let alpha = alphaMap[alphaIdx];
+            const rawAlpha = alphaMap[alphaIdx];
+
+            // Remove low-level alpha noise from compressed background capture.
+            const signalAlpha = Math.max(0, rawAlpha - ALPHA_NOISE_FLOOR) * alphaGain;
 
             // Skip very small alpha values (noise)
-            if (alpha < ALPHA_THRESHOLD) {
+            if (signalAlpha < ALPHA_THRESHOLD) {
                 continue;
             }
 
-            // Limit alpha value to avoid division by near-zero
-            alpha = Math.min(alpha, MAX_ALPHA);
+            // Use original alpha for inverse solve; use denoised alpha as activation signal.
+            const alpha = Math.min(rawAlpha * alphaGain, MAX_ALPHA);
             const oneMinusAlpha = 1.0 - alpha;
 
             // Apply reverse alpha blending to each RGB channel

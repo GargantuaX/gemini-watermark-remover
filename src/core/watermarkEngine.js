@@ -3,10 +3,22 @@
  * Coordinate watermark detection, alpha map calculation, and removal operations
  */
 
-import { calculateAlphaMap } from './alphaMap.js';
-import { removeWatermark } from './blendModes.js';
-import BG_48_PATH from '../assets/bg_48.png';
-import BG_96_PATH from '../assets/bg_96.png';
+import { getEmbeddedAlphaMap } from './embeddedAlphaMaps.js';
+import { removeRepeatedWatermarkLayers } from './multiPassRemoval.js';
+import { processWatermarkImageData } from './watermarkProcessor.js';
+import {
+    interpolateAlphaMap,
+} from './adaptiveDetector.js';
+import {
+    detectWatermarkConfig,
+    calculateWatermarkPosition,
+} from './watermarkConfig.js';
+export { detectWatermarkConfig, calculateWatermarkPosition } from './watermarkConfig.js';
+
+function createRuntimeCanvas(width, height) {
+    if (typeof OffscreenCanvas !== 'undefined') {
+        return new OffscreenCanvas(width, height);
+    }
 
 /**
  * Detect watermark configuration based on image size
@@ -31,6 +43,8 @@ function detectWatermarkConfig(imageWidth, imageHeight) {
             marginBottom: 32
         };
     }
+
+    throw new Error('Canvas runtime not available');
 }
 
 /**
@@ -56,29 +70,12 @@ function calculateWatermarkPosition(imageWidth, imageHeight, config) {
  * Coordinate watermark detection, alpha map calculation, and removal operations
  */
 export class WatermarkEngine {
-    constructor(bgCaptures) {
-        this.bgCaptures = bgCaptures;
+    constructor() {
         this.alphaMaps = {};
     }
 
     static async create() {
-        const bg48 = new Image();
-        const bg96 = new Image();
-
-        await Promise.all([
-            new Promise((resolve, reject) => {
-                bg48.onload = resolve;
-                bg48.onerror = reject;
-                bg48.src = BG_48_PATH;
-            }),
-            new Promise((resolve, reject) => {
-                bg96.onload = resolve;
-                bg96.onerror = reject;
-                bg96.src = BG_96_PATH;
-            })
-        ]);
-
-        return new WatermarkEngine({ bg48, bg96 });
+        return new WatermarkEngine();
     }
 
     /**
@@ -87,25 +84,24 @@ export class WatermarkEngine {
      * @returns {Promise<Float32Array>} Alpha map
      */
     async getAlphaMap(size) {
+        // For non-standard watermark size, interpolate from 96x96 alpha map.
+        if (size !== 48 && size !== 96) {
+            if (this.alphaMaps[size]) return this.alphaMaps[size];
+            const alpha96 = await this.getAlphaMap(96);
+            const interpolated = interpolateAlphaMap(alpha96, 96, size);
+            this.alphaMaps[size] = interpolated;
+            return interpolated;
+        }
+
         // If cached, return directly
         if (this.alphaMaps[size]) {
             return this.alphaMaps[size];
         }
 
-        // Select corresponding background capture based on watermark size
-        const bgImage = size === 48 ? this.bgCaptures.bg48 : this.bgCaptures.bg96;
-
-        // Create temporary canvas to extract ImageData
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(bgImage, 0, 0);
-
-        const imageData = ctx.getImageData(0, 0, size, size);
-
-        // Calculate alpha map
-        const alphaMap = calculateAlphaMap(imageData);
+        const alphaMap = getEmbeddedAlphaMap(size);
+        if (!alphaMap) {
+            throw new Error(`Missing embedded alpha map for size ${size}`);
+        }
 
         // Cache result
         this.alphaMaps[size] = alphaMap;
@@ -118,31 +114,22 @@ export class WatermarkEngine {
      * @param {HTMLImageElement|HTMLCanvasElement} image - Input image
      * @returns {Promise<HTMLCanvasElement>} Processed canvas
      */
-    async removeWatermarkFromImage(image) {
-        // Create canvas to process image
-        const canvas = document.createElement('canvas');
-        canvas.width = image.width;
-        canvas.height = image.height;
-        const ctx = canvas.getContext('2d');
-
-        // Draw original image onto canvas
+    async removeWatermarkFromImage(image, options = {}) {
+        const canvas = createRuntimeCanvas(image.width, image.height);
+        const ctx = getCanvasContext2D(canvas);
         ctx.drawImage(image, 0, 0);
-
-        // Get image data
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-        // Detect watermark configuration
-        const config = detectWatermarkConfig(canvas.width, canvas.height);
-        const position = calculateWatermarkPosition(canvas.width, canvas.height, config);
-
-        // Get alpha map for watermark size
-        const alphaMap = await this.getAlphaMap(config.logoSize);
-
-        // Remove watermark from image data
-        removeWatermark(imageData, alphaMap, position);
-
-        // Write processed image data back to canvas
-        ctx.putImageData(imageData, 0, 0);
+        const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const alpha48 = await this.getAlphaMap(48);
+        const alpha96 = await this.getAlphaMap(96);
+        const result = processWatermarkImageData(originalImageData, {
+            alpha48,
+            alpha96,
+            adaptiveMode: options.adaptiveMode,
+            maxPasses: options.maxPasses,
+            getAlphaMap: (size) => this.alphaMaps[size] || interpolateAlphaMap(alpha96, 96, size)
+        });
+        ctx.putImageData(result.imageData, 0, 0);
+        canvas.__watermarkMeta = result.meta;
 
         return canvas;
     }
@@ -164,3 +151,5 @@ export class WatermarkEngine {
         };
     }
 }
+
+export { removeRepeatedWatermarkLayers } from './multiPassRemoval.js';
