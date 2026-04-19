@@ -72,7 +72,9 @@
     "cli:smoke": "node bin/gwr.mjs --help",
     "serve": "pnpm dlx serve dist",
     "export:samples": "node scripts/export-fixed-samples.js",
-    "calibrate:preview-alpha": "node scripts/calibrate-preview-alpha.js"
+    "calibrate:preview-alpha": "node scripts/calibrate-preview-alpha.js",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "dependencies": {
     "sharp": "^0.34.5"
@@ -81,7 +83,8 @@
     "@types/node": "^24.6.0",
     "esbuild": "^0.24.0",
     "playwright": "^1.58.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.83.0"
   },
   "packageManager": "pnpm@10.11.0",
   "pnpm": {

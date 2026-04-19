@@ -27,3 +27,9 @@ src/assets/samples/*-fix.*
 src/assets/samples/fix/
 .omx/
 docs/superpowers/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
