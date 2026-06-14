@@ -4,10 +4,29 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { extname, join, normalize, resolve } from 'node:path';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const pathSep = process.platform === 'win32' ? ';' : ':';
+const binPath = join(__dirname, 'node_modules', '.bin');
+const envWithBin = { ...process.env, PATH: `${binPath}${pathSep}${process.env.PATH}` };
+
+function buildTailwindCSS() {
+  console.log('🎨 Compiling Tailwind CSS...');
+  execSync('tailwindcss -i public/input.css -o dist/tailwind.css --minify', { stdio: 'inherit', env: envWithBin });
+}
+
+function watchTailwindCSS() {
+  console.log('🎨 Watching Tailwind CSS...');
+  return spawn('tailwindcss', ['-i', 'public/input.css', '-o', 'dist/tailwind.css', '--watch'], {
+    stdio: 'inherit',
+    env: envWithBin,
+  });
+}
 const isProd = process.env.NODE_ENV === 'production' || process.argv.includes('--prod');
 
 let _commitHash = null;
@@ -239,6 +258,7 @@ if (isProd) {
     workerCtx.rebuild(),
     userscriptCtx.rebuild()
   ]);
+  buildTailwindCSS();
   console.log('✅ Build complete!');
   process.exit(0);
 } else {
@@ -247,6 +267,7 @@ if (isProd) {
     workerCtx.watch(),
     userscriptCtx.watch()
   ]);
+  watchTailwindCSS();
 
   const watchDir = (dir, dest) => {
     let debounceTimer = null;

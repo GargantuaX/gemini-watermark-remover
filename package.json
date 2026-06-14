@@ -1,5 +1,5 @@
 {
-  "name": "@pilio/gemini-watermark-remover",
+  "name": "gemini-watermark-remover",
   "description": "Automatically removes watermarks from Gemini AI generated images",
   "version": "1.0.10",
   "author": "GargantuaX",
@@ -11,12 +11,11 @@
     "src/core/",
     "src/sdk/",
     "README.md",
-    "README_zh.md",
     "LICENSE"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/GargantuaX/gemini-watermark-remover.git"
+    "url": "https://github.com/lucsena/gemini-watermark-remover.git"
   },
   "license": "MIT",
   "type": "module",
@@ -43,24 +42,14 @@
     }
   },
   "scripts": {
+    "start": "node build.js",
     "dev": "node build.js",
     "build": "node build.js --prod",
+    "serve": "node scripts/serve.js",
     "clean": "node scripts/clean.js",
-    "clean:all": "node scripts/clean.js --include-profile",
-    "convert:samples:webp": "node scripts/convert-samples-to-webp.js",
     "test": "node --test tests/**/*.test.js",
-    "test:sdk-smoke": "node --test tests/sdk/packageMetadata.test.js tests/sdk/packagePack.test.js tests/sdk/typeDeclarations.test.js tests/sdk/consumerRuntime.test.js tests/sdk/typescriptConsumer.test.js tests/sdk/smokeAutomation.test.js",
-    "probe:tm": "node scripts/tampermonkey-smoke.js run",
-    "probe:tm:freshness": "node scripts/tampermonkey-freshness.js",
-    "probe:tm:profile": "node scripts/open-tampermonkey-profile.js",
-    "probe:tm:setup": "node scripts/tampermonkey-smoke.js setup",
-    "probe:real-page:compare": "node scripts/real-page-pixel-compare.js",
-    "benchmark:samples": "node scripts/sample-benchmark.js",
-    "benchmark:userscript": "node scripts/userscript-benchmark.js",
     "cli:smoke": "node bin/gwr.mjs --help",
-    "serve": "pnpm dlx serve dist",
-    "export:samples": "node scripts/export-fixed-samples.js",
-    "calibrate:preview-alpha": "node scripts/calibrate-preview-alpha.js"
+    "benchmark:samples": "node scripts/sample-benchmark.js"
   },
   "dependencies": {
     "jszip": "^3.10.1",
@@ -71,9 +60,9 @@
     "@types/node": "^24.6.0",
     "esbuild": "^0.24.0",
     "playwright": "^1.58.2",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3"
   },
-  "packageManager": "pnpm@10.11.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
