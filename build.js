@@ -25,6 +25,7 @@ function watchTailwindCSS() {
   return spawn('tailwindcss', ['-i', 'public/input.css', '-o', 'dist/tailwind.css', '--watch'], {
     stdio: 'inherit',
     env: envWithBin,
+    shell: true, // required on Windows to resolve .cmd binaries in node_modules/.bin
   });
 }
 const isProd = process.env.NODE_ENV === 'production' || process.argv.includes('--prod');
