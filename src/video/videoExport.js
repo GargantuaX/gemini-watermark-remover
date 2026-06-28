@@ -8,7 +8,6 @@ import {
     Input,
     Mp4OutputFormat,
     Output,
-    QUALITY_HIGH,
     VideoSampleSink,
     canEncodeVideo
 } from 'mediabunny';
@@ -35,7 +34,12 @@ import { resolveAllenkFdncnnRuntimeProfile } from './videoDenoiseRuntimePolicy.j
 const DEFAULT_SAMPLE_COUNT = 12;
 const DEFAULT_ALPHA_GAIN = 1;
 const DEFAULT_ADAPTIVE_ALPHA = false;
-const DEFAULT_VIDEO_BITRATE = QUALITY_HIGH;
+const DEFAULT_VIDEO_BITRATE = 12_000_000;
+const DEFAULT_VIDEO_KEY_FRAME_INTERVAL = 2;
+const DEFAULT_AVC_HARDWARE_ACCELERATION = 'no-preference';
+const DEFAULT_VIDEO_LATENCY_MODE = 'quality';
+const DEFAULT_VIDEO_BITRATE_MODE = 'constant';
+const DEFAULT_VIDEO_CONTENT_HINT = 'detail';
 const ALPHA_REFINEMENT_ROUNDS = 5;
 const ALPHA_FRAME_STEP_CAP = 0.05;
 const FRAME_HIGH_CONFIDENCE = 0.14;
@@ -127,6 +131,19 @@ function getSampleTargetTimestamps({ firstTimestamp, duration, sampleCount }) {
 function resolveVideoBitrate(value) {
     const bitrate = Number(value);
     return Number.isFinite(bitrate) && bitrate > 0 ? bitrate : DEFAULT_VIDEO_BITRATE;
+}
+
+export function createVideoExportEncodingConfig(videoBitrate) {
+    return {
+        codec: 'avc',
+        bitrate: resolveVideoBitrate(videoBitrate),
+        alpha: 'discard',
+        keyFrameInterval: DEFAULT_VIDEO_KEY_FRAME_INTERVAL,
+        latencyMode: DEFAULT_VIDEO_LATENCY_MODE,
+        bitrateMode: DEFAULT_VIDEO_BITRATE_MODE,
+        hardwareAcceleration: DEFAULT_AVC_HARDWARE_ACCELERATION,
+        contentHint: DEFAULT_VIDEO_CONTENT_HINT
+    };
 }
 
 function normalizePacketTimestamp(packet, startTimestamp) {
@@ -889,10 +906,15 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
         throw new Error('视频水印检测置信度偏低，已停止导出。可打开低置信导出后重试。');
     }
 
+    const videoEncodingConfig = createVideoExportEncodingConfig(videoBitrate);
     const canEncodeAvc = await canEncodeVideo('avc', {
         width: metadata.width,
         height: metadata.height,
-        bitrate: videoBitrate
+        bitrate: videoEncodingConfig.bitrate,
+        latencyMode: videoEncodingConfig.latencyMode,
+        bitrateMode: videoEncodingConfig.bitrateMode,
+        hardwareAcceleration: videoEncodingConfig.hardwareAcceleration,
+        contentHint: videoEncodingConfig.contentHint
     });
     if (!canEncodeAvc) {
         throw new Error('当前浏览器不支持 WebCodecs H.264/AVC 编码，请使用新版 Chrome 或 Edge。');
@@ -902,17 +924,12 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
     const canvas = createRuntimeCanvas(metadata.width, metadata.height);
     const ctx = get2dContext(canvas);
     const target = new BufferTarget();
-    const format = new Mp4OutputFormat();
+    const format = new Mp4OutputFormat({ fastStart: 'in-memory' });
     const output = new Output({
         format,
         target
     });
-    const source = new CanvasSource(canvas, {
-        codec: 'avc',
-        bitrate: videoBitrate,
-        alpha: 'discard',
-        keyFrameInterval: 2
-    });
+    const source = new CanvasSource(canvas, videoEncodingConfig);
 
     output.addVideoTrack(source, {
         frameRate: metadata.frameRate
