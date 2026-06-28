@@ -146,7 +146,10 @@ export function createOutputResidualGateReport({
     const currentVeoTextScore = originalVeoTextScore
         ? scoreVeoTextSelection(currentReport, originalVeoTextScore.candidateId)
         : null;
-    const useVeoTextAnchor = (!candidateId || explicitVeoTextCandidate) && originalVeoTextScore && currentVeoTextScore;
+    const useVeoTextAnchor = (
+        explicitVeoTextCandidate ||
+        (!candidateId && originalVeoTextScore?.isConfident)
+    ) && originalVeoTextScore && currentVeoTextScore;
     const fixedCandidateId = candidateId || (useVeoTextAnchor
         ? originalVeoTextScore.candidateId
         : originalReport?.catalogScores?.[0]?.candidateId || null);

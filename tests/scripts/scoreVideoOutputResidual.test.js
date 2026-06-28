@@ -143,6 +143,51 @@ test('createOutputResidualGateReport should use confident Veo text detections as
     assert.equal(report.verdict.currentMeanConfidence, 0.041);
 });
 
+test('createOutputResidualGateReport should ignore weak incidental Veo text detections', () => {
+    const report = createOutputResidualGateReport({
+        originalReport: {
+            selectedDetection: {
+                watermarkKind: 'diamond',
+                alternatives: {
+                    veoTextCandidates: [
+                        {
+                            candidateId: 'veo-text-68x30:1174:649',
+                            templateId: 'veo-text-68x30',
+                            meanNcc: 0.078,
+                            isConfident: false
+                        }
+                    ]
+                }
+            },
+            catalogScores: [
+                { candidateId: 'veo-720p-3-inset', meanConfidence: 0.813 }
+            ]
+        },
+        currentReport: {
+            selectedDetection: {
+                watermarkKind: 'diamond',
+                alternatives: {
+                    veoTextCandidates: [
+                        {
+                            candidateId: 'veo-text-68x30:1174:649',
+                            templateId: 'veo-text-68x30',
+                            meanNcc: 0.052,
+                            isConfident: false
+                        }
+                    ]
+                }
+            },
+            catalogScores: [
+                { candidateId: 'veo-720p-3-inset', meanConfidence: 0.014 }
+            ]
+        }
+    });
+
+    assert.equal(report.fixedAnchor.watermarkKind, 'diamond');
+    assert.equal(report.fixedAnchor.candidateId, 'veo-720p-3-inset');
+    assert.equal(report.verdict.action, 'pass');
+});
+
 test('createOutputResidualGateReport should honor explicit Veo text candidate ids', () => {
     const report = createOutputResidualGateReport({
         candidateId: 'veo-text-23x10:682:1254',
