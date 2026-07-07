@@ -1,1 +1,1 @@
-2e2724e68e69ceb52ddf0a23a1b80a778a149789abf7b80a9ff6b67e1a4a5fcc  gemini-watermark-remover-extension-v1.0.29.zip
+e68c6d23b159f8f9ddc5a5da22f7669b0b5b91b931b9915c181b79fed39808e4  gemini-watermark-remover-extension-v1.0.29.zip
