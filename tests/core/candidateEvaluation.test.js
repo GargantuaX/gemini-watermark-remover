@@ -6,7 +6,8 @@ import {
     createAcceptedDecisionPath,
     createCandidateEvaluation,
     createRejectedDecisionPath,
-    hasHighRiskNewMarginPositiveEvidence
+    hasHighRiskNewMarginPositiveEvidence,
+    shouldFailClosedForVisibleResidualUnsafeDamage
 } from '../../src/core/candidateEvaluation.js';
 
 const NEW_MARGIN_ALPHA_VARIANT = Object.freeze({
@@ -70,6 +71,42 @@ test('createCandidateEvaluation should allow strong 96px new-margin evidence', (
         originalSpatialScore: 0.468,
         originalGradientScore: 0.804
     }), true);
+});
+
+test('shouldFailClosedForVisibleResidualUnsafeDamage should reject issue 103 unsafe visible residual', () => {
+    assert.equal(shouldFailClosedForVisibleResidualUnsafeDamage({
+        selectedTrial: {
+            config: NEW_MARGIN_ALPHA_VARIANT,
+            damage: { safe: false, reason: 'texture' }
+        },
+        residualVisibility: { visible: true }
+    }), true);
+});
+
+test('shouldFailClosedForVisibleResidualUnsafeDamage should allow safe or non-visible results', () => {
+    assert.equal(shouldFailClosedForVisibleResidualUnsafeDamage({
+        selectedTrial: {
+            config: NEW_MARGIN_ALPHA_VARIANT,
+            damage: { safe: true, reason: null }
+        },
+        residualVisibility: { visible: true }
+    }), false);
+
+    assert.equal(shouldFailClosedForVisibleResidualUnsafeDamage({
+        selectedTrial: {
+            config: NEW_MARGIN_ALPHA_VARIANT,
+            damage: { safe: false, reason: 'texture' }
+        },
+        residualVisibility: { visible: false }
+    }), false);
+
+    assert.equal(shouldFailClosedForVisibleResidualUnsafeDamage({
+        selectedTrial: {
+            config: NEW_MARGIN_DEFAULT_ALPHA,
+            damage: { safe: false, reason: 'texture' }
+        },
+        residualVisibility: { visible: true }
+    }), false);
 });
 
 test('arbitrateCandidateByEvaluation should prefer safe default-alpha new-margin rescue over uncleared alpha variant', () => {

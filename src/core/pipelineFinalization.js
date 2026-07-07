@@ -1,7 +1,11 @@
 import { assessWatermarkResidualVisibility } from './restorationMetrics.js';
 import { createSelectionDebugSummary } from './selectionDebug.js';
 import { calculateWatermarkPosition } from './watermarkConfig.js';
-import { createAcceptedPipelineResultFromState } from './pipelineResult.js';
+import { shouldFailClosedForVisibleResidualUnsafeDamage } from './candidateEvaluation.js';
+import {
+    createAcceptedPipelineResultFromState,
+    createUnsafeVisibleResidualPipelineResultFromState
+} from './pipelineResult.js';
 
 export function createAcceptedPipelineFinalResult({
     pipelineState = {},
@@ -31,6 +35,24 @@ export function createAcceptedPipelineFinalResult({
         initialConfig: resolvedConfig,
         initialPosition
     });
+
+    if (shouldFailClosedForVisibleResidualUnsafeDamage({
+        selectedTrial: resultContext.selectedTrial,
+        residualVisibility
+    })) {
+        return createUnsafeVisibleResidualPipelineResultFromState({
+            originalImageData,
+            pipelineState,
+            passState,
+            traceState,
+            resultContext: {
+                ...resultContext,
+                selectionSource
+            },
+            residualVisibility,
+            selectionDebug
+        });
+    }
 
     return createAcceptedPipelineResultFromState({
         pipelineState,

@@ -1,5 +1,6 @@
 import {
     createAcceptedDecisionPath,
+    createDetectionCandidateFromSelectedTrial,
     createRejectedDecisionPath
 } from './candidateEvaluation.js';
 
@@ -197,5 +198,94 @@ export function createRejectedWatermarkMeta({
             originalGradientScore,
             adaptiveConfidence
         })
+    });
+}
+
+export function createUnsafeVisibleResidualWatermarkMeta({
+    selectedTrial = null,
+    position = null,
+    config = null,
+    adaptiveConfidence = null,
+    originalSpatialScore = null,
+    originalGradientScore = null,
+    processedSpatialScore = null,
+    processedGradientScore = null,
+    suppressionGain = null,
+    residualVisibility = null,
+    templateWarp = null,
+    alphaGain = 1,
+    passCount = 0,
+    attemptedPassCount = 0,
+    passStopReason = null,
+    passes = null,
+    source = 'standard',
+    decisionTier = null,
+    subpixelShift = null,
+    selectionDebug = null,
+    alphaAdjustmentStages = null,
+    alphaMapSource = null
+} = {}) {
+    const reason = 'visible-residual-unsafe-damage';
+    const resolvedPosition = position ?? selectedTrial?.position ?? null;
+    const resolvedConfig = config ?? selectedTrial?.config ?? null;
+    const detectionCandidate = createDetectionCandidateFromSelectedTrial({
+        selectedTrial,
+        source,
+        config: resolvedConfig,
+        position: resolvedPosition,
+        adaptiveConfidence,
+        decisionTier
+    });
+    const decisionPath = {
+        version: 1,
+        decision: 'reject',
+        detectionSource: detectionCandidate.source,
+        alphaSource: null,
+        repairSource: null,
+        evaluationDecision: 'rejected',
+        blockedGate: reason,
+        riskFlags: [],
+        detectionCandidate,
+        alphaTrial: null,
+        repairTrial: null,
+        evaluation: {
+            pathId: `${detectionCandidate.id}->reject`,
+            detectionId: detectionCandidate.id,
+            alphaTrialId: null,
+            repairTrialId: null,
+            eligible: false,
+            decision: 'reject',
+            blockedGate: reason,
+            riskFlags: [],
+            evidenceClass: 'unsafe-visible-residual',
+            explanation: reason
+        }
+    };
+
+    return createWatermarkMeta({
+        position: resolvedPosition,
+        config: resolvedConfig,
+        adaptiveConfidence,
+        originalSpatialScore,
+        originalGradientScore,
+        processedSpatialScore,
+        processedGradientScore,
+        suppressionGain,
+        residualVisibility,
+        templateWarp,
+        alphaGain,
+        passCount,
+        attemptedPassCount,
+        passStopReason,
+        passes,
+        source,
+        decisionTier,
+        applied: false,
+        skipReason: reason,
+        subpixelShift,
+        alphaAdjustmentStages,
+        alphaMapSource,
+        selectionDebug,
+        decisionPath
     });
 }

@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import {
     createAcceptedPipelineResult,
     createAcceptedPipelineResultFromState,
-    createRejectedPipelineResult
+    createRejectedPipelineResult,
+    createUnsafeVisibleResidualPipelineResultFromState
 } from '../../src/core/pipelineResult.js';
 
 test('createRejectedPipelineResult should preserve skipped result shape', () => {
@@ -157,4 +158,65 @@ test('createAcceptedPipelineResultFromState should preserve accepted result mapp
     });
     assert.deepEqual(result.meta.selectionDebug, { selected: true });
     assert.equal(result.meta.decisionPath.alphaTrial.strategy, 'fine-alpha');
+});
+
+test('createUnsafeVisibleResidualPipelineResultFromState should preserve diagnostics while failing closed', () => {
+    const originalImageData = { width: 2, height: 2, data: new Uint8ClampedArray(16) };
+    const processedImageData = { width: 2, height: 2, data: new Uint8ClampedArray(16) };
+    const debugTimings = { totalMs: 21 };
+    const result = createUnsafeVisibleResidualPipelineResultFromState({
+        originalImageData,
+        pipelineState: {
+            finalImageData: processedImageData,
+            position: { x: 1760, y: 1760, width: 96, height: 96 },
+            config: { logoSize: 96, marginRight: 192, marginBottom: 192, alphaVariant: '20260520' },
+            alphaGain: 0.85,
+            originalSpatialScore: 0.394,
+            originalGradientScore: 0.692,
+            finalProcessedSpatialScore: -0.195,
+            finalProcessedGradientScore: 0.294,
+            suppressionGain: 0.589,
+            source: 'standard+located-aggressive'
+        },
+        passState: {
+            passCount: 2,
+            attemptedPassCount: 2,
+            passStopReason: 'located-aggressive-edge-cleanup',
+            passes: [{ index: 1 }, { index: 2 }]
+        },
+        traceState: {
+            alphaAdjustmentStages: [{ stage: 'located-aggressive-removal' }],
+            alphaTrialEvents: [{ strategy: 'located-aggressive-alpha', decision: 'accept' }]
+        },
+        resultContext: {
+            debugTimings,
+            selectedTrial: {
+                config: { logoSize: 96, marginRight: 192, marginBottom: 192, alphaVariant: '20260520' },
+                position: { x: 1760, y: 1760, width: 96, height: 96 },
+                damage: { safe: false, reason: 'texture' }
+            },
+            selectionSource: 'standard',
+            adaptiveConfidence: null,
+            decisionTier: 'direct-match'
+        },
+        residualVisibility: { visible: true, visibleGradientResidual: true, visibleSpatialResidual: true },
+        selectionDebug: { candidateSource: 'standard' }
+    });
+
+    assert.equal(result.imageData, originalImageData);
+    assert.equal(result.debugTimings, debugTimings);
+    assert.equal(result.meta.applied, false);
+    assert.equal(result.meta.skipReason, 'visible-residual-unsafe-damage');
+    assert.equal(result.meta.position.x, 1760);
+    assert.equal(result.meta.config.alphaVariant, '20260520');
+    assert.equal(result.meta.detection.processedGradientScore, 0.294);
+    assert.deepEqual(result.meta.detection.residualVisibility, {
+        visible: true,
+        visibleGradientResidual: true,
+        visibleSpatialResidual: true
+    });
+    assert.equal(result.meta.decisionPath.decision, 'reject');
+    assert.equal(result.meta.decisionPath.evaluation.blockedGate, 'visible-residual-unsafe-damage');
+    assert.equal(result.meta.decisionPath.detectionCandidate.config.alphaVariant, '20260520');
+    assert.equal(result.meta.decisionPath.detectionCandidate.position.x, 1760);
 });

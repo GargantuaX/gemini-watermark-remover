@@ -1,6 +1,7 @@
 import {
     createAcceptedWatermarkMeta,
-    createRejectedWatermarkMeta
+    createRejectedWatermarkMeta,
+    createUnsafeVisibleResidualWatermarkMeta
 } from './pipelineMeta.js';
 
 export function createRejectedPipelineResult({
@@ -125,4 +126,43 @@ export function createAcceptedPipelineResultFromState({
         alphaMapSource: pipelineState.alphaMapSource,
         selectionDebug
     });
+}
+
+export function createUnsafeVisibleResidualPipelineResultFromState({
+    originalImageData = null,
+    pipelineState = {},
+    passState = {},
+    traceState = {},
+    resultContext = {},
+    residualVisibility = null,
+    selectionDebug = null
+} = {}) {
+    return {
+        imageData: originalImageData ?? pipelineState.finalImageData,
+        meta: createUnsafeVisibleResidualWatermarkMeta({
+            selectedTrial: resultContext.selectedTrial,
+            position: pipelineState.position,
+            config: pipelineState.config,
+            adaptiveConfidence: resultContext.adaptiveConfidence,
+            originalSpatialScore: pipelineState.originalSpatialScore,
+            originalGradientScore: pipelineState.originalGradientScore,
+            processedSpatialScore: pipelineState.finalProcessedSpatialScore,
+            processedGradientScore: pipelineState.finalProcessedGradientScore,
+            suppressionGain: pipelineState.suppressionGain,
+            residualVisibility,
+            templateWarp: resultContext.templateWarp,
+            alphaGain: pipelineState.alphaGain,
+            passCount: passState.passCount,
+            attemptedPassCount: passState.attemptedPassCount,
+            passStopReason: passState.passStopReason,
+            passes: passState.passes,
+            source: pipelineState.source,
+            decisionTier: resultContext.decisionTier,
+            subpixelShift: resultContext.subpixelShift,
+            alphaAdjustmentStages: traceState.alphaAdjustmentStages,
+            alphaMapSource: pipelineState.alphaMapSource,
+            selectionDebug
+        }),
+        debugTimings: resultContext.debugTimings
+    };
 }
