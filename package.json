@@ -97,6 +97,7 @@
     "release:quality-gate": "pnpm compare:allenk-v2 -- --fail-on-incomplete && pnpm release:readiness -- --fail-on-not-ready",
     "release:goal-audit": "node scripts/create-release-goal-audit-report.js",
     "release:ci-check": "node scripts/check-github-ci.js --workflow ci.yml --commit HEAD --fail-closed",
+    "release:distribution-check": "node scripts/check-release-distribution.js",
     "release:preflight": "pnpm test && pnpm build && pnpm package:extension && pnpm release:quality-gate && pnpm release:goal-audit -- --fail-on-incomplete && pnpm release:ci-check",
     "visible-residual:loop": "node scripts/run-visible-residual-loop.js",
     "visible-residual:verify": "node scripts/verify-visible-residual-loop.js",
