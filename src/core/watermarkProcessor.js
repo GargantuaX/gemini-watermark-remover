@@ -62,7 +62,7 @@ const CATALOG_DARK_ALPHA_GAIN_CANDIDATES = Object.freeze([0.9, 0.85, 0.8, 0.95, 
 const STANDARD_ALPHA_PRIORITY_GAINS = ALPHA_PARAMETER_GROUPS
     .filter((group) => group.standardPriority === true)
     .map((group) => group.alphaGain);
-const PREVIEW_EDGE_CLEANUP_MAX_SIZE = 40;
+const PREVIEW_EDGE_CLEANUP_MAX_SIZE = 32;
 const KNOWN_48_EDGE_CLEANUP_MIN_SIZE = 40;
 const KNOWN_48_EDGE_CLEANUP_MAX_SIZE = 56;
 const KNOWN_48_EDGE_CLEANUP_MIN_GRADIENT = 0.22;
@@ -127,6 +127,8 @@ const KNOWN_48_MID_CORE_BIAS_MAX_ARTIFACT_DRIFT = 0.001;
 const KNOWN_48_MID_CORE_BIAS_MAX_NEW_CLIP_DRIFT = 0.001;
 const PREVIEW_EDGE_CLEANUP_SPATIAL_THRESHOLD = 0.08;
 const PREVIEW_EDGE_CLEANUP_GRADIENT_THRESHOLD = 0.1;
+const SMALL_PREVIEW_EDGE_CLEANUP_MAX_SIZE = 32;
+const SMALL_PREVIEW_EDGE_CLEANUP_GRADIENT_THRESHOLD = 0.05;
 const PREVIEW_EDGE_CLEANUP_MIN_GRADIENT_IMPROVEMENT = 0.03;
 const PREVIEW_EDGE_CLEANUP_MAX_SPATIAL_DRIFT = 0.04;
 const PREVIEW_EDGE_CLEANUP_MAX_APPLIED_PASSES = 3;
@@ -143,6 +145,18 @@ const PREVIEW_EDGE_CLEANUP_PRESETS = Object.freeze([
     { minAlpha: 0.1, maxAlpha: 0.7, radius: 3, strength: 0.8, outsideAlphaMax: 0.12 },
     { minAlpha: 0.01, maxAlpha: 0.35, radius: 4, strength: 1.4, outsideAlphaMax: 0.05 }
 ]);
+const SMALL_PREVIEW_EDGE_CLEANUP_PRESETS = Object.freeze([
+    {
+        minAlpha: 0.01,
+        maxAlpha: 0.55,
+        radius: 2,
+        strength: 2.4,
+        outsideAlphaMax: 0.05,
+        minGradientImprovement: 0.04,
+        maxSpatialDrift: 0.12,
+        maxAcceptedSpatial: 0.12
+    }
+]);
 const PREVIEW_EDGE_CLEANUP_STRONG_GRADIENT_THRESHOLD = 0.45;
 const PREVIEW_EDGE_CLEANUP_AGGRESSIVE_PRESETS = Object.freeze([
     {
@@ -156,6 +170,20 @@ const PREVIEW_EDGE_CLEANUP_AGGRESSIVE_PRESETS = Object.freeze([
         maxAcceptedSpatial: 0.18
     }
 ]);
+const SMALL_PREVIEW_FLAT_FILL_MIN_SAMPLE_LUM = 190;
+const SMALL_PREVIEW_FLAT_FILL_MIN_BACKGROUND_MEAN = 230;
+const SMALL_PREVIEW_FLAT_FILL_MAX_BACKGROUND_STD = 8;
+const SMALL_PREVIEW_FLAT_FILL_MAX_GRADIENT = 0.02;
+const SMALL_PREVIEW_FLAT_FILL_MAX_ABS_SPATIAL = 0.08;
+const SMALL_PREVIEW_FLAT_FILL_PRESET = Object.freeze({
+    pad: 14,
+    outsideAlphaMax: 0.012,
+    minSampleLum: SMALL_PREVIEW_FLAT_FILL_MIN_SAMPLE_LUM,
+    minAlpha: 0.004,
+    minTargetLum: 170,
+    strength: 1,
+    maxBackgroundStd: SMALL_PREVIEW_FLAT_FILL_MAX_BACKGROUND_STD,
+});
 const LOCATED_AGGRESSIVE_EDGE_PRESETS = Object.freeze([
     { minAlpha: 0.004, maxAlpha: 0.99, radius: 2, strength: 0.85, outsideAlphaMax: 0.08 },
     { minAlpha: 0.004, maxAlpha: 0.99, radius: 3, strength: 1.15, outsideAlphaMax: 0.12 },
@@ -857,6 +885,12 @@ function shouldRefineResidualEdge({
             baselineGradientScore >= V2_SMALL_EDGE_CLEANUP_MIN_GRADIENT;
     }
 
+    const isSmallPreviewAnchor = position?.width >= 24 &&
+        position?.width <= SMALL_PREVIEW_EDGE_CLEANUP_MAX_SIZE;
+    const gradientThreshold = isSmallPreviewAnchor
+        ? SMALL_PREVIEW_EDGE_CLEANUP_GRADIENT_THRESHOLD
+        : PREVIEW_EDGE_CLEANUP_GRADIENT_THRESHOLD;
+
     return typeof source === 'string' &&
         source.includes('preview-anchor') &&
         position?.width >= 24 &&
@@ -868,7 +902,7 @@ function shouldRefineResidualEdge({
                 Math.abs(baselineSpatialScore) <= PREVIEW_EDGE_CLEANUP_HALO_SPATIAL_THRESHOLD
             )
         ) &&
-        baselineGradientScore >= PREVIEW_EDGE_CLEANUP_GRADIENT_THRESHOLD;
+        baselineGradientScore >= gradientThreshold;
 }
 
 function blendPreviewResidualEdge({
@@ -1021,7 +1055,8 @@ function calculateBackgroundSampleStats(samples) {
 
 function sampleFlatBackgroundPixels(imageData, alphaMap, position, {
     pad = KNOWN_48_FLAT_FILL_PAD,
-    outsideAlphaMax = KNOWN_48_FLAT_FILL_OUTSIDE_ALPHA_MAX
+    outsideAlphaMax = KNOWN_48_FLAT_FILL_OUTSIDE_ALPHA_MAX,
+    minSampleLum = 0
 } = {}) {
     const samples = [];
     const left = Math.max(0, position.x - pad);
@@ -1045,6 +1080,12 @@ function sampleFlatBackgroundPixels(imageData, alphaMap, position, {
             }
 
             const pixelIndex = (y * imageData.width + x) * 4;
+            const luminance =
+                0.2126 * imageData.data[pixelIndex] +
+                0.7152 * imageData.data[pixelIndex + 1] +
+                0.0722 * imageData.data[pixelIndex + 2];
+            if (luminance < minSampleLum) continue;
+
             samples.push({
                 x: (x - position.x) / Math.max(1, position.width),
                 y: (y - position.y) / Math.max(1, position.height),
@@ -1066,9 +1107,16 @@ function applyFlatBackgroundFill({
     maxAlpha,
     strength,
     maxBackgroundStd = KNOWN_48_FLAT_FILL_MAX_BACKGROUND_STD,
-    edgeWeightFloor = 0.35
+    edgeWeightFloor = 0.35,
+    pad = KNOWN_48_FLAT_FILL_PAD,
+    outsideAlphaMax = KNOWN_48_FLAT_FILL_OUTSIDE_ALPHA_MAX,
+    minSampleLum = 0
 }) {
-    const samples = sampleFlatBackgroundPixels(sourceImageData, alphaMap, position);
+    const samples = sampleFlatBackgroundPixels(sourceImageData, alphaMap, position, {
+        pad,
+        outsideAlphaMax,
+        minSampleLum
+    });
     const stats = calculateBackgroundSampleStats(samples);
     if (
         stats.count < 24 ||
@@ -1107,6 +1155,67 @@ function applyFlatBackgroundFill({
             for (let channel = 0; channel < 3; channel++) {
                 candidate.data[pixelIndex + channel] = clampChannel(
                     candidate.data[pixelIndex + channel] * (1 - blend) + target[channel] * blend
+                );
+            }
+        }
+    }
+
+    return { imageData: candidate, stats };
+}
+
+function applySmallPreviewBrightBackgroundFill({
+    sourceImageData,
+    alphaMap,
+    position,
+    minAlpha,
+    minTargetLum,
+    strength,
+    pad,
+    outsideAlphaMax,
+    minSampleLum,
+    maxBackgroundStd
+}) {
+    const samples = sampleFlatBackgroundPixels(sourceImageData, alphaMap, position, {
+        pad,
+        outsideAlphaMax,
+        minSampleLum
+    });
+    const stats = calculateBackgroundSampleStats(samples);
+    if (
+        stats.count < 24 ||
+        stats.std > maxBackgroundStd
+    ) {
+        return null;
+    }
+
+    const redPlane = fitColorPlane(samples, 'r');
+    const greenPlane = fitColorPlane(samples, 'g');
+    const bluePlane = fitColorPlane(samples, 'b');
+    if (!redPlane || !greenPlane || !bluePlane) return null;
+
+    const candidate = cloneImageData(sourceImageData);
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const localIndex = row * position.width + col;
+            if (alphaMap[localIndex] < minAlpha) continue;
+
+            const pixelIndex = ((position.y + row) * candidate.width + position.x + col) * 4;
+            const currentLum =
+                0.2126 * candidate.data[pixelIndex] +
+                0.7152 * candidate.data[pixelIndex + 1] +
+                0.0722 * candidate.data[pixelIndex + 2];
+            if (currentLum < minTargetLum) continue;
+
+            const x = col / Math.max(1, position.width);
+            const y = row / Math.max(1, position.height);
+            const target = [
+                redPlane[0] + redPlane[1] * x + redPlane[2] * y,
+                greenPlane[0] + greenPlane[1] * x + greenPlane[2] * y,
+                bluePlane[0] + bluePlane[1] * x + bluePlane[2] * y
+            ];
+            for (let channel = 0; channel < 3; channel++) {
+                candidate.data[pixelIndex + channel] = clampChannel(
+                    candidate.data[pixelIndex + channel] * (1 - strength) + target[channel] * strength
                 );
             }
         }
@@ -2199,11 +2308,16 @@ function refinePreviewResidualEdge({
                 ? PREVIEW_EDGE_CLEANUP_HALO_RELAXED_MIN_GRADIENT_IMPROVEMENT
                 : minGradientImprovement
         );
+    const smallPreviewPresets = mode === 'preview' &&
+        position?.width >= 24 &&
+        position?.width <= SMALL_PREVIEW_EDGE_CLEANUP_MAX_SIZE
+        ? SMALL_PREVIEW_EDGE_CLEANUP_PRESETS
+        : [];
     const presets = allowAggressivePresets &&
         baselineGradientScore >= PREVIEW_EDGE_CLEANUP_STRONG_GRADIENT_THRESHOLD &&
         Math.abs(baselineSpatialScore) <= 0.05
         ? [...PREVIEW_EDGE_CLEANUP_PRESETS, ...PREVIEW_EDGE_CLEANUP_AGGRESSIVE_PRESETS]
-        : PREVIEW_EDGE_CLEANUP_PRESETS;
+        : [...PREVIEW_EDGE_CLEANUP_PRESETS, ...smallPreviewPresets];
     let best = null;
 
     for (const preset of presets) {
@@ -2257,7 +2371,53 @@ function refinePreviewResidualEdge({
         }
     }
 
-    return best;
+    if (!best || !(
+        mode === 'preview' &&
+        position?.width >= 24 &&
+        position?.width <= SMALL_PREVIEW_EDGE_CLEANUP_MAX_SIZE
+    )) {
+        return best;
+    }
+
+    const flatFilled = applySmallPreviewBrightBackgroundFill({
+        sourceImageData: best.imageData,
+        alphaMap,
+        position,
+        ...SMALL_PREVIEW_FLAT_FILL_PRESET
+    });
+    if (!flatFilled) return best;
+    if (
+        flatFilled.stats.mean < SMALL_PREVIEW_FLAT_FILL_MIN_BACKGROUND_MEAN ||
+        flatFilled.stats.std > SMALL_PREVIEW_FLAT_FILL_MAX_BACKGROUND_STD
+    ) {
+        return best;
+    }
+
+    const flatSpatialScore = computeRegionSpatialCorrelation({
+        imageData: flatFilled.imageData,
+        alphaMap,
+        region: { x: position.x, y: position.y, size: position.width }
+    });
+    const flatGradientScore = computeRegionGradientCorrelation({
+        imageData: flatFilled.imageData,
+        alphaMap,
+        region: { x: position.x, y: position.y, size: position.width }
+    });
+    if (
+        Math.abs(flatSpatialScore) > SMALL_PREVIEW_FLAT_FILL_MAX_ABS_SPATIAL ||
+        flatGradientScore > SMALL_PREVIEW_FLAT_FILL_MAX_GRADIENT
+    ) {
+        return best;
+    }
+
+    return {
+        ...best,
+        imageData: flatFilled.imageData,
+        spatialScore: flatSpatialScore,
+        gradientScore: flatGradientScore,
+        flatFillStats: flatFilled.stats,
+        cost: Math.abs(flatSpatialScore) * 0.6 + Math.max(0, flatGradientScore)
+    };
 }
 
 function scoreLocatedAggressiveCandidate({

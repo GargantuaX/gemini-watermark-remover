@@ -144,7 +144,10 @@ export function runAcceptedAlphaRepairPipeline({
         debugTimings.subpixelRefinementMs = nowMs() - subpixelStartedAt;
     }
 
-    const shouldRunEdgeCleanup = visualPostProcessingEnabled || useKnown48EdgeCleanup || useV2SmallEdgeCleanup;
+    const shouldRunEdgeCleanup = visualPostProcessingEnabled ||
+        useKnown48EdgeCleanup ||
+        useV2SmallEdgeCleanup ||
+        usePreviewAnchorFastCleanup;
     const {
         previewEdgeCleanupElapsedMs
     } = runRepairCleanupSpecPhase({
