@@ -3,7 +3,9 @@ import {
     classifyStandardWatermarkSignal
 } from './watermarkDecisionPolicy.js';
 
-export function hasReliableStandardWatermarkSignal({ spatialScore, gradientScore }) {
+export function hasReliableStandardWatermarkSignal(scores) {
+    if (!scores) return false;
+    const { spatialScore, gradientScore } = scores;
     return classifyStandardWatermarkSignal({ spatialScore, gradientScore }).tier === 'direct-match';
 }
 

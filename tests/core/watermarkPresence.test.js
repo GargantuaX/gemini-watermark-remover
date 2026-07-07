@@ -46,6 +46,12 @@ test('hasReliableStandardWatermarkSignal should reject weak low-gradient false p
     );
 });
 
+test('hasReliableStandardWatermarkSignal should return false safely for null or undefined inputs', () => {
+    assert.equal(hasReliableStandardWatermarkSignal(null), false);
+    assert.equal(hasReliableStandardWatermarkSignal(undefined), false);
+    assert.equal(hasReliableStandardWatermarkSignal(), false);
+});
+
 test('hasReliableAdaptiveWatermarkSignal should accept strong adaptive Gemini match', () => {
     assert.equal(
         hasReliableAdaptiveWatermarkSignal({
