@@ -55,6 +55,20 @@ function isGeminiClipboardActionContext(actionContext) {
   );
 }
 
+function isGeminiClipboardTargetPage(targetWindow) {
+  const hostname = typeof targetWindow?.location?.hostname === 'string'
+    ? targetWindow.location.hostname.trim().toLowerCase()
+    : '';
+  if (!hostname) {
+    return false;
+  }
+
+  return hostname === 'gemini.google.com'
+    || hostname.endsWith('.gemini.google.com')
+    || hostname === 'business.gemini.google'
+    || hostname.endsWith('.business.gemini.google');
+}
+
 async function notifyActionCriticalFailure(onActionCriticalFailure, payload) {
   if (typeof onActionCriticalFailure !== 'function') {
     return;
@@ -267,6 +281,8 @@ export function installGeminiClipboardImageHook(targetWindow, {
     const containsImageItems = hasClipboardImageItems(items);
     const requiresOriginalGeminiBlob = containsImageItems
       && isGeminiClipboardActionContext(actionContext);
+    const shouldTryClipboardImageProcessing = requiresOriginalGeminiBlob
+      || (containsImageItems && isGeminiClipboardTargetPage(targetWindow));
     let clipboardResolutionError = null;
 
     try {
@@ -287,7 +303,7 @@ export function installGeminiClipboardImageHook(targetWindow, {
       } catch (error) {
         clipboardResolutionError = error;
       }
-      if (!processedBlob && requiresOriginalGeminiBlob) {
+      if (!processedBlob && shouldTryClipboardImageProcessing) {
         processedBlob = await processClipboardImageBlobFallback(items, {
           processClipboardImageBlob,
           actionContext
