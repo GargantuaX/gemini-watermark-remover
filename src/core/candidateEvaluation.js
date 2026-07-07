@@ -67,6 +67,15 @@ export function hasHighRiskNewMarginPositiveEvidence(candidate) {
         numberOr(candidate?.originalSpatialScore) >= HIGH_RISK_NEW_MARGIN_MIN_SPATIAL;
 }
 
+export function shouldFailClosedForVisibleResidualUnsafeDamage({
+    selectedTrial = null,
+    residualVisibility = null
+} = {}) {
+    return isNewMarginAlphaVariantTrial(selectedTrial) &&
+        residualVisibility?.visible === true &&
+        selectedTrial?.damage?.safe === false;
+}
+
 function firstFalseGate(gates) {
     for (const [name, allowed] of Object.entries(gates)) {
         if (!allowed) return name;
