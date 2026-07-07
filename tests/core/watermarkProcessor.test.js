@@ -174,6 +174,33 @@ test('processWatermarkImageData should cleanup residual edges on allenk V2 36px 
     );
 });
 
+test('Issue 99 small preview-anchor residual should require targeted cleanup', async () => {
+    const alpha48 = calculateAlphaMap(await decodeImageDataInNode(path.resolve('src/assets/bg_48.png')));
+    const alpha96 = calculateAlphaMap(await decodeImageDataInNode(path.resolve('src/assets/bg_96.png')));
+    const imageData = await decodeImageDataInNode(path.resolve('tests/fixtures/issue99-small-preview-anchor.png'));
+
+    const result = processWatermarkImageData(imageData, {
+        alpha48,
+        alpha96,
+        getAlphaMap: (size) => size === 48 ? alpha48 : interpolateAlphaMap(alpha96, 96, size)
+    });
+
+    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
+    assert.ok(
+        result.meta.source.includes('preview-anchor'),
+        `expected Issue 99 to use preview-anchor localization, source=${result.meta.source}`
+    );
+    assert.ok(
+        result.meta.position.width >= 24 && result.meta.position.width <= 32,
+        `expected Issue 99 small preview anchor, position=${JSON.stringify(result.meta.position)}`
+    );
+    assert.ok(
+        result.meta.source.includes('small-preview-residual') ||
+            result.meta.detection.processedGradientScore <= 0.02,
+        `expected Issue 99 faint diamond residual to be cleaned, gradient=${result.meta.detection.processedGradientScore}, source=${result.meta.source}`
+    );
+});
+
 test('processWatermarkImageData should allow weak alpha gain to compete as a first-pass candidate', async () => {
     const alpha48 = calculateAlphaMap(await decodeImageDataInNode(path.resolve('src/assets/bg_48.png')));
     const alpha96 = calculateAlphaMap(await decodeImageDataInNode(path.resolve('src/assets/bg_96.png')));

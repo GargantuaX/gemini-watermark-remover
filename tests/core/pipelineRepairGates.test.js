@@ -13,6 +13,10 @@ import {
 test('shouldUsePreviewAnchorFastCleanup should accept preview anchors in size range', () => {
     assert.equal(shouldUsePreviewAnchorFastCleanup(
         { provenance: { previewAnchor: true } },
+        { width: 27 }
+    ), true);
+    assert.equal(shouldUsePreviewAnchorFastCleanup(
+        { provenance: { previewAnchor: true } },
         { width: 40 }
     ), true);
     assert.equal(shouldUsePreviewAnchorFastCleanup(

@@ -73,6 +73,19 @@ export interface VideoBufferRemovalResult {
 
 export function inferVideoMimeTypeFromPath(filePath: string): string;
 export function isVideoMimeType(mimeType: string): boolean;
+export function resolveDefaultVideoPreviewPage(options?: {
+    moduleUrl?: string | URL;
+}): string;
+export function withLocalVideoPreviewPage<T>(
+    pagePath: string,
+    callback: (
+        pageUrl: string,
+        context: {
+            served: boolean;
+            server: unknown | null;
+        }
+    ) => Promise<T> | T
+): Promise<T>;
 export function removeVideoWatermarkFromFile(
     inputPath: string,
     options?: VideoFileRemovalOptions
@@ -81,4 +94,3 @@ export function removeVideoWatermarkFromBuffer(
     inputBuffer: Buffer | Uint8Array | ArrayBuffer,
     options: VideoBufferRemovalOptions
 ): Promise<VideoBufferRemovalResult>;
-

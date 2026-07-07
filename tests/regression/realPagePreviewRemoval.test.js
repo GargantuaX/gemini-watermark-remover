@@ -82,7 +82,7 @@ test('real Gemini preview-sized page image should remove the bottom-right waterm
     }
 });
 
-test('real Gemini preview path should avoid visual post-processing in fixed-core mode', async (t) => {
+test('real Gemini preview path should use gated edge cleanup without subpixel refinement', async (t) => {
     let browser;
     try {
         browser = await chromium.launch({ headless: true });
@@ -111,8 +111,12 @@ test('real Gemini preview path should avoid visual post-processing in fixed-core
 
         assert.ok(result.meta.applied, `skipReason=${result.meta.skipReason}`);
         assert.ok(
-            !result.meta.source.includes('+edge-cleanup'),
-            `expected preview real page fixture to skip edge cleanup, source=${result.meta.source}`
+            result.meta.source.includes('preview-anchor'),
+            `expected preview real page fixture to stay on preview-anchor localization, source=${result.meta.source}`
+        );
+        assert.ok(
+            result.meta.source.includes('+edge-cleanup'),
+            `expected preview real page fixture to use gated edge cleanup, source=${result.meta.source}`
         );
         assert.equal(result.meta.subpixelShift, null, `expected no accepted subpixel shift, source=${result.meta.source}`);
         assert.ok(
@@ -128,7 +132,7 @@ test('real Gemini preview path should avoid visual post-processing in fixed-core
     }
 });
 
-test('real Gemini strong preview fixture should stay on fixed-core inverse path', async (t) => {
+test('real Gemini strong preview fixture should use gated cleanup without subpixel refinement', async (t) => {
     let browser;
     try {
         browser = await chromium.launch({ headless: true });
@@ -170,8 +174,12 @@ test('real Gemini strong preview fixture should stay on fixed-core inverse path'
             `expected fixed-core inverse to reduce residual gradient, before=${result.meta.detection.originalGradientScore}, after=${result.meta.detection.processedGradientScore}`
         );
         assert.ok(
-            !result.meta.source.includes('+edge-cleanup'),
-            `expected strong preview fixture to skip edge cleanup, source=${result.meta.source}`
+            result.meta.source.includes('preview-anchor'),
+            `expected strong preview fixture to stay on preview-anchor localization, source=${result.meta.source}`
+        );
+        assert.ok(
+            result.meta.source.includes('+edge-cleanup'),
+            `expected strong preview fixture to use gated edge cleanup, source=${result.meta.source}`
         );
         assert.ok(
             result.debugTimings.subpixelRefinementMs < 5,

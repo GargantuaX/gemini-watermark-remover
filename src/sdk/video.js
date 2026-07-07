@@ -1,6 +1,8 @@
 import path from 'node:path';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
+import { createReadStream } from 'node:fs';
+import { createServer } from 'node:http';
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_VIDEO_DENOISE_BACKEND = 'allenk-fdncnn-browser-spike';
 const DEFAULT_VIDEO_TIMEOUT_MS = 6 * 60 * 1000;
@@ -22,8 +24,8 @@ function isHttpUrl(value) {
     return /^https?:\/\//i.test(String(value || ''));
 }
 
-function resolveDefaultVideoPreviewPage() {
-    return path.resolve(process.cwd(), 'dist', 'video-preview.html');
+export function resolveDefaultVideoPreviewPage({ moduleUrl = import.meta.url } = {}) {
+    return fileURLToPath(new URL('../../dist/video-preview.html', moduleUrl));
 }
 
 async function assertReadableFile(filePath, label) {
@@ -31,6 +33,85 @@ async function assertReadableFile(filePath, label) {
         await access(filePath);
     } catch (error) {
         throw new Error(`${label} is unavailable: ${filePath}`, { cause: error });
+    }
+}
+
+function resolveContentType(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.html') return 'text/html; charset=utf-8';
+    if (ext === '.js' || ext === '.mjs') return 'text/javascript; charset=utf-8';
+    if (ext === '.wasm') return 'application/wasm';
+    if (ext === '.onnx') return 'application/octet-stream';
+    if (ext === '.css') return 'text/css; charset=utf-8';
+    if (ext === '.json') return 'application/json; charset=utf-8';
+    if (ext === '.png') return 'image/png';
+    if (ext === '.svg') return 'image/svg+xml';
+    return 'application/octet-stream';
+}
+
+function isPathInsideRoot(targetPath, rootPath) {
+    const relative = path.relative(rootPath, targetPath);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function createLocalVideoPreviewServer(rootDir) {
+    const rootPath = path.resolve(rootDir);
+    const server = createServer(async (request, response) => {
+        try {
+            const url = new URL(request.url || '/', 'http://127.0.0.1');
+            const requestPath = decodeURIComponent(url.pathname === '/' ? '/video-preview.html' : url.pathname);
+            const targetPath = path.resolve(rootPath, `.${requestPath}`);
+            if (!isPathInsideRoot(targetPath, rootPath)) {
+                response.writeHead(403);
+                response.end('Forbidden');
+                return;
+            }
+
+            const fileInfo = await stat(targetPath);
+            if (!fileInfo.isFile()) {
+                response.writeHead(404);
+                response.end('Not found');
+                return;
+            }
+
+            response.writeHead(200, {
+                'content-type': resolveContentType(targetPath),
+                'content-length': String(fileInfo.size),
+                'cross-origin-opener-policy': 'same-origin',
+                'cross-origin-embedder-policy': 'require-corp'
+            });
+            createReadStream(targetPath).pipe(response);
+        } catch {
+            response.writeHead(404);
+            response.end('Not found');
+        }
+    });
+
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    return {
+        url: `http://127.0.0.1:${address.port}/`,
+        close() {
+            return new Promise((resolve, reject) => {
+                server.close((error) => error ? reject(error) : resolve());
+            });
+        }
+    };
+}
+
+export async function withLocalVideoPreviewPage(pagePath, callback) {
+    if (isHttpUrl(pagePath)) {
+        return await callback(pagePath, { served: false, server: null });
+    }
+
+    const resolvedPagePath = path.resolve(pagePath);
+    const rootDir = path.dirname(resolvedPagePath);
+    const pageName = path.basename(resolvedPagePath);
+    const server = await createLocalVideoPreviewServer(rootDir);
+    try {
+        return await callback(new URL(pageName, server.url).href, { served: true, server });
+    } finally {
+        await server.close();
     }
 }
 
@@ -132,71 +213,76 @@ async function processVideoWithPreviewPage(inputPath, options = {}) {
     });
     const browser = await chromium.launch({ headless: true });
     try {
-        const page = await browser.newPage();
-        page.setDefaultTimeout(timeoutMs);
-        await page.goto(isHttpUrl(pagePath) ? pagePath : pathToFileURL(pagePath).href);
-        await page.locator('#fileInput').setInputFiles(inputPath);
-        await setControlValue(page, '#denoiseBackend', denoiseBackend);
-
-        if (adaptiveAlpha) {
-            await setCheckboxValue(page, '#adaptiveAlpha', true);
-        }
-        if (allowLowConfidence) {
-            await page.evaluate(() => {
-                window.__gwrVideoOverrideAllowLowConfidence = true;
-            });
-            await setCheckboxValue(page, '#allowLowConfidence', true);
-        }
-        if (Number.isFinite(alphaGain) && alphaGain > 0) {
-            await setNumericInputValue(page, '#alphaGain', Math.max(0.25, Math.min(1.35, alphaGain)));
-        }
-        if (typeof alphaProfile === 'string' && alphaProfile) {
+        return await withLocalVideoPreviewPage(pagePath, async (pageUrl) => {
+            const page = await browser.newPage();
+            page.setDefaultTimeout(timeoutMs);
+            await page.goto(pageUrl);
+            await page.locator('#fileInput').setInputFiles(inputPath);
             await page.evaluate((value) => {
-                window.__gwrVideoAlphaProfile = value;
-            }, alphaProfile);
-        }
-        if (Number.isFinite(edgeDenoiseStrength)) {
-            const value = Math.max(0, Math.min(3, edgeDenoiseStrength));
-            await page.evaluate((nextValue) => {
-                window.__gwrVideoOverrideEdgeDenoiseStrength = nextValue;
-            }, value);
-            await setNumericInputValue(page, '#edgeDenoiseStrength', value);
-        }
-        if (Number.isFinite(residualCleanupStrength)) {
-            const value = Math.max(0, Math.min(1.8, residualCleanupStrength));
-            await page.evaluate((nextValue) => {
-                window.__gwrVideoOverrideResidualCleanupStrength = nextValue;
-            }, value);
-            await setNumericInputValue(page, '#residualCleanup', value);
-        }
-        if (Number.isFinite(videoBitrate) && videoBitrate > 0) {
-            await setNumericInputValue(page, '#videoBitrateMbps', videoBitrate / 1000 / 1000);
-        }
+                window.__gwrVideoOverrideDenoiseBackend = value;
+            }, denoiseBackend);
+            await setControlValue(page, '#denoiseBackend', denoiseBackend);
 
-        await page.locator('#processBtn').click();
-        await page.waitForFunction(() => {
-            const status = document.getElementById('status');
-            return status?.dataset?.tone === 'success' || status?.dataset?.tone === 'error';
-        }, null, { timeout: timeoutMs });
-
-        const status = await page.locator('#status').textContent();
-        const tone = await page.locator('#status').getAttribute('data-tone');
-        if (tone !== 'success') {
-            throw new Error(status || 'Video export failed');
-        }
-
-        const controls = await collectVideoControls(page);
-        const buffer = await readDownloadBufferFromPage(page);
-        return {
-            buffer,
-            meta: {
-                status,
-                denoiseBackend,
-                actualDenoiseBackend: controls.denoiseBackend,
-                actualControls: controls,
-                pagePath
+            if (adaptiveAlpha) {
+                await setCheckboxValue(page, '#adaptiveAlpha', true);
             }
-        };
+            if (allowLowConfidence) {
+                await page.evaluate(() => {
+                    window.__gwrVideoOverrideAllowLowConfidence = true;
+                });
+                await setCheckboxValue(page, '#allowLowConfidence', true);
+            }
+            if (Number.isFinite(alphaGain) && alphaGain > 0) {
+                await setNumericInputValue(page, '#alphaGain', Math.max(0.25, Math.min(1.35, alphaGain)));
+            }
+            if (typeof alphaProfile === 'string' && alphaProfile) {
+                await page.evaluate((value) => {
+                    window.__gwrVideoAlphaProfile = value;
+                }, alphaProfile);
+            }
+            if (Number.isFinite(edgeDenoiseStrength)) {
+                const value = Math.max(0, Math.min(3, edgeDenoiseStrength));
+                await page.evaluate((nextValue) => {
+                    window.__gwrVideoOverrideEdgeDenoiseStrength = nextValue;
+                }, value);
+                await setNumericInputValue(page, '#edgeDenoiseStrength', value);
+            }
+            if (Number.isFinite(residualCleanupStrength)) {
+                const value = Math.max(0, Math.min(1.8, residualCleanupStrength));
+                await page.evaluate((nextValue) => {
+                    window.__gwrVideoOverrideResidualCleanupStrength = nextValue;
+                }, value);
+                await setNumericInputValue(page, '#residualCleanup', value);
+            }
+            if (Number.isFinite(videoBitrate) && videoBitrate > 0) {
+                await setNumericInputValue(page, '#videoBitrateMbps', videoBitrate / 1000 / 1000);
+            }
+
+            await page.locator('#processBtn').click();
+            await page.waitForFunction(() => {
+                const status = document.getElementById('status');
+                return status?.dataset?.tone === 'success' || status?.dataset?.tone === 'error';
+            }, null, { timeout: timeoutMs });
+
+            const status = await page.locator('#status').textContent();
+            const tone = await page.locator('#status').getAttribute('data-tone');
+            if (tone !== 'success') {
+                throw new Error(status || 'Video export failed');
+            }
+
+            const controls = await collectVideoControls(page);
+            const buffer = await readDownloadBufferFromPage(page);
+            return {
+                buffer,
+                meta: {
+                    status,
+                    denoiseBackend,
+                    actualDenoiseBackend: controls.denoiseBackend,
+                    actualControls: controls,
+                    pagePath: pageUrl
+                }
+            };
+        });
     } finally {
         await browser.close();
     }

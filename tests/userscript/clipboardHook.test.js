@@ -729,3 +729,126 @@ test('installGeminiClipboardImageHook should prefer provideActionContext over ge
 
   dispose();
 });
+
+test('installGeminiClipboardImageHook should process Gemini page image clipboard items when actionContext is missing', async () => {
+  const writtenItems = [];
+  const originalBlob = new Blob(['clipboard-watermarked'], { type: 'image/png' });
+  const processedBlob = new Blob(['clipboard-processed-without-context'], { type: 'image/png' });
+  const originalItem = new MockClipboardItem({
+    'image/png': originalBlob
+  });
+  const clipboard = {
+    async write(items) {
+      writtenItems.push(items);
+    }
+  };
+  const targetWindow = {
+    location: {
+      hostname: 'gemini.google.com'
+    },
+    navigator: { clipboard },
+    ClipboardItem: MockClipboardItem
+  };
+
+  let processedInputText = '';
+  const dispose = installGeminiClipboardImageHook(targetWindow, {
+    getActionContext: () => null,
+    processClipboardImageBlob: async (blob, { actionContext }) => {
+      processedInputText = await blob.text();
+      assert.equal(actionContext, null);
+      return {
+        processedBlob
+      };
+    },
+    fetchBlobDirect: async () => {
+      throw new Error('missing actionContext should not fetch session resources');
+    },
+    resolveBlobViaImageElement: async () => {
+      throw new Error('missing actionContext should not decode session resources');
+    },
+    logger: { warn() {} }
+  });
+
+  await clipboard.write([originalItem]);
+
+  assert.equal(processedInputText, 'clipboard-watermarked');
+  assert.equal(writtenItems.length, 1);
+  assert.deepEqual(writtenItems[0][0].types, ['image/png']);
+  assert.equal(await writtenItems[0][0].getType('image/png'), processedBlob);
+
+  dispose();
+});
+
+test('installGeminiClipboardImageHook should not process non-Gemini image clipboard items without actionContext', async () => {
+  const writtenItems = [];
+  const originalItem = new MockClipboardItem({
+    'image/png': new Blob(['non-gemini-image'], { type: 'image/png' })
+  });
+  const clipboard = {
+    async write(items) {
+      writtenItems.push(items);
+    }
+  };
+  const targetWindow = {
+    location: {
+      hostname: 'example.com'
+    },
+    navigator: { clipboard },
+    ClipboardItem: MockClipboardItem
+  };
+
+  const dispose = installGeminiClipboardImageHook(targetWindow, {
+    getActionContext: () => null,
+    processClipboardImageBlob: async () => {
+      throw new Error('non-Gemini pages should not process clipboard images without actionContext');
+    },
+    fetchBlobDirect: async () => {
+      throw new Error('non-Gemini pages should not fetch session resources');
+    },
+    resolveBlobViaImageElement: async () => {
+      throw new Error('non-Gemini pages should not decode session resources');
+    },
+    logger: { warn() {} }
+  });
+
+  await clipboard.write([originalItem]);
+
+  assert.equal(writtenItems.length, 1);
+  assert.equal(writtenItems[0][0], originalItem);
+
+  dispose();
+});
+
+test('installGeminiClipboardImageHook should fall back to original Gemini clipboard items when page fallback processing fails', async () => {
+  const writtenItems = [];
+  const originalItem = new MockClipboardItem({
+    'image/png': new Blob(['gemini-unprocessed-on-fallback-error'], { type: 'image/png' })
+  });
+  const clipboard = {
+    async write(items) {
+      writtenItems.push(items);
+    }
+  };
+  const targetWindow = {
+    location: {
+      hostname: 'business.gemini.google'
+    },
+    navigator: { clipboard },
+    ClipboardItem: MockClipboardItem
+  };
+
+  const dispose = installGeminiClipboardImageHook(targetWindow, {
+    getActionContext: () => null,
+    processClipboardImageBlob: async () => {
+      throw new Error('fallback processing failed');
+    },
+    logger: { warn() {} }
+  });
+
+  await clipboard.write([originalItem]);
+
+  assert.equal(writtenItems.length, 1);
+  assert.equal(writtenItems[0][0], originalItem);
+
+  dispose();
+});
