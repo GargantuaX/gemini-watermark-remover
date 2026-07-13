@@ -53,6 +53,7 @@ const allenkFdncnnRuntimePromises = new Map();
 const els = {
     dropzone: $('dropzone'),
     fileInput: $('fileInput'),
+    batchQueue: $('batchQueue'),
     comparePlayer: $('comparePlayer'),
     afterBadge: $('afterBadge'),
     playPauseBtn: $('playPauseBtn'),
@@ -672,8 +673,116 @@ async function runExport() {
     }
 }
 
+// --- Batch processing (multiple videos, one at a time) ---
+// Video decode/encode is CPU/GPU-bound, so sequential processing through the
+// existing single-file pipeline is the correct design, not a compromise.
+const batch = { queue: [], processing: false };
+
+function batchStatusLabel(status) {
+    switch (status) {
+        case 'pending': return '排队中';
+        case 'processing': return '处理中…';
+        case 'done': return '已完成 ✓';
+        case 'error': return '失败 ✗';
+        case 'skipped': return '已跳过';
+        default: return '';
+    }
+}
+
+function renderBatchQueue() {
+    const box = els.batchQueue;
+    if (!box) return;
+    if (batch.queue.length === 0) {
+        box.hidden = true;
+        box.replaceChildren();
+        return;
+    }
+    box.hidden = false;
+    box.replaceChildren(...batch.queue.map((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'batch-item';
+        row.dataset.status = item.status;
+        const name = document.createElement('span');
+        name.className = 'batch-name';
+        name.textContent = `${index + 1}. ${item.file.name}`;
+        const stateLabel = document.createElement('span');
+        stateLabel.className = 'batch-state';
+        stateLabel.textContent = batchStatusLabel(item.status);
+        row.append(name, stateLabel);
+        return row;
+    }));
+}
+
+function triggerDownload(href, filename) {
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+}
+
+async function processBatch() {
+    if (batch.processing) return;
+    batch.processing = true;
+    try {
+        for (const item of batch.queue) {
+            if (item.status !== 'pending') continue;
+            item.status = 'processing';
+            renderBatchQueue();
+            try {
+                await setFile(item.file);
+                if (getDebugFileKind(item.file) !== 'video' || !state.file) {
+                    item.status = 'skipped';
+                    renderBatchQueue();
+                    continue;
+                }
+                await runExport();
+                const href = els.downloadBtn.getAttribute('href');
+                if (state.processedUrl && href) {
+                    triggerDownload(href, els.downloadBtn.getAttribute('download') || `${item.file.name}.mp4`);
+                    item.status = 'done';
+                } else {
+                    item.status = 'error';
+                }
+            } catch (error) {
+                console.error(error);
+                item.status = 'error';
+            }
+            renderBatchQueue();
+        }
+        const done = batch.queue.filter((it) => it.status === 'done').length;
+        setStatus(`批量处理完成：成功 ${done}/${batch.queue.length}，结果已自动下载。`, done ? 'success' : 'warn');
+    } finally {
+        batch.processing = false;
+    }
+}
+
+function handleIncomingFiles(fileList) {
+    const list = Array.from(fileList || []).filter(Boolean);
+    const videoFiles = list.filter((file) => getDebugFileKind(file) === 'video');
+
+    if (videoFiles.length > 1) {
+        for (const file of videoFiles) {
+            batch.queue.push({ file, status: 'pending' });
+        }
+        renderBatchQueue();
+        processBatch();
+        return;
+    }
+
+    // Single video (or an image handoff): keep the original single-file behavior
+    // so preset tuning and manual export still work.
+    const file = pickDebugUploadFile(fileList);
+    if (file) setFile(file);
+}
+
 function reset() {
     state.jobId++;
+    if (!batch.processing) {
+        batch.queue = [];
+        renderBatchQueue();
+    }
     cleanupUrls();
     state.file = null;
     state.metadata = null;
@@ -783,8 +892,7 @@ function setupEvents() {
         }
     });
     els.fileInput.addEventListener('change', (event) => {
-        const file = pickDebugUploadFile(event.target.files);
-        if (file) setFile(file);
+        handleIncomingFiles(event.target.files);
     });
 
     for (const eventName of ['dragenter', 'dragover']) {
@@ -800,8 +908,7 @@ function setupEvents() {
         });
     }
     els.dropzone.addEventListener('drop', (event) => {
-        const file = pickDebugUploadFile(event.dataTransfer?.files);
-        if (file) setFile(file);
+        handleIncomingFiles(event.dataTransfer?.files);
     });
 
     els.alphaGain.addEventListener('input', () => {
