@@ -21,7 +21,7 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
         if (maskW <= 0 || maskH <= 0 || !alphaMap || alphaMap.length < maskW * maskH) return;
 
         const edgeMask = new Float32Array(maskW * maskH);
-        const pad = logoSize >= 96 ? 2 : 1;
+        const pad = logoSize >= 96 ? 3 : 2;
 
         for (let y = 1; y < maskH - 1; y++) {
             for (let x = 1; x < maskW - 1; x++) {
@@ -33,8 +33,8 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
                 const nRight = Math.abs(alphaMap[y * maskW + (x + 1)]);
                 const diff = Math.max(Math.abs(val - nUp), Math.abs(val - nDown), Math.abs(val - nLeft), Math.abs(val - nRight));
 
-                if (diff >= 0.03 && val >= 0.01 && val <= 0.50) {
-                    edgeMask[idx] = diff;
+                if ((diff >= 0.005 || (val >= 0.008 && val <= 0.65))) {
+                    edgeMask[idx] = Math.max(diff * 2.5, val * 0.85);
                 }
             }
         }
@@ -69,10 +69,10 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
                 const ix = position.x + x;
                 if (ix < 0 || ix >= w) continue;
                 const edgeVal = dilMask[y * maskW + x];
-                if (edgeVal <= 0.01) continue;
+                if (edgeVal <= 0.005) continue;
 
                 const idx = (iy * w + ix) * 4;
-                const blend = Math.min(0.65, edgeVal * 1.2);
+                const blend = Math.min(0.85, edgeVal * 1.5);
 
                 let rSum = 0;
                 let gSum = 0;
@@ -86,7 +86,7 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
                     if (sampleX >= 0 && sampleX < w && sampleY >= 0 && sampleY < h) {
                         const localY = sampleY - position.y;
                         const localX = sampleX - position.x;
-                        const isEdge = (localX >= 0 && localX < maskW && localY >= 0 && localY < maskH) ? (dilMask[localY * maskW + localX] > 0.01) : false;
+                        const isEdge = (localX >= 0 && localX < maskW && localY >= 0 && localY < maskH) ? (dilMask[localY * maskW + localX] > 0.005) : false;
                         if (!isEdge) {
                             const sIdx = (sampleY * w + sampleX) * 4;
                             const weight = 1.0;
