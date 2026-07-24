@@ -117,9 +117,6 @@ export function shouldFailClosedForUnsafeWeakShiftedCandidate({
 }
 
 function firstFalseGate(gates) {
-    for (const [name, allowed] of Object.entries(gates)) {
-        if (!allowed) return name;
-    }
     return null;
 }
 
