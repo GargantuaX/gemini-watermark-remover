@@ -11,102 +11,107 @@ const MAX_ALPHA = 0.99;            // Avoid division by near-zero values
 const LOGO_VALUE = 255;            // Color value for white watermark
 
 function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
-    if (!imageData || !imageData.data || !position) return;
-    const w = imageData.width;
-    const h = imageData.height;
-    const maskW = position.width;
-    const maskH = position.height;
-    if (!alphaMap || alphaMap.length < maskW * maskH) return;
+    try {
+        if (!imageData || !imageData.data || !position || typeof position.width !== 'number' || typeof position.height !== 'number' || position.width <= 0 || position.height <= 0) return;
+        const w = imageData.width;
+        const h = imageData.height;
+        if (!w || !h) return;
+        const maskW = Math.floor(position.width);
+        const maskH = Math.floor(position.height);
+        if (maskW <= 0 || maskH <= 0 || !alphaMap || alphaMap.length < maskW * maskH) return;
 
-    const edgeMask = new Float32Array(maskW * maskH);
-    const pad = logoSize >= 96 ? 2 : 1;
+        const edgeMask = new Float32Array(maskW * maskH);
+        const pad = logoSize >= 96 ? 2 : 1;
 
-    for (let y = 1; y < maskH - 1; y++) {
-        for (let x = 1; x < maskW - 1; x++) {
-            const idx = y * maskW + x;
-            const val = Math.abs(alphaMap[idx]);
-            const nUp = Math.abs(alphaMap[(y - 1) * maskW + x]);
-            const nDown = Math.abs(alphaMap[(y + 1) * maskW + x]);
-            const nLeft = Math.abs(alphaMap[y * maskW + (x - 1)]);
-            const nRight = Math.abs(alphaMap[y * maskW + (x + 1)]);
-            const diff = Math.max(Math.abs(val - nUp), Math.abs(val - nDown), Math.abs(val - nLeft), Math.abs(val - nRight));
+        for (let y = 1; y < maskH - 1; y++) {
+            for (let x = 1; x < maskW - 1; x++) {
+                const idx = y * maskW + x;
+                const val = Math.abs(alphaMap[idx]);
+                const nUp = Math.abs(alphaMap[(y - 1) * maskW + x]);
+                const nDown = Math.abs(alphaMap[(y + 1) * maskW + x]);
+                const nLeft = Math.abs(alphaMap[y * maskW + (x - 1)]);
+                const nRight = Math.abs(alphaMap[y * maskW + (x + 1)]);
+                const diff = Math.max(Math.abs(val - nUp), Math.abs(val - nDown), Math.abs(val - nLeft), Math.abs(val - nRight));
 
-            if (diff >= 0.03 && val >= 0.01 && val <= 0.50) {
-                edgeMask[idx] = diff;
-            }
-        }
-    }
-
-    const dilMask = new Float32Array(maskW * maskH);
-    for (let y = 0; y < maskH; y++) {
-        for (let x = 0; x < maskW; x++) {
-            let maxVal = 0;
-            for (let dy = -pad; dy <= pad; dy++) {
-                const ny = y + dy;
-                if (ny < 0 || ny >= maskH) continue;
-                for (let dx = -pad; dx <= pad; dx++) {
-                    const nx = x + dx;
-                    if (nx < 0 || nx >= maskW) continue;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist <= pad) {
-                        const v = edgeMask[ny * maskW + nx];
-                        if (v > maxVal) maxVal = v;
-                    }
+                if (diff >= 0.03 && val >= 0.01 && val <= 0.50) {
+                    edgeMask[idx] = diff;
                 }
             }
-            dilMask[y * maskW + x] = maxVal;
         }
-    }
 
-    const resultData = new Uint8ClampedArray(imageData.data);
-    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
-    for (let y = 0; y < maskH; y++) {
-        const iy = position.y + y;
-        if (iy < 0 || iy >= h) continue;
-        for (let x = 0; x < maskW; x++) {
-            const ix = position.x + x;
-            if (ix < 0 || ix >= w) continue;
-            const edgeVal = dilMask[y * maskW + x];
-            if (edgeVal <= 0.01) continue;
-
-            const idx = (iy * w + ix) * 4;
-            const blend = Math.min(0.65, edgeVal * 1.2);
-
-            let rSum = 0;
-            let gSum = 0;
-            let bSum = 0;
-            let wSum = 0;
-            for (let d = 0; d < dirs.length; d++) {
-                const stepX = dirs[d][0];
-                const stepY = dirs[d][1];
-                const sampleX = ix + stepX * 2;
-                const sampleY = iy + stepY * 2;
-                if (sampleX >= 0 && sampleX < w && sampleY >= 0 && sampleY < h) {
-                    const localY = sampleY - position.y;
-                    const localX = sampleX - position.x;
-                    const isEdge = (localX >= 0 && localX < maskW && localY >= 0 && localY < maskH) ? (dilMask[localY * maskW + localX] > 0.01) : false;
-                    if (!isEdge) {
-                        const sIdx = (sampleY * w + sampleX) * 4;
-                        const weight = 1.0;
-                        rSum += imageData.data[sIdx] * weight;
-                        gSum += imageData.data[sIdx + 1] * weight;
-                        bSum += imageData.data[sIdx + 2] * weight;
-                        wSum += weight;
+        const dilMask = new Float32Array(maskW * maskH);
+        for (let y = 0; y < maskH; y++) {
+            for (let x = 0; x < maskW; x++) {
+                let maxVal = 0;
+                for (let dy = -pad; dy <= pad; dy++) {
+                    const ny = y + dy;
+                    if (ny < 0 || ny >= maskH) continue;
+                    for (let dx = -pad; dx <= pad; dx++) {
+                        const nx = x + dx;
+                        if (nx < 0 || nx >= maskW) continue;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist <= pad) {
+                            const v = edgeMask[ny * maskW + nx];
+                            if (v > maxVal) maxVal = v;
+                        }
                     }
                 }
-            }
-
-            if (wSum > 0) {
-                const inpR = rSum / wSum;
-                const inpG = gSum / wSum;
-                const inpB = bSum / wSum;
-                resultData[idx] = Math.round(resultData[idx] * (1 - blend) + inpR * blend);
-                resultData[idx + 1] = Math.round(resultData[idx + 1] * (1 - blend) + inpG * blend);
-                resultData[idx + 2] = Math.round(resultData[idx + 2] * (1 - blend) + inpB * blend);
+                dilMask[y * maskW + x] = maxVal;
             }
         }
+
+        const resultData = new Uint8ClampedArray(imageData.data);
+        const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+        for (let y = 0; y < maskH; y++) {
+            const iy = position.y + y;
+            if (iy < 0 || iy >= h) continue;
+            for (let x = 0; x < maskW; x++) {
+                const ix = position.x + x;
+                if (ix < 0 || ix >= w) continue;
+                const edgeVal = dilMask[y * maskW + x];
+                if (edgeVal <= 0.01) continue;
+
+                const idx = (iy * w + ix) * 4;
+                const blend = Math.min(0.65, edgeVal * 1.2);
+
+                let rSum = 0;
+                let gSum = 0;
+                let bSum = 0;
+                let wSum = 0;
+                for (let d = 0; d < dirs.length; d++) {
+                    const stepX = dirs[d][0];
+                    const stepY = dirs[d][1];
+                    const sampleX = ix + stepX * 2;
+                    const sampleY = iy + stepY * 2;
+                    if (sampleX >= 0 && sampleX < w && sampleY >= 0 && sampleY < h) {
+                        const localY = sampleY - position.y;
+                        const localX = sampleX - position.x;
+                        const isEdge = (localX >= 0 && localX < maskW && localY >= 0 && localY < maskH) ? (dilMask[localY * maskW + localX] > 0.01) : false;
+                        if (!isEdge) {
+                            const sIdx = (sampleY * w + sampleX) * 4;
+                            const weight = 1.0;
+                            rSum += imageData.data[sIdx] * weight;
+                            gSum += imageData.data[sIdx + 1] * weight;
+                            bSum += imageData.data[sIdx + 2] * weight;
+                            wSum += weight;
+                        }
+                    }
+                }
+
+                if (wSum > 0) {
+                    const inpR = rSum / wSum;
+                    const inpG = gSum / wSum;
+                    const inpB = bSum / wSum;
+                    resultData[idx] = Math.round(resultData[idx] * (1 - blend) + inpR * blend);
+                    resultData[idx + 1] = Math.round(resultData[idx + 1] * (1 - blend) + inpG * blend);
+                    resultData[idx + 2] = Math.round(resultData[idx + 2] * (1 - blend) + inpB * blend);
+                }
+            }
+        }
+        imageData.data.set(resultData);
+    } catch (err) {
+        // Fail-safe: prevent processing error from breaking the extension
     }
-    imageData.data.set(resultData);
 }
 
 /**
