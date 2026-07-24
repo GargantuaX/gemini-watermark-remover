@@ -156,9 +156,9 @@ async function notifyActionCriticalFailure(onActionCriticalFailure, payload) {
   }
 }
 
-const DOWNLOAD_ACTION_LABEL_PATTERN = /(download|copy|下载|复制)/i;
-const COPY_ACTION_LABEL_PATTERN = /(copy|复制)/i;
-const EXPLICIT_DOWNLOAD_ACTION_LABEL_PATTERN = /(download|下载)/i;
+const DOWNLOAD_ACTION_LABEL_PATTERN = /(download|copy|save|export|下载|复制|завантажити|скачати|зберегти|копіювати|скопіювати|скачать|сохранить|копировать|herunterladen|télécharger|descargar|scarica|downloaden)/i;
+const COPY_ACTION_LABEL_PATTERN = /(copy|复制|копіювати|скопіювати|копировать|kopieren|copier|copiar|copia)/i;
+const EXPLICIT_DOWNLOAD_ACTION_LABEL_PATTERN = /(download|save|export|下载|завантажити|скачати|зберегти|скачать|сохранить|herunterladen|télécharger|descargar|scarica|downloaden)/i;
 const INTENT_EVENT_TYPES = ['click', 'keydown'];
 const DEFAULT_INTENT_WINDOW_MS = 5000;
 const DEFAULT_DOWNLOAD_STICKY_WINDOW_MS = 30000;
@@ -215,12 +215,20 @@ function collectButtonLikeLabels(element) {
     return [];
   }
 
-  return [
+  const attrs = [
     button.getAttribute?.('aria-label') || '',
     button.getAttribute?.('title') || '',
+    button.getAttribute?.('data-tooltip') || '',
+    button.getAttribute?.('jslog') || '',
     button.innerText || '',
     button.textContent || ''
-  ]
+  ];
+  const svgPaths = Array.from(button.querySelectorAll?.('path') || []).map((p) => p.getAttribute?.('d') || '').join(' ');
+  if (svgPaths) {
+    attrs.push(svgPaths);
+  }
+
+  return attrs
     .map(normalizeActionLabel)
     .filter(Boolean);
 }
