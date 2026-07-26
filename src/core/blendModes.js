@@ -60,7 +60,7 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
             }
         }
 
-        const resultData = new Uint8ClampedArray(imageData.data);
+        const changes = [];
         const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
         for (let y = 0; y < maskH; y++) {
             const iy = position.y + y;
@@ -102,13 +102,21 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
                     const inpR = rSum / wSum;
                     const inpG = gSum / wSum;
                     const inpB = bSum / wSum;
-                    resultData[idx] = Math.round(resultData[idx] * (1 - blend) + inpR * blend);
-                    resultData[idx + 1] = Math.round(resultData[idx + 1] * (1 - blend) + inpG * blend);
-                    resultData[idx + 2] = Math.round(resultData[idx + 2] * (1 - blend) + inpB * blend);
+                    changes.push({
+                        idx,
+                        r: Math.round(imageData.data[idx] * (1 - blend) + inpR * blend),
+                        g: Math.round(imageData.data[idx + 1] * (1 - blend) + inpG * blend),
+                        b: Math.round(imageData.data[idx + 2] * (1 - blend) + inpB * blend)
+                    });
                 }
             }
         }
-        imageData.data.set(resultData);
+        for (let i = 0; i < changes.length; i++) {
+            const change = changes[i];
+            imageData.data[change.idx] = change.r;
+            imageData.data[change.idx + 1] = change.g;
+            imageData.data[change.idx + 2] = change.b;
+        }
     } catch (err) {
         // Fail-safe: prevent processing error from breaking the extension
     }
