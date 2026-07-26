@@ -21,7 +21,7 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
         if (maskW <= 0 || maskH <= 0 || !alphaMap || alphaMap.length < maskW * maskH) return;
 
         const edgeMask = new Float32Array(maskW * maskH);
-        const pad = logoSize >= 96 ? 5 : 4;
+        const pad = logoSize >= 96 ? 3 : 2;
 
         for (let y = 1; y < maskH - 1; y++) {
             for (let x = 1; x < maskW - 1; x++) {
@@ -33,8 +33,8 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
                 const nRight = Math.abs(alphaMap[y * maskW + (x + 1)]);
                 const diff = Math.max(Math.abs(val - nUp), Math.abs(val - nDown), Math.abs(val - nLeft), Math.abs(val - nRight));
 
-                if (diff >= 0.002 || (val >= 0.003 && val <= 0.85)) {
-                    edgeMask[idx] = Math.max(diff * 3.5, val * 1.2);
+                if ((diff >= 0.005 || (val >= 0.008 && val <= 0.65))) {
+                    edgeMask[idx] = Math.max(diff * 2.5, val * 0.85);
                 }
             }
         }
@@ -52,9 +52,7 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
                         const dist = Math.sqrt(dx * dx + dy * dy);
                         if (dist <= pad) {
                             const v = edgeMask[ny * maskW + nx];
-                            const falloff = 1.0 - (dist / (pad + 1));
-                            const scaled = v * falloff;
-                            if (scaled > maxVal) maxVal = scaled;
+                            if (v > maxVal) maxVal = v;
                         }
                     }
                 }
@@ -62,67 +60,62 @@ function applyHybridInpainting(imageData, position, logoSize, alphaMap) {
             }
         }
 
-        for (let pass = 0; pass < 3; pass++) {
-            const changes = [];
-            const sampleDist = 3 + pass;
-            const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
-            for (let y = 0; y < maskH; y++) {
-                const iy = position.y + y;
-                if (iy < 0 || iy >= h) continue;
-                for (let x = 0; x < maskW; x++) {
-                    const ix = position.x + x;
-                    if (ix < 0 || ix >= w) continue;
-                    const edgeVal = dilMask[y * maskW + x];
-                    if (edgeVal <= 0.002) continue;
+        const changes = [];
+        const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+        for (let y = 0; y < maskH; y++) {
+            const iy = position.y + y;
+            if (iy < 0 || iy >= h) continue;
+            for (let x = 0; x < maskW; x++) {
+                const ix = position.x + x;
+                if (ix < 0 || ix >= w) continue;
+                const edgeVal = dilMask[y * maskW + x];
+                if (edgeVal <= 0.005) continue;
 
-                    const idx = (iy * w + ix) * 4;
-                    const blend = Math.min(0.95, edgeVal * 2.5);
+                const idx = (iy * w + ix) * 4;
+                const blend = Math.min(0.85, edgeVal * 1.5);
 
-                    let rSum = 0;
-                    let gSum = 0;
-                    let bSum = 0;
-                    let wSum = 0;
-                    for (let d = 0; d < dirs.length; d++) {
-                        const stepX = dirs[d][0];
-                        const stepY = dirs[d][1];
-                        for (let dist = sampleDist; dist <= sampleDist + 2; dist++) {
-                            const sampleX = ix + stepX * dist;
-                            const sampleY = iy + stepY * dist;
-                            if (sampleX >= 0 && sampleX < w && sampleY >= 0 && sampleY < h) {
-                                const localY = sampleY - position.y;
-                                const localX = sampleX - position.x;
-                                const isEdge = (localX >= 0 && localX < maskW && localY >= 0 && localY < maskH) ? (dilMask[localY * maskW + localX] > 0.002) : false;
-                                if (!isEdge) {
-                                    const sIdx = (sampleY * w + sampleX) * 4;
-                                    const weight = 1.0 / dist;
-                                    rSum += imageData.data[sIdx] * weight;
-                                    gSum += imageData.data[sIdx + 1] * weight;
-                                    bSum += imageData.data[sIdx + 2] * weight;
-                                    wSum += weight;
-                                }
-                            }
+                let rSum = 0;
+                let gSum = 0;
+                let bSum = 0;
+                let wSum = 0;
+                for (let d = 0; d < dirs.length; d++) {
+                    const stepX = dirs[d][0];
+                    const stepY = dirs[d][1];
+                    const sampleX = ix + stepX * 2;
+                    const sampleY = iy + stepY * 2;
+                    if (sampleX >= 0 && sampleX < w && sampleY >= 0 && sampleY < h) {
+                        const localY = sampleY - position.y;
+                        const localX = sampleX - position.x;
+                        const isEdge = (localX >= 0 && localX < maskW && localY >= 0 && localY < maskH) ? (dilMask[localY * maskW + localX] > 0.005) : false;
+                        if (!isEdge) {
+                            const sIdx = (sampleY * w + sampleX) * 4;
+                            const weight = 1.0;
+                            rSum += imageData.data[sIdx] * weight;
+                            gSum += imageData.data[sIdx + 1] * weight;
+                            bSum += imageData.data[sIdx + 2] * weight;
+                            wSum += weight;
                         }
                     }
+                }
 
-                    if (wSum > 0) {
-                        const inpR = rSum / wSum;
-                        const inpG = gSum / wSum;
-                        const inpB = bSum / wSum;
-                        changes.push({
-                            idx,
-                            r: Math.round(imageData.data[idx] * (1 - blend) + inpR * blend),
-                            g: Math.round(imageData.data[idx + 1] * (1 - blend) + inpG * blend),
-                            b: Math.round(imageData.data[idx + 2] * (1 - blend) + inpB * blend)
-                        });
-                    }
+                if (wSum > 0) {
+                    const inpR = rSum / wSum;
+                    const inpG = gSum / wSum;
+                    const inpB = bSum / wSum;
+                    changes.push({
+                        idx,
+                        r: Math.round(imageData.data[idx] * (1 - blend) + inpR * blend),
+                        g: Math.round(imageData.data[idx + 1] * (1 - blend) + inpG * blend),
+                        b: Math.round(imageData.data[idx + 2] * (1 - blend) + inpB * blend)
+                    });
                 }
             }
-            for (let i = 0; i < changes.length; i++) {
-                const c = changes[i];
-                imageData.data[c.idx] = c.r;
-                imageData.data[c.idx + 1] = c.g;
-                imageData.data[c.idx + 2] = c.b;
-            }
+        }
+        for (let i = 0; i < changes.length; i++) {
+            const change = changes[i];
+            imageData.data[change.idx] = change.r;
+            imageData.data[change.idx + 1] = change.g;
+            imageData.data[change.idx + 2] = change.b;
         }
     } catch (err) {
         // Fail-safe: prevent processing error from breaking the extension
