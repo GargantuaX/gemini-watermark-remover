@@ -126,10 +126,49 @@ export function resolveCandidateImageUrl(img) {
   return src;
 }
 
+function isGeminiEditorImage(img) {
+  let current = img.parentElement;
+  let depth = 0;
+  while (current && depth < 5) {
+    const className = (current.className || '');
+    const dataTestId = (current.getAttribute('data-test-id') || '');
+    const combined = `${typeof className === 'string' ? className : ''} ${dataTestId}`.toLowerCase();
+    
+    if (combined.includes('editor') || combined.includes('sketch') || combined.includes('inpainting')) {
+      return true;
+    }
+    current = current.parentElement;
+    depth += 1;
+  }
+
+  if (img.parentElement && img.parentElement.querySelector('canvas')) {
+    return true;
+  }
+
+  const dialog = img.closest(GEMINI_FULLSCREEN_CONTAINER_SELECTOR);
+  if (dialog) {
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    for (const btn of buttons) {
+      const text = (btn.textContent || '').trim().toLowerCase();
+      const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+      if (
+        text === 'sketch' || aria.includes('sketch') ||
+        text === 'намалювати' || aria.includes('намалювати') ||
+        text === 'эскиз' || aria.includes('эскиз')
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function isProcessableGeminiImageElement(img) {
   if (!img || typeof img.closest !== 'function') return false;
   if (img?.dataset?.gwrPreviewImage === 'true') return false;
   if (isGeminiUploaderPreviewImage(img)) return false;
+  if (isGeminiEditorImage(img)) return false;
+  
   const knownContainer = img.closest(GEMINI_IMAGE_CONTAINER_SELECTOR);
   const sourceUrl = resolveCandidateImageUrl(img);
   if (isGeminiGeneratedAssetUrl(sourceUrl)) {

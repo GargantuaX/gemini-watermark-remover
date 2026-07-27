@@ -1848,12 +1848,14 @@ export function applyPageImageProcessingResult({
   const candidateDiagnosticsSummary = sourceResult?.candidateDiagnosticsSummary || '';
   const captureTiming = sourceResult?.captureTiming || null;
 
-  applyReadyImageState(imageElement, processedBlob, {
-    imageSessionStore,
-    processedMeta: sourceResult?.processedMeta || null,
-    processedFrom: selectedStrategy || (isPreviewSource ? 'preview-candidate' : 'default'),
-    processedSlot: isPreviewSource ? 'preview' : 'full'
-  });
+  if (!isPreviewReplacementDisabled()) {
+    applyReadyImageState(imageElement, processedBlob, {
+      imageSessionStore,
+      processedMeta: sourceResult?.processedMeta || null,
+      processedFrom: selectedStrategy || (isPreviewSource ? 'preview-candidate' : 'default'),
+      processedSlot: isPreviewSource ? 'preview' : 'full'
+    });
+  }
 
   emitPageImageProcessEvent({
     logger,
@@ -1968,7 +1970,7 @@ export function bindOriginalAssetUrlToImages({
       const rememberedPreviewResult = resolveRememberedProcessedPreviewResult(normalizedSourceUrl, {
         imageSessionStore
       });
-      if (rememberedPreviewResult) {
+      if (rememberedPreviewResult && !isPreviewReplacementDisabled()) {
         applyReadyImageState(imageElement, rememberedPreviewResult.processedBlob, {
           imageSessionStore,
           processedMeta: rememberedPreviewResult.processedMeta,
@@ -1982,7 +1984,7 @@ export function bindOriginalAssetUrlToImages({
     const rememberedPreviewResult = resolveRememberedProcessedPreviewResult(normalizedSourceUrl, {
       imageSessionStore
     });
-    if (rememberedPreviewResult) {
+    if (rememberedPreviewResult && !isPreviewReplacementDisabled()) {
       applyReadyImageState(imageElement, rememberedPreviewResult.processedBlob, {
         imageSessionStore,
         processedMeta: rememberedPreviewResult.processedMeta,
@@ -1996,6 +1998,17 @@ export function bindOriginalAssetUrlToImages({
   return updatedCount;
 }
 
+function isPreviewReplacementDisabled() {
+  try {
+    const targetWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : globalThis.window;
+    if (targetWindow?.__GWR_PREVIEW_ENABLED__ === false) return true;
+    if (targetWindow?.localStorage?.getItem('__gwr_enable_preview_replacement__') === '0') return true;
+  } catch {
+    // Ignore
+  }
+  return false;
+}
+
 export function bindProcessedPreviewResultToImages({
   root = document,
   sourceUrl = '',
@@ -2006,6 +2019,9 @@ export function bindProcessedPreviewResultToImages({
   assetIds = null,
   imageSessionStore = getDefaultImageSessionStore()
 } = {}) {
+  if (isPreviewReplacementDisabled()) {
+    return 0;
+  }
   const normalizedSourceUrl = typeof sourceUrl === 'string'
     ? normalizeGoogleusercontentImageUrl(sourceUrl.trim())
     : '';
@@ -2092,7 +2108,7 @@ export function createPageImageReplacementController({
   let recentImageSourceHint = null;
 
   function tryApplyRememberedPreviewResult(imageElement) {
-    if (!imageElement || typeof imageElement !== 'object') {
+    if (isPreviewReplacementDisabled() || !imageElement || typeof imageElement !== 'object') {
       return false;
     }
 
@@ -2127,7 +2143,7 @@ export function createPageImageReplacementController({
   }
 
   function tryApplySessionProcessedResult(imageElement) {
-    if (!imageElement || typeof imageElement !== 'object') {
+    if (isPreviewReplacementDisabled() || !imageElement || typeof imageElement !== 'object') {
       return false;
     }
 
@@ -2141,6 +2157,7 @@ export function createPageImageReplacementController({
     if (
       resource?.kind !== 'processed'
       || !(resource.blob instanceof Blob)
+      || resource.slot !== 'full'
     ) {
       return false;
     }
@@ -2149,7 +2166,7 @@ export function createPageImageReplacementController({
       imageSessionStore,
       processedMeta: resource.processedMeta ?? null,
       processedFrom: resource.source || 'processed',
-      processedSlot: resource.slot === 'full' ? 'full' : 'preview'
+      processedSlot: 'full'
     });
     return true;
   }
@@ -2195,6 +2212,9 @@ export function createPageImageReplacementController({
   }
 
   async function processImage(imageElement) {
+    if (isPreviewReplacementDisabled()) {
+      return;
+    }
     applyRecentImageSourceHintToImage(imageElement, recentImageSourceHint);
     if (tryApplyRememberedPreviewResult(imageElement)) {
       return;

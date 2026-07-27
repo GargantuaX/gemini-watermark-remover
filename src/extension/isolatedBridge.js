@@ -6,22 +6,43 @@ import {
 } from './messageTypes.js';
 
 const EXTENSION_ENABLED_STORAGE_KEY = 'gwrEnabled';
+const EXTENSION_PREVIEW_ENABLED_STORAGE_KEY = 'gwrPreviewEnabled';
 
-function readExtensionEnabled(callback) {
-  chrome.storage.local.get({ [EXTENSION_ENABLED_STORAGE_KEY]: true }, (items) => {
-    callback(items?.[EXTENSION_ENABLED_STORAGE_KEY] !== false);
+function readExtensionState(callback) {
+  chrome.storage.local.get({
+    [EXTENSION_ENABLED_STORAGE_KEY]: true,
+    [EXTENSION_PREVIEW_ENABLED_STORAGE_KEY]: true
+  }, (items) => {
+    callback({
+      enabled: items?.[EXTENSION_ENABLED_STORAGE_KEY] !== false,
+      previewEnabled: items?.[EXTENSION_PREVIEW_ENABLED_STORAGE_KEY] !== false
+    });
   });
 }
+
+try {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes[EXTENSION_PREVIEW_ENABLED_STORAGE_KEY]) {
+      const previewEnabled = changes[EXTENSION_PREVIEW_ENABLED_STORAGE_KEY].newValue !== false;
+      window.postMessage({
+        type: 'GWR_EXTENSION_PREVIEW_STATE_CHANGE',
+        previewEnabled
+      }, '*');
+    }
+  });
+} catch {}
 
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   const data = event.data || {};
   if (data.type === GWR_EXTENSION_STATE_REQUEST && data.requestId) {
-    readExtensionEnabled((enabled) => {
+    readExtensionState(({ enabled, previewEnabled }) => {
       window.postMessage({
         type: GWR_EXTENSION_STATE_RESPONSE,
         requestId: data.requestId,
-        enabled
+        enabled,
+        previewEnabled
       }, '*');
     });
     return;

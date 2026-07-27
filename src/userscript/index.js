@@ -58,6 +58,9 @@ function shouldSkipFrame(targetWindow) {
 
 function isPreviewReplacementEnabled(targetWindow) {
   try {
+    if (targetWindow?.__GWR_PREVIEW_ENABLED__ === false) {
+      return false;
+    }
     return targetWindow?.localStorage?.getItem('__gwr_enable_preview_replacement__') !== '0';
   } catch {
     return true;
@@ -171,6 +174,7 @@ export async function initGeminiWatermarkRemoverUserscript() {
       });
     };
     const handlePreviewBlobResolved = (payload = {}) => {
+      if (!isPreviewReplacementEnabled(targetWindow)) return;
       const resolvedActionContext = resolveCompatibleActionContextFromPayload(payload);
       const sessionKey = (
         typeof resolvedActionContext?.sessionKey === 'string'
@@ -251,7 +255,7 @@ export async function initGeminiWatermarkRemoverUserscript() {
       normalizeUrl: normalizeGoogleusercontentImageUrl,
       getActionContext: resolvePreviewRequestActionContext,
       processBlob: processPreviewBlobAtBestPath,
-      shouldProcessRequest: ({ url = '' } = {}) => isGeminiDisplayPreviewAssetUrl(url),
+      shouldProcessRequest: ({ url = '' } = {}) => isPreviewReplacementEnabled(targetWindow) && isGeminiDisplayPreviewAssetUrl(url),
       failOpenOnProcessingError: true,
       onProcessedBlobResolved: handlePreviewBlobResolved,
       logger: console

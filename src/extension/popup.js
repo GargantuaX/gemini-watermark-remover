@@ -1,4 +1,5 @@
 const EXTENSION_ENABLED_STORAGE_KEY = 'gwrEnabled';
+const EXTENSION_PREVIEW_ENABLED_STORAGE_KEY = 'gwrPreviewEnabled';
 const GEMINI_ORIGIN_PATTERN = /^https:\/\/(?:business\.)?gemini\.google\//i;
 
 function getExtensionApi() {
@@ -32,15 +33,21 @@ async function reloadCurrentGeminiTab() {
   getExtensionApi()?.tabs?.reload?.(tab.id);
 }
 
-function readEnabled(callback) {
+function readSettings(callback) {
   const storage = getExtensionApi()?.storage?.local;
   if (!storage?.get) {
-    callback(true);
+    callback({ enabled: true, previewEnabled: true });
     return;
   }
 
-  storage.get({ [EXTENSION_ENABLED_STORAGE_KEY]: true }, (items) => {
-    callback(items?.[EXTENSION_ENABLED_STORAGE_KEY] !== false);
+  storage.get({
+    [EXTENSION_ENABLED_STORAGE_KEY]: true,
+    [EXTENSION_PREVIEW_ENABLED_STORAGE_KEY]: true
+  }, (items) => {
+    callback({
+      enabled: items?.[EXTENSION_ENABLED_STORAGE_KEY] !== false,
+      previewEnabled: items?.[EXTENSION_PREVIEW_ENABLED_STORAGE_KEY] !== false
+    });
   });
 }
 
@@ -54,8 +61,19 @@ function writeEnabled(enabled, callback) {
   storage.set({ [EXTENSION_ENABLED_STORAGE_KEY]: Boolean(enabled) }, callback);
 }
 
+function writePreviewEnabled(previewEnabled, callback) {
+  const storage = getExtensionApi()?.storage?.local;
+  if (!storage?.set) {
+    callback?.();
+    return;
+  }
+
+  storage.set({ [EXTENSION_PREVIEW_ENABLED_STORAGE_KEY]: Boolean(previewEnabled) }, callback);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const toggle = document.getElementById('enable-toggle');
+  const previewToggle = document.getElementById('preview-toggle');
   const versionLabel = document.getElementById('extension-version');
 
   if (versionLabel) {
@@ -63,15 +81,28 @@ document.addEventListener('DOMContentLoaded', () => {
     versionLabel.textContent = version ? `v${version}` : '';
   }
 
-  if (!toggle) return;
-
-  readEnabled((enabled) => {
-    toggle.checked = enabled;
+  readSettings(({ enabled, previewEnabled }) => {
+    if (toggle) {
+      toggle.checked = enabled;
+    }
+    if (previewToggle) {
+      previewToggle.checked = previewEnabled;
+    }
   });
 
-  toggle.addEventListener('change', () => {
-    writeEnabled(toggle.checked, () => {
-      void reloadCurrentGeminiTab();
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      writeEnabled(toggle.checked, () => {
+        void reloadCurrentGeminiTab();
+      });
     });
-  });
+  }
+
+  if (previewToggle) {
+    previewToggle.addEventListener('change', () => {
+      writePreviewEnabled(previewToggle.checked, () => {
+        void reloadCurrentGeminiTab();
+      });
+    });
+  }
 });
