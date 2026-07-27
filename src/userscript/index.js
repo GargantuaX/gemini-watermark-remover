@@ -303,24 +303,27 @@ export async function initGeminiWatermarkRemoverUserscript() {
       logger: console
     });
     await processingRuntime.initialize();
-    await installInjectedPageProcessorRuntime({
+    const injectedRuntime = await installInjectedPageProcessorRuntime({
       targetWindow,
       scriptCode: USERSCRIPT_PAGE_PROCESSOR_CODE,
       logger: console
     });
-    pageProcessClient = createPageProcessBridgeClient({
-      targetWindow,
-      logger: console,
-      fallbackProcessWatermarkBlob: processingRuntime.processWatermarkBlob,
-      fallbackRemoveWatermarkFromBlob: processingRuntime.removeWatermarkFromBlob
-    });
 
-    installUserscriptProcessBridge({
-      targetWindow,
-      processWatermarkBlob: processingRuntime.processWatermarkBlob,
-      removeWatermarkFromBlob: processingRuntime.removeWatermarkFromBlob,
-      logger: console
-    });
+    if (injectedRuntime) {
+      pageProcessClient = createPageProcessBridgeClient({
+        targetWindow,
+        logger: console,
+        fallbackProcessWatermarkBlob: processingRuntime.processWatermarkBlob,
+        fallbackRemoveWatermarkFromBlob: processingRuntime.removeWatermarkFromBlob
+      });
+
+      installUserscriptProcessBridge({
+        targetWindow,
+        processWatermarkBlob: processingRuntime.processWatermarkBlob,
+        removeWatermarkFromBlob: processingRuntime.removeWatermarkFromBlob,
+        logger: console
+      });
+    }
 
     const pageImageReplacementController = isPreviewReplacementEnabled(targetWindow)
       ? installPageImageReplacement({
