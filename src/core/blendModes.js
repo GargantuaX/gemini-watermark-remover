@@ -5,8 +5,8 @@
 
 // Constants definition
 // Constants definition
-const ALPHA_NOISE_FLOOR = 0; // Process all low-level quantization alpha map values
-const ALPHA_THRESHOLD = 0.00001; // Denoised alpha activation threshold
+const ALPHA_NOISE_FLOOR = 3 / 255; // Remove low-level quantization noise from alpha map
+const ALPHA_THRESHOLD = 0.002;     // Ignore very small alpha values after noise floor removaleshold
 const MAX_ALPHA = 0.99;            // Avoid division by near-zero values
 const LOGO_VALUE = 255;            // Color value for white watermark
 
@@ -220,7 +220,4 @@ export function removeWatermark(imageData, alphaMap, position, options = {}) {
             // imageData.data[imgIdx + 3] does not need modification
         }
     }
-
-    // Apply edge-only texture smoothing along the watermark perimeter to eliminate residual fringe lines
-    applyHybridInpainting(imageData, position, position.width, alphaMap);
 }
