@@ -137,6 +137,8 @@ const BOTTOM_RIGHT_48_EVIDENCE_DOMINANCE_GRADIENT_ADVANTAGE = 0.12;
 const BOTTOM_RIGHT_48_EVIDENCE_DOMINANCE_MAX_RESIDUAL_DELTA = 0.08;
 const DARK_POLARITY_CATALOG_MIN_ORIGINAL_SPATIAL = 0.12;
 const DARK_POLARITY_CATALOG_MIN_ORIGINAL_GRADIENT = 0.08;
+const DARK_POLARITY_48_MIN_ORIGINAL_SPATIAL = 0.6;
+const DARK_POLARITY_48_MIN_ORIGINAL_GRADIENT = 0.3;
 const DARK_POLARITY_CATALOG_MAX_TEXTURE_FOR_WEAK_EVIDENCE = 0.25;
 const DARK_POLARITY_MAX_NEAR_WHITE_RATIO_INCREASE_FOR_WEAK_EVIDENCE = 0.05;
 const DARK_POLARITY_NEAR_WHITE_OVERRIDE_MIN_ORIGINAL_SPATIAL = 0.4;
@@ -183,6 +185,7 @@ const PREVIEW_ANCHOR_GAIN_SKIP_RESIDUAL_THRESHOLD = 0.24;
 const PREVIEW_ANCHOR_GAIN_SKIP_GRADIENT_THRESHOLD = 0.24;
 const CORE_ALPHA_PRIORITY_GAINS = Object.freeze([0.6, 1, 1.1, 1.15, 1.3, 0.45, 0.7, 0.85, 0.55]);
 const CURRENT_LARGE_MARGIN_ULTRA_WEAK_ALPHA_GAINS = Object.freeze([0.25, 0.3, 0.35, 0.4]);
+const DARK_POLARITY_48_ULTRA_WEAK_ALPHA_GAINS = Object.freeze([0.08, 0.1, 0.12, 0.15, 0.2]);
 const STANDARD_ANCHOR_WEAK_ALPHA_RESCUE_GAINS = Object.freeze([0.55, 0.7, 0.85]);
 const STANDARD_ANCHOR_WEAK_RESCUE_MAX_SPATIAL = 0.35;
 const STANDARD_ANCHOR_WEAK_RESCUE_MAX_GRADIENT = 0.24;
@@ -393,13 +396,17 @@ function buildStandardCandidateSeeds({
         }
 
         if (shouldAddDarkPolaritySeed(candidateConfig)) {
+            const weakDarkPolarity48 = candidateConfig.logoSize === 48;
             seeds.push({
                 ...baseSeed,
                 alphaMap: createNegativeAlphaMap(alphaMap),
                 source: `${baseSeed.source}+dark-polarity`,
                 provenance: mergeCandidateProvenance(
                     baseSeed.provenance,
-                    { darkPolarity: true }
+                    {
+                        darkPolarity: true,
+                        ...(weakDarkPolarity48 ? { weakDarkPolarity48: true } : {})
+                    }
                 )
             });
         }
@@ -409,9 +416,19 @@ function buildStandardCandidateSeeds({
 }
 
 function shouldAddDarkPolaritySeed(config) {
-    return config?.logoSize === 96 &&
+    if (
+        config?.logoSize === 96 &&
         config.marginRight === 192 &&
-        config.marginBottom === 192;
+        config.marginBottom === 192
+    ) {
+        return true;
+    }
+
+    return config?.logoSize === 48 &&
+        config.marginRight >= 90 &&
+        config.marginRight <= 100 &&
+        config.marginBottom >= 90 &&
+        config.marginBottom <= 100;
 }
 
 const negativeAlphaMapCache = new WeakMap();
@@ -659,7 +676,15 @@ function isWeakAlphaPrioritySeed(seed) {
         seed.config.marginBottom === 96;
 }
 
+function isWeakDarkPolarity48Seed(seed) {
+    return seed?.provenance?.weakDarkPolarity48 === true;
+}
+
 function resolveStandardSeedAlphaPriorityGains(seed, alphaPriorityGains) {
+    if (isWeakDarkPolarity48Seed(seed)) {
+        return DARK_POLARITY_48_ULTRA_WEAK_ALPHA_GAINS;
+    }
+
     const extras = isWeakAlphaPrioritySeed(seed)
         ? [
             ...CURRENT_LARGE_MARGIN_ULTRA_WEAK_ALPHA_GAINS,
@@ -874,7 +899,7 @@ function evaluateStandardTrialForSeed({
         }
     }
 
-    return isWeakAlphaPrioritySeed(seed)
+    const selected = isWeakAlphaPrioritySeed(seed)
         ? bestWeakAlphaPriorityTrial ?? bestWeakAlphaRescueTrial ?? bestAcceptedTrial ?? fallbackTrial
         : bestWeakAlphaPriorityTrial ??
             (
@@ -884,6 +909,10 @@ function evaluateStandardTrialForSeed({
             ) ??
             bestWeakAlphaRescueTrial ??
             fallbackTrial;
+
+    return isWeakDarkPolarity48Seed(seed) && selected?.accepted !== true
+        ? null
+        : selected;
 }
 
 export function evaluateRestorationCandidate({
@@ -1011,11 +1040,40 @@ export function evaluateRestorationCandidate({
     const strongDarkPolarityOriginalEvidence =
         originalScores.spatialScore >= DARK_POLARITY_CATALOG_MIN_ORIGINAL_SPATIAL ||
         originalScores.gradientScore >= DARK_POLARITY_CATALOG_MIN_ORIGINAL_GRADIENT;
+    const isLargeMargin48DarkPolarity =
+        provenance?.darkPolarity === true &&
+        config?.logoSize === 48 &&
+        config.marginRight >= 90 &&
+        config.marginRight <= 100 &&
+        config.marginBottom >= 90 &&
+        config.marginBottom <= 100;
+    const largeMargin48DarkPolarityEvidenceAllowed =
+        !isLargeMargin48DarkPolarity ||
+        (
+            originalScores.spatialScore >= DARK_POLARITY_48_MIN_ORIGINAL_SPATIAL &&
+            originalScores.gradientScore >= DARK_POLARITY_48_MIN_ORIGINAL_GRADIENT
+        );
+    const weakDarkPolarity48ScopeAllowed =
+        provenance?.weakDarkPolarity48 !== true ||
+        (
+            config?.logoSize === 48 &&
+            config.marginRight >= 90 &&
+            config.marginRight <= 100 &&
+            config.marginBottom >= 90 &&
+            config.marginBottom <= 100 &&
+            alphaGain <= 0.2
+        );
     const darkPolarityCatalogEvidenceAllowed =
         provenance?.darkPolarity !== true ||
         provenance?.catalogVariant !== true ||
-        strongDarkPolarityOriginalEvidence ||
-        texturePenalty <= DARK_POLARITY_CATALOG_MAX_TEXTURE_FOR_WEAK_EVIDENCE;
+        (
+            weakDarkPolarity48ScopeAllowed &&
+            largeMargin48DarkPolarityEvidenceAllowed &&
+            (
+                strongDarkPolarityOriginalEvidence ||
+                texturePenalty <= DARK_POLARITY_CATALOG_MAX_TEXTURE_FOR_WEAK_EVIDENCE
+            )
+        );
     const strongDarkPolarityNearWhiteOverrideEvidence =
         originalScores.spatialScore >= DARK_POLARITY_NEAR_WHITE_OVERRIDE_MIN_ORIGINAL_SPATIAL ||
         originalScores.gradientScore >= DARK_POLARITY_NEAR_WHITE_OVERRIDE_MIN_ORIGINAL_GRADIENT;

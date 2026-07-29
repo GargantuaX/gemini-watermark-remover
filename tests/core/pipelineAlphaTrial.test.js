@@ -121,6 +121,122 @@ test('createAlphaTrialFromSelectedTrial should split accepted and rejected event
     assert.equal(alphaTrial.acceptedStrategies[0].alphaGain, 1.3);
 });
 
+test('createAlphaTrialFromSelectedTrial should replace stale selection quality with final pipeline quality', () => {
+    const selectedDamage = {
+        safe: true,
+        penalty: 0.1,
+        newlyClippedRatio: 0
+    };
+    const selectedResidual = {
+        cleared: false,
+        spatial: -0.06,
+        gradient: 0.05,
+        score: 0.09
+    };
+    const finalArtifacts = {
+        newlyClippedRatio: 0.019965277777777776,
+        visualArtifactCost: 0.117
+    };
+    const finalQualitySignals = {
+        final: {
+            spatialScore: 0.08269753279573036,
+            gradientScore: 0.0663245530919801
+        },
+        artifacts: finalArtifacts,
+        texture: {
+            hardReject: false,
+            texturePenalty: 0.04
+        },
+        visibility: {
+            halo: { positiveDeltaLum: 2.7 }
+        },
+        nearBlackIncrease: 0.02
+    };
+
+    const alphaTrial = createAlphaTrialFromSelectedTrial({
+        selectedTrial: {
+            source: 'standard+catalog',
+            config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+            position: { x: 576, y: 1313, width: 48, height: 48 },
+            alphaGain: 1,
+            damage: selectedDamage,
+            residual: selectedResidual
+        },
+        source: 'standard+catalog+profile-alpha-rescue',
+        alphaGain: 0.85,
+        alphaAdjustmentStages: [{
+            stage: 'large-margin-48-profile-alpha-rescue',
+            fromAlphaGain: 1,
+            toAlphaGain: 0.85,
+            alphaStrategy: 'large-margin-48-profile-alpha',
+            profileExponent: 0.9
+        }],
+        processedSpatialScore: finalQualitySignals.final.spatialScore,
+        processedGradientScore: finalQualitySignals.final.gradientScore,
+        suppressionGain: 0.628960825889181,
+        finalQualitySignals
+    });
+
+    assert.notEqual(alphaTrial.damage, selectedDamage);
+    assert.equal(alphaTrial.damage.newlyClippedRatio, finalArtifacts.newlyClippedRatio);
+    assert.equal(alphaTrial.damage.nearBlackIncrease, 0.02);
+    assert.equal(alphaTrial.damage.texturePenalty, 0.04);
+    assert.equal(alphaTrial.artifacts, finalArtifacts);
+    assert.notEqual(alphaTrial.residual, selectedResidual);
+    assert.equal(alphaTrial.residual.spatial, finalQualitySignals.final.spatialScore);
+    assert.equal(alphaTrial.residual.gradient, finalQualitySignals.final.gradientScore);
+    assert.equal(alphaTrial.residual.suppressionGain, 0.628960825889181);
+    assert.equal(alphaTrial.residual.artifactCost, finalArtifacts.visualArtifactCost);
+});
+
+test('createAlphaTrialFromSelectedTrial should classify profile and local alpha stages as phase2 and preserve stage extras', () => {
+    const profileTrial = createAlphaTrialFromSelectedTrial({
+        selectedTrial: {
+            source: 'standard+catalog',
+            config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+            position: { x: 576, y: 1313, width: 48, height: 48 }
+        },
+        source: 'standard+catalog+profile-alpha-rescue',
+        alphaAdjustmentStages: [{
+            stage: 'large-margin-48-profile-alpha-rescue',
+            fromAlphaGain: 1,
+            toAlphaGain: 0.85,
+            alphaStrategy: 'large-margin-48-profile-alpha',
+            profileExponent: 0.9
+        }]
+    });
+    const localSearchTrigger = {
+        reason: 'damage-warning',
+        newlyClippedRatio: 0.021
+    };
+    const localTrial = createAlphaTrialFromSelectedTrial({
+        selectedTrial: {
+            source: 'standard+catalog',
+            config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+            position: { x: 576, y: 1313, width: 48, height: 48 }
+        },
+        source: 'standard+catalog+local-alpha',
+        alphaAdjustmentStages: [{
+            stage: 'evidence-gated-local-alpha-search',
+            fromAlphaGain: 1,
+            toAlphaGain: 0.95,
+            alphaStrategy: 'evidence-gated-local-alpha',
+            localSearchTrigger,
+            evaluatedCandidateCount: 7
+        }]
+    });
+
+    assert.equal(profileTrial.strategy, 'large-margin-48-profile-alpha');
+    assert.equal(profileTrial.migrationStage, 'phase2-alpha-trial');
+    assert.equal(localTrial.strategy, 'evidence-gated-local-alpha');
+    assert.equal(localTrial.migrationStage, 'phase2-alpha-trial');
+    assert.equal(
+        localTrial.alphaShape.profileStages[0].localSearchTrigger,
+        localSearchTrigger
+    );
+    assert.equal(localTrial.alphaShape.profileStages[0].evaluatedCandidateCount, 7);
+});
+
 test('createAlphaTrialContractSummary should expose stable alpha contract counts', () => {
     const alphaTrial = createAlphaTrialFromSelectedTrial({
         selectedTrial: {

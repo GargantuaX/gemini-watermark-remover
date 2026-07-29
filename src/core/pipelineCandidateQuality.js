@@ -25,6 +25,9 @@ const IMPERFECTION_POSITIVE_HALO_LUM_THRESHOLD = 6;
 const IMPERFECTION_GRADIENT_THRESHOLD = 0.22;
 const IMPERFECTION_SPATIAL_THRESHOLD = 0.18;
 const IMPERFECTION_WARNING_RATIO = 0.5;
+const DARK_SUPPORT_RESOLUTION_MAX_ABS_SPATIAL = 0.18;
+const DARK_SUPPORT_RESOLUTION_MAX_GRADIENT = 0.18;
+const DARK_SUPPORT_RESOLUTION_MAX_NEWLY_CLIPPED_RATIO = 0.25;
 
 function clamp01(value) {
     if (!Number.isFinite(value)) return 0;
@@ -42,10 +45,14 @@ export function classifyCandidateQuality({
 }
 
 export function createCandidateImperfectionSignals(visibility = {}) {
+    const darkPolarityHaloThreshold = Number.isFinite(visibility.darkPolarityHaloThreshold)
+        ? visibility.darkPolarityHaloThreshold
+        : IMPERFECTION_POSITIVE_HALO_LUM_THRESHOLD;
     const definitions = [
         ['spatial-residual', visibility.spatialResidual, IMPERFECTION_SPATIAL_THRESHOLD],
         ['gradient-residual', visibility.gradientResidual, IMPERFECTION_GRADIENT_THRESHOLD],
-        ['positive-halo', visibility.positiveHaloLum, IMPERFECTION_POSITIVE_HALO_LUM_THRESHOLD]
+        ['positive-halo', visibility.positiveHaloLum, IMPERFECTION_POSITIVE_HALO_LUM_THRESHOLD],
+        ['dark-polarity-halo', visibility.darkPolarityHaloLum, darkPolarityHaloThreshold]
     ];
     const components = Object.fromEntries(definitions.map(([type, rawValue, threshold]) => {
         const value = Number.isFinite(rawValue) ? Math.max(0, rawValue) : 0;
@@ -79,11 +86,13 @@ export function createCandidateImperfectionSignals(visibility = {}) {
 export function createCandidateQualitySignals({
     originalImageData,
     candidateImageData,
-    hypothesis
+    hypothesis,
+    finalCandidate = null
 } = {}) {
     const trial = hypothesis?.trial;
-    const position = trial?.position ?? hypothesis?.position;
-    const alphaMap = trial?.alphaMap;
+    const position = finalCandidate?.position ?? trial?.position ?? hypothesis?.position;
+    const alphaMap = finalCandidate?.alphaMap ?? trial?.alphaMap;
+    const alphaGain = finalCandidate?.alphaGain ?? trial?.alphaGain ?? 1;
     if (!originalImageData || !candidateImageData || !position || !alphaMap) {
         throw new Error('Candidate quality measurement requires original pixels, candidate pixels, position, and alpha map');
     }
@@ -95,7 +104,7 @@ export function createCandidateQualitySignals({
         originalImageData,
         position,
         alphaMap,
-        alphaGain: trial.alphaGain ?? 1
+        alphaGain
     });
     const imperfections = createCandidateImperfectionSignals(visibility);
     const artifacts = assessRemovalDiffArtifacts({
@@ -103,7 +112,7 @@ export function createCandidateQualitySignals({
         candidateImageData,
         alphaMap,
         position,
-        alphaGain: trial.alphaGain ?? 1
+        alphaGain
     });
     const texture = assessReferenceTextureAlignment({
         originalImageData,
@@ -119,13 +128,16 @@ export function createCandidateQualitySignals({
     const nearWhiteIncrease = candidateNearWhiteRatio - originalNearWhiteRatio;
 
     const evidence = clamp01((
-        Math.abs(original.spatialScore) +
+        Math.max(0, original.spatialScore) +
         Math.max(0, original.gradientScore)
     ) / 2);
     const residualComponents = {
         spatial: clamp01(Math.abs(final.spatialScore) / 0.4),
         gradient: clamp01(Math.max(0, final.gradientScore) / 0.35),
-        halo: clamp01((visibility?.positiveHaloLum ?? 0) / 8)
+        halo: clamp01(Math.max(
+            visibility?.positiveHaloLum ?? 0,
+            visibility?.darkPolarityHaloLum ?? 0
+        ) / 8)
     };
     const residualLoss =
         residualComponents.spatial * 0.45 +
@@ -151,10 +163,35 @@ export function createCandidateQualitySignals({
         damageComponents.nearWhite >= 0.4 ||
         damageComponents.clipped >= 0.4
     );
-    const damageWarning = damageComponents.nearBlack >= 1 ||
+    const rawDamageWarning = damageComponents.nearBlack >= 1 ||
         damageComponents.nearWhite >= 1 ||
         damageComponents.clipped >= 1 ||
         textureWarningCorroborated;
+    const darkBackgroundSupportConvergence =
+        finalCandidate?.darkBackgroundSupportConvergence?.accepted === true
+            ? finalCandidate.darkBackgroundSupportConvergence
+            : null;
+    const textureHardRejectResolved =
+        darkBackgroundSupportConvergence?.textureHardRejectResolved === true;
+    const darkBackgroundSupportResolved = Boolean(
+        rawDamageWarning &&
+        darkBackgroundSupportConvergence &&
+        !residualVisible &&
+        (
+            texture?.hardReject !== true ||
+            textureHardRejectResolved
+        ) &&
+        Math.abs(final.spatialScore) <=
+            DARK_SUPPORT_RESOLUTION_MAX_ABS_SPATIAL &&
+        final.gradientScore <= DARK_SUPPORT_RESOLUTION_MAX_GRADIENT &&
+        Number(artifacts?.newlyClippedRatio ?? Infinity) <=
+            DARK_SUPPORT_RESOLUTION_MAX_NEWLY_CLIPPED_RATIO
+    );
+    const damageWarning = rawDamageWarning &&
+        !darkBackgroundSupportResolved;
+    const damageRiskResolution = darkBackgroundSupportResolved
+        ? 'dark-background-support-converged'
+        : null;
     const qualityStatus = classifyCandidateQuality({
         residualVisible,
         damageWarning
@@ -166,6 +203,9 @@ export function createCandidateQualitySignals({
         damageLoss,
         residualVisible,
         damageWarning,
+        rawDamageWarning,
+        damageRiskResolution,
+        darkBackgroundSupportConvergence,
         qualityStatus,
         imperfections,
         original,

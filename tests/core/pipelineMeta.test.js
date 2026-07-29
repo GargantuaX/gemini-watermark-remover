@@ -188,3 +188,165 @@ test('attachTopNSelectionMeta should preserve existing accepted metadata', () =>
     assert.equal(attached.retryRecommended, false);
     assert.equal(attached.qualityStatus, 'clean');
 });
+
+test('attachTopNSelectionMeta should reconcile phase2 decisionPath quality with final candidate state', () => {
+    const staleDamage = {
+        safe: true,
+        penalty: 0.1,
+        newlyClippedRatio: 0
+    };
+    const staleResidual = {
+        cleared: false,
+        spatial: -0.06,
+        gradient: 0.05
+    };
+    const existing = createWatermarkMeta({
+        position: { x: 576, y: 1313, width: 48, height: 48 },
+        config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+        processedSpatialScore: 0.08269753279573036,
+        processedGradientScore: 0.0663245530919801,
+        suppressionGain: 0.628960825889181,
+        alphaGain: 0.85,
+        source: 'standard+catalog+profile-alpha-rescue',
+        decisionPath: {
+            decision: 'accept',
+            alphaTrial: {
+                migrationStage: 'phase2-alpha-trial',
+                scores: { suppressionGain: 0.628960825889181 },
+                damage: staleDamage,
+                residual: staleResidual
+            }
+        }
+    });
+    const artifacts = {
+        newlyClippedRatio: 0.019965277777777776,
+        visualArtifactCost: 0.117
+    };
+    const qualitySignals = {
+        final: {
+            spatialScore: 0.08269753279573036,
+            gradientScore: 0.0663245530919801
+        },
+        artifacts,
+        texture: {
+            hardReject: false,
+            texturePenalty: 0.04
+        },
+        visibility: {
+            halo: { positiveDeltaLum: 2.7 }
+        },
+        nearBlackIncrease: 0.02
+    };
+
+    const attached = attachTopNSelectionMeta(existing, { qualitySignals });
+
+    assert.equal(existing.decisionPath.alphaTrial.damage, staleDamage);
+    assert.equal(attached.decisionPath.alphaTrial.artifacts, artifacts);
+    assert.equal(
+        attached.decisionPath.alphaTrial.damage.newlyClippedRatio,
+        artifacts.newlyClippedRatio
+    );
+    assert.equal(
+        attached.decisionPath.alphaTrial.residual.spatial,
+        qualitySignals.final.spatialScore
+    );
+    assert.equal(
+        attached.decisionPath.alphaTrial.residual.gradient,
+        qualitySignals.final.gradientScore
+    );
+});
+
+test('attachTopNSelectionMeta should reconcile ordinary phase1 alpha trial with final quality', () => {
+    const legacyDamage = { safe: true, penalty: 0.02, newlyClippedRatio: 0 };
+    const legacyResidual = { cleared: true, spatial: 0.01, gradient: 0.02 };
+    const existing = createWatermarkMeta({
+        decisionPath: {
+            decision: 'accept',
+            alphaTrial: {
+                migrationStage: 'phase1-adapter',
+                damage: legacyDamage,
+                residual: legacyResidual
+            }
+        }
+    });
+
+    const attached = attachTopNSelectionMeta(existing, {
+        qualitySignals: {
+            final: { spatialScore: 0.03, gradientScore: 0.04 },
+            artifacts: {
+                newlyClippedRatio: 0.017361111111111112,
+                visualArtifactCost: 0.1
+            },
+            nearBlackIncrease: 0.01,
+            texture: { hardReject: false, texturePenalty: 0 }
+        }
+    });
+
+    assert.notEqual(attached.decisionPath.alphaTrial.damage, legacyDamage);
+    assert.notEqual(attached.decisionPath.alphaTrial.residual, legacyResidual);
+    assert.equal(
+        attached.decisionPath.alphaTrial.artifacts.newlyClippedRatio,
+        0.017361111111111112
+    );
+    assert.equal(
+        attached.decisionPath.alphaTrial.damage.newlyClippedRatio,
+        0.017361111111111112
+    );
+    assert.equal(attached.decisionPath.alphaTrial.residual.spatial, 0.03);
+    assert.equal(attached.decisionPath.alphaTrial.residual.gradient, 0.04);
+});
+
+test('attachTopNSelectionMeta should reconcile a phase1 alpha trial when repair changed the final pixels', () => {
+    const legacyDamage = { safe: true, penalty: 0, newlyClippedRatio: 0 };
+    const legacyResidual = {
+        cleared: false,
+        spatial: 0.15,
+        gradient: 0.1
+    };
+    const existing = createWatermarkMeta({
+        decisionPath: {
+            decision: 'accept',
+            alphaTrial: {
+                migrationStage: 'phase1-adapter',
+                scores: {
+                    processedSpatial: 0.08,
+                    processedGradient: 0.03,
+                    suppressionGain: 0.6
+                },
+                damage: legacyDamage,
+                residual: legacyResidual
+            },
+            repairTrial: {
+                applied: true,
+                repairType: 'edge-cleanup'
+            }
+        }
+    });
+    const artifacts = {
+        newlyClippedRatio: 0.008,
+        visualArtifactCost: 0.04
+    };
+
+    const attached = attachTopNSelectionMeta(existing, {
+        qualitySignals: {
+            final: {
+                spatialScore: 0.08,
+                gradientScore: 0.03
+            },
+            artifacts,
+            texture: {
+                hardReject: false,
+                texturePenalty: 0.01
+            },
+            nearBlackIncrease: 0.005
+        }
+    });
+
+    assert.equal(attached.decisionPath.alphaTrial.artifacts, artifacts);
+    assert.equal(
+        attached.decisionPath.alphaTrial.damage.newlyClippedRatio,
+        artifacts.newlyClippedRatio
+    );
+    assert.equal(attached.decisionPath.alphaTrial.residual.spatial, 0.08);
+    assert.equal(attached.decisionPath.alphaTrial.residual.gradient, 0.03);
+});

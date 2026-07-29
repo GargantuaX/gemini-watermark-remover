@@ -791,8 +791,7 @@ function getRenderableImageSize(imageElement) {
 }
 
 function isPreviewImageRenderable(imageElement) {
-  return Boolean(imageElement?.complete)
-    && (Number(imageElement?.naturalWidth) || 0) > 0
+  return (Number(imageElement?.naturalWidth) || 0) > 0
     && (Number(imageElement?.naturalHeight) || 0) > 0;
 }
 
@@ -2202,12 +2201,7 @@ export function createPageImageReplacementController({
     if (tryApplySessionProcessedResult(imageElement)) {
       return;
     }
-    const currentSourceUrl = String(resolveCandidateImageUrl(imageElement) || '').trim();
-    if (
-      currentSourceUrl
-      && isBlobPageImageSource(currentSourceUrl)
-      && !isPreviewImageRenderable(imageElement)
-    ) {
+    if (!isPreviewImageRenderable(imageElement)) {
       deferUntilRenderable(imageElement);
       return;
     }

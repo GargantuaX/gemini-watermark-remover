@@ -45,7 +45,7 @@ function createPipelineInput({ hypotheses, failures = new Set(), options = {} })
             cleanupConfig: {},
             createAcceptedPipelineDependencies: () => ({}),
             selectCandidate: () => ({ selectedTrial: null }),
-            collectCandidates: () => ({ hypotheses }),
+            collectCandidates: () => ({ hypotheses, presenceConfirmed: true }),
             runCandidate: ({ hypothesis }) => {
                 executed.push(hypothesis.id);
                 if (failures.has(hypothesis.id)) {
@@ -70,6 +70,105 @@ function createPipelineInput({ hypotheses, failures = new Set(), options = {} })
         }
     };
 }
+
+test('runImageWatermarkPipeline should not reuse convergence from a superseded accepted stage', () => {
+    const convergence = {
+        accepted: true,
+        textureHardRejectResolved: true
+    };
+    const hypotheses = [
+        createHypothesis('stale-convergence', {
+            qualityStatus: 'clean',
+            evidenceLoss: 0.05,
+            residualLoss: 0.05,
+            damageLoss: 0.05
+        })
+    ];
+    const capturedFinalCandidates = [];
+    const { request } = createPipelineInput({ hypotheses });
+    request.runCandidate = ({ hypothesis }) => ({
+        hypothesis,
+        result: {
+            imageData: createImageData(),
+            meta: {
+                applied: true,
+                source: 'source:stale-convergence',
+                config: hypothesis.config,
+                position: hypothesis.position,
+                alphaAdjustmentStages: [
+                    {
+                        stage: 'evidence-gated-local-alpha-search',
+                        darkBackgroundSupportConvergence: convergence
+                    },
+                    {
+                        stage: 'later-pixel-repair'
+                    }
+                ]
+            }
+        },
+        pipelineState: {
+            position: hypothesis.position,
+            alphaMap: new Float32Array(48 * 48).fill(0.5),
+            alphaGain: 1
+        }
+    });
+    request.measureCandidate = ({ hypothesis, finalCandidate }) => {
+        capturedFinalCandidates.push(finalCandidate);
+        return hypothesis.signals;
+    };
+
+    runImageWatermarkPipeline(request);
+
+    assert.equal(
+        capturedFinalCandidates[0].darkBackgroundSupportConvergence,
+        null
+    );
+});
+
+test('runImageWatermarkPipeline should scope accepted-pipeline dependencies to each hypothesis', () => {
+    const hypotheses = [
+        createHypothesis('first', {
+            qualityStatus: 'clean',
+            evidenceLoss: 0.05,
+            residualLoss: 0.05,
+            damageLoss: 0.05
+        }),
+        createHypothesis('second', {
+            qualityStatus: 'visible-residual',
+            evidenceLoss: 0.1,
+            residualLoss: 0.4,
+            damageLoss: 0.1
+        })
+    ];
+    const scopedHypothesisIds = [];
+    const { request } = createPipelineInput({ hypotheses });
+    request.createAcceptedPipelineDependencies = (hypothesis) => {
+        scopedHypothesisIds.push(hypothesis?.id ?? null);
+        return {};
+    };
+    request.runCandidate = ({
+        hypothesis,
+        createAcceptedPipelineDependencies
+    }) => {
+        createAcceptedPipelineDependencies();
+        return {
+            hypothesis,
+            result: {
+                imageData: createImageData(),
+                meta: {
+                    applied: true,
+                    source: `source:${hypothesis.id}`,
+                    config: hypothesis.config,
+                    position: hypothesis.position
+                }
+            }
+        };
+    };
+
+    runImageWatermarkPipeline(request);
+
+    assert.deepEqual(scopedHypothesisIds, ['first', 'second']);
+});
 
 test('runImageWatermarkPipeline should notify diagnostics once for each completed candidate', () => {
     const hypotheses = [
@@ -263,4 +362,89 @@ test('runImageWatermarkPipeline should reject only when every candidate executio
     assert.equal(result.meta.decisionTier, 'runtime-failure');
     assert.equal(result.debugTimings.generatedCandidateCount, 2);
     assert.equal(result.debugTimings.failedCandidateCount, 2);
+});
+
+test('runImageWatermarkPipeline should reject unconfirmed hypotheses before changing pixels', () => {
+    const hypotheses = [
+        createHypothesis('diagnostic-only', {
+            qualityStatus: 'visible-residual',
+            evidenceLoss: 1,
+            residualLoss: 1,
+            damageLoss: 1
+        })
+    ];
+    const { request, executed } = createPipelineInput({ hypotheses });
+    const original = new Uint8ClampedArray(request.imageData.data);
+    request.collectCandidates = () => ({
+        hypotheses,
+        presenceConfirmed: false,
+        fixedSelection: {
+            selectedTrial: null,
+            adaptiveConfidence: null,
+            standardSpatialScore: 0,
+            standardGradientScore: 0,
+            decisionTier: 'insufficient'
+        },
+        automaticSelection: {
+            selectedTrial: null,
+            adaptiveConfidence: null,
+            standardSpatialScore: 0,
+            standardGradientScore: 0,
+            decisionTier: 'insufficient'
+        }
+    });
+
+    const result = runImageWatermarkPipeline(request);
+
+    assert.deepEqual(executed, []);
+    assert.equal(result.meta.applied, false);
+    assert.equal(result.meta.skipReason, 'no-watermark-detected');
+    assert.equal(result.meta.decisionPath?.decision, 'reject');
+    assert.deepEqual(result.imageData.data, original);
+});
+
+test('runImageWatermarkPipeline should execute an explicit unconfirmed best-effort fallback', () => {
+    const hypotheses = [
+        createHypothesis('validated-best-effort', {
+            qualityStatus: 'visible-residual',
+            evidenceLoss: 0.3,
+            residualLoss: 0.5,
+            damageLoss: 0.1,
+            damageWarning: false
+        })
+    ];
+    const { request, executed } = createPipelineInput({ hypotheses });
+    request.collectCandidates = () => ({
+        hypotheses,
+        presenceConfirmed: false,
+        bestEffortFallback: true,
+        bestEffortReason: 'presence-witness-unconfirmed'
+    });
+
+    const result = runImageWatermarkPipeline(request);
+
+    assert.deepEqual(executed, ['validated-best-effort']);
+    assert.equal(result.meta.applied, true);
+    assert.equal(result.meta.bestEffort, true);
+    assert.equal(result.meta.retryRecommended, false);
+    assert.equal(result.meta.presenceConfirmed, false);
+    assert.equal(result.meta.bestEffortReason, 'presence-witness-unconfirmed');
+});
+
+test('runImageWatermarkPipeline should preserve collectors that predate explicit presence metadata', () => {
+    const hypotheses = [
+        createHypothesis('legacy-collector', {
+            qualityStatus: 'clean',
+            evidenceLoss: 0.1,
+            residualLoss: 0.1,
+            damageLoss: 0.1
+        })
+    ];
+    const { request, executed } = createPipelineInput({ hypotheses });
+    request.collectCandidates = () => ({ hypotheses });
+
+    const result = runImageWatermarkPipeline(request);
+
+    assert.deepEqual(executed, ['legacy-collector']);
+    assert.equal(result.meta.applied, true);
 });

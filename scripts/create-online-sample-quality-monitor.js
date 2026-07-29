@@ -49,7 +49,9 @@ function parseArgs(argv) {
         failOnStrictDefectIncrease: false,
         maxStrictDefectIncrease: 0,
         failOnPerfectLoss: false,
-        maxPerfectLoss: 0
+        maxPerfectLoss: 0,
+        failOnAppliedLoss: false,
+        maxAppliedLoss: 0
     };
 
     const args = [...argv];
@@ -69,6 +71,10 @@ function parseArgs(argv) {
             parsed.failOnPerfectLoss = true;
         } else if (arg === '--max-perfect-loss') {
             parsed.maxPerfectLoss = parseInteger(args.shift(), parsed.maxPerfectLoss);
+        } else if (arg === '--fail-on-applied-loss') {
+            parsed.failOnAppliedLoss = true;
+        } else if (arg === '--max-applied-loss') {
+            parsed.maxAppliedLoss = parseInteger(args.shift(), parsed.maxAppliedLoss);
         }
     }
     return parsed;
@@ -105,24 +111,53 @@ function anchorKey(anchor) {
     return `${anchor.logoSize}/${anchor.marginRight}/${anchor.marginBottom}${suffix}`;
 }
 
-function extractDamage(record) {
+export function extractDamage(record) {
     const alphaDamage = record.decisionPath?.alphaTrial?.damage ?? null;
     const evaluationDamage = record.decisionPath?.evaluation?.damage ?? null;
     const repairDamage = record.decisionPath?.repairTrial?.damage ?? null;
     return alphaDamage ?? repairDamage ?? evaluationDamage ?? null;
 }
 
-function summarizeRecord(record) {
+function extractFinalAlphaArtifacts(record) {
+    return record.decisionPath?.alphaTrial?.artifacts ??
+        record.qualitySignals?.artifacts ??
+        null;
+}
+
+function extractFinalAlphaResidual(record, artifacts) {
+    if (!artifacts) return null;
+    return record.decisionPath?.alphaTrial?.residual ?? null;
+}
+
+export function summarizeRecord(record) {
     const residualVisibility = record.residualVisibility ?? {};
     const damage = extractDamage(record);
-    const residual = Math.abs(toFiniteNumber(record.residualScore) ?? 0);
-    const gradient = Math.max(0, toFiniteNumber(record.processedGradientScore) ?? 0);
+    const artifacts = extractFinalAlphaArtifacts(record);
+    const finalResidual = extractFinalAlphaResidual(record, artifacts);
+    const residual = Math.abs(
+        toFiniteNumber(finalResidual?.spatialResidual) ??
+        toFiniteNumber(finalResidual?.spatial) ??
+        toFiniteNumber(record.residualScore) ??
+        0
+    );
+    const gradient = Math.max(
+        0,
+        toFiniteNumber(finalResidual?.gradientResidual) ??
+        toFiniteNumber(finalResidual?.gradient) ??
+        toFiniteNumber(record.processedGradientScore) ??
+        0
+    );
     const positiveHaloLum = Math.max(0, toFiniteNumber(residualVisibility.positiveHaloLum) ?? 0);
     const suppressionGain = toFiniteNumber(record.suppressionGain);
     const damagePenalty = Math.max(0, toFiniteNumber(damage?.penalty) ?? 0);
     const texturePenalty = Math.max(0, toFiniteNumber(damage?.texturePenalty) ?? 0);
     const nearBlackIncrease = Math.max(0, toFiniteNumber(damage?.nearBlackIncrease) ?? 0);
-    const newlyClippedRatio = Math.max(0, toFiniteNumber(damage?.newlyClippedRatio) ?? 0);
+    const newlyClippedRatio = Math.max(
+        0,
+        toFiniteNumber(artifacts?.newlyClippedRatio) ??
+        toFiniteNumber(damage?.newlyClippedRatio) ??
+        0
+    );
     const riskFlags = Array.isArray(record.decisionPath?.riskFlags)
         ? record.decisionPath.riskFlags
         : [];
@@ -147,7 +182,7 @@ function summarizeRecord(record) {
         texturePenalty,
         nearBlackIncrease,
         newlyClippedRatio,
-        damageMetricAvailable: Boolean(damage),
+        damageMetricAvailable: Boolean(damage || artifacts),
         riskFlags
     };
 }
@@ -189,7 +224,7 @@ function buildSevereFlags(metrics) {
     return flags;
 }
 
-function classifyRecord(record) {
+export function classifyRecord(record) {
     const metrics = summarizeRecord(record);
     const strictFlags = buildFlags(metrics, STRICT_THRESHOLDS);
     const cleanFlags = buildFlags(metrics, CLEAN_THRESHOLDS);
@@ -335,8 +370,12 @@ function compareReports(currentRecords, baselineRecords) {
     const currentByFile = new Map(currentRecords.map((record) => [record.fileName, record]));
     const baselineByFile = new Map(baselineRecords.map((record) => [record.fileName, record]));
     const sharedFiles = [...currentByFile.keys()].filter((fileName) => baselineByFile.has(fileName));
+    const currentOnlyFiles = [...currentByFile.keys()].filter((fileName) => !baselineByFile.has(fileName));
+    const baselineOnlyFiles = [...baselineByFile.keys()].filter((fileName) => !currentByFile.has(fileName));
     const changes = {
         sharedTotal: sharedFiles.length,
+        appliedGained: [],
+        appliedLost: [],
         perfectGained: [],
         perfectLost: [],
         strictDefectIntroduced: [],
@@ -349,9 +388,22 @@ function compareReports(currentRecords, baselineRecords) {
         passLost: []
     };
 
+    for (const fileName of baselineOnlyFiles) {
+        if (baselineByFile.get(fileName).metrics.applied) {
+            changes.appliedLost.push(fileName);
+        }
+    }
+
     for (const fileName of sharedFiles) {
         const current = currentByFile.get(fileName);
         const baseline = baselineByFile.get(fileName);
+        compareBooleanChange(
+            changes.appliedGained,
+            changes.appliedLost,
+            fileName,
+            baseline.metrics.applied,
+            current.metrics.applied
+        );
         compareBooleanChange(changes.perfectGained, changes.perfectLost, fileName, baseline.perfect, current.perfect);
         compareBooleanChange(
             changes.strictDefectIntroduced,
@@ -379,7 +431,14 @@ function compareReports(currentRecords, baselineRecords) {
 
     return {
         sharedTotal: changes.sharedTotal,
+        alignment: {
+            currentOnlyCount: currentOnlyFiles.length,
+            baselineOnlyCount: baselineOnlyFiles.length,
+            currentOnlyExamples: currentOnlyFiles.slice(0, 20),
+            baselineOnlyExamples: baselineOnlyFiles.slice(0, 20)
+        },
         deltas: {
+            applied: changes.appliedGained.length - changes.appliedLost.length,
             perfect: changes.perfectGained.length - changes.perfectLost.length,
             strictDefect: changes.strictDefectIntroduced.length - changes.strictDefectResolved.length,
             severeDefect: changes.severeDefectIntroduced.length - changes.severeDefectResolved.length,
@@ -458,6 +517,7 @@ function renderMarkdown({ reportPath, baselinePath, summary, comparison, records
         lines.push('## Baseline Diff');
         lines.push('');
         lines.push(`- Shared total: ${comparison.sharedTotal}`);
+        lines.push(`- Applied coverage delta: ${comparison.deltas.applied}`);
         lines.push(`- Perfect delta: ${comparison.deltas.perfect}`);
         lines.push(`- Strict defect delta: ${comparison.deltas.strictDefect}`);
         lines.push(`- Severe defect delta: ${comparison.deltas.severeDefect}`);
@@ -513,7 +573,10 @@ function renderGroupLine(group) {
 
 async function loadClassified(reportPath) {
     const report = JSON.parse(stripBom(await readFile(reportPath, 'utf8')));
-    const records = (report.results ?? []).map(classifyRecord);
+    if (!Array.isArray(report.results)) {
+        throw new Error(`${reportPath} must contain a results array`);
+    }
+    const records = report.results.map(classifyRecord);
     return {
         report,
         records,
@@ -544,6 +607,15 @@ async function main() {
         -comparison.deltas.perfect > args.maxPerfectLoss
     ) {
         failures.push(`perfect loss ${-comparison.deltas.perfect} > ${args.maxPerfectLoss}`);
+    }
+    if (
+        args.failOnAppliedLoss &&
+        comparison &&
+        comparison.counts.appliedLost > args.maxAppliedLoss
+    ) {
+        failures.push(
+            `applied loss ${comparison.counts.appliedLost} > ${args.maxAppliedLoss}`
+        );
     }
 
     const output = {

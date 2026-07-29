@@ -83,6 +83,441 @@ test('processWatermarkImageData should run in Node without asset imports and rec
     assert.equal(result.meta.decisionPath?.evaluationDecision, 'accepted');
 });
 
+test('processWatermarkImageData should leave a uniform zero-evidence image unchanged', () => {
+    const width = 256;
+    const height = 256;
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let index = 0; index < width * height; index++) {
+        const offset = index * 4;
+        data[offset] = 120;
+        data[offset + 1] = 120;
+        data[offset + 2] = 120;
+        data[offset + 3] = 255;
+    }
+    const imageData = { width, height, data };
+    const original = new Uint8ClampedArray(data);
+
+    const result = processWatermarkImageData(imageData, {
+        alpha48,
+        alpha96,
+        getAlphaMap: (size) => (
+            size === 48
+                ? alpha48
+                : size === 96
+                    ? alpha96
+                    : interpolateAlphaMap(alpha96, 96, size)
+        )
+    });
+
+    assert.equal(result.meta.applied, false);
+    assert.equal(result.meta.skipReason, 'no-watermark-detected');
+    assert.equal(result.meta.decisionPath?.decision, 'reject');
+    assert.deepEqual(result.imageData.data, original);
+});
+
+test('processWatermarkImageData should calibrate a strong dark source geometry before generic repair', async (t) => {
+    const samplePath = externalSamplePath(
+        '2026-07-19',
+        'pilio_2078803162491260928_2078803153620307968_source.png'
+    );
+    try {
+        await access(samplePath);
+    } catch {
+        t.skip('external strong dark geometry sample is not available');
+        return;
+    }
+
+    const alpha48 = calculateAlphaMap(
+        await decodeImageDataInNode(path.resolve('src/assets/bg_48.png'))
+    );
+    const alpha96 = calculateAlphaMap(
+        await decodeImageDataInNode(path.resolve('src/assets/bg_96.png'))
+    );
+    const originalImageData = await decodeImageDataInNode(samplePath);
+    const result = processWatermarkImageData(originalImageData, {
+        alpha48,
+        alpha96,
+        adaptiveMode: 'never',
+        debugTimings: true,
+        getAlphaMap: (configOrSize) => {
+            const size = typeof configOrSize === 'object'
+                ? configOrSize.logoSize
+                : configOrSize;
+            return size === 48
+                ? alpha48
+                : interpolateAlphaMap(alpha96, 96, size);
+        }
+    });
+
+    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
+    assert.deepEqual(result.meta.position, {
+        x: 624,
+        y: 1232,
+        width: 48,
+        height: 48
+    });
+    assert.deepEqual(result.meta.config, {
+        logoSize: 48,
+        marginRight: 96,
+        marginBottom: 96
+    });
+    assert.ok(
+        result.meta.alphaGain >= 0.6 && result.meta.alphaGain <= 0.61,
+        `alphaGain=${result.meta.alphaGain}, source=${result.meta.source}`
+    );
+    assert.ok(
+        String(result.meta.source).includes('+fine-alpha'),
+        `source=${result.meta.source}`
+    );
+    assert.ok(
+        Math.abs(result.meta.detection.processedSpatialScore) <= 0.18,
+        `spatial=${result.meta.detection.processedSpatialScore}`
+    );
+    assert.ok(
+        result.meta.detection.processedGradientScore <= 0.18,
+        `gradient=${result.meta.detection.processedGradientScore}`
+    );
+    assert.deepEqual(result.meta.qualitySignals?.localAlphaSearch, {
+        trigger: 'dark-background-support',
+        acceptedTrialDamageSafe: false,
+        finalDamageSafe: false,
+        riskResolution: 'dark-background-support-converged'
+    });
+    assert.equal(
+        result.meta.qualitySignals?.darkBackgroundSupportConvergence?.accepted,
+        true
+    );
+    assert.equal(result.meta.qualitySignals?.rawDamageWarning, true);
+    assert.equal(result.meta.qualitySignals?.damageWarning, false);
+    assert.equal(
+        result.meta.qualitySignals?.damageRiskResolution,
+        'dark-background-support-converged'
+    );
+    assert.equal(result.meta.qualityStatus, 'clean');
+    assert.ok(
+        result.debugTimings.darkSupportSearchTrialCount <= 31,
+        `darkSupportSearchTrialCount=${result.debugTimings.darkSupportSearchTrialCount}`
+    );
+    assert.equal(
+        result.debugTimings.localAlphaSearchTrialFullImageCloneCount,
+        0
+    );
+
+    let wrongAnchorChangedPixels = 0;
+    for (let y = 1296; y < 1344; y++) {
+        for (let x = 688; x < 736; x++) {
+            const offset = (y * originalImageData.width + x) * 4;
+            if (
+                result.imageData.data[offset] !== originalImageData.data[offset] ||
+                result.imageData.data[offset + 1] !== originalImageData.data[offset + 1] ||
+                result.imageData.data[offset + 2] !== originalImageData.data[offset + 2]
+            ) {
+                wrongAnchorChangedPixels++;
+            }
+        }
+    }
+    assert.equal(wrongAnchorChangedPixels, 0);
+});
+
+test('processWatermarkImageData should reject a dark-support alpha trial without neighborhood convergence', async (t) => {
+    const samplePath = externalSamplePath(
+        '2026-07-26',
+        'pilio_2081116477062123520_2081116471617916928_source.png'
+    );
+    try {
+        await access(samplePath);
+    } catch {
+        t.skip('external non-convergent dark-support sample is not available');
+        return;
+    }
+
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const alpha96NewMargin = getEmbeddedAlphaMap('96-20260520');
+    const alpha36V2 = getEmbeddedAlphaMap('36-v2');
+    const cache = new Map([
+        [48, alpha48],
+        [96, alpha96],
+        ['96-20260520', alpha96NewMargin],
+        ['36-v2', alpha36V2]
+    ]);
+    const originalImageData = await decodeImageDataInNode(samplePath);
+    const result = processWatermarkImageData(originalImageData, {
+        alpha48,
+        alpha96,
+        alpha96Variants: {
+            '20260520': alpha96NewMargin
+        },
+        getAlphaMap: (size) => {
+            if (cache.has(size)) return cache.get(size);
+            if (typeof size === 'string') return null;
+            const alphaMap = interpolateAlphaMap(alpha96, 96, size);
+            cache.set(size, alphaMap);
+            return alphaMap;
+        }
+    });
+
+    const nonConvergentAcceptedStage =
+        result.meta.alphaAdjustmentStages?.find((stage) => (
+            stage.stage === 'evidence-gated-local-alpha-search' &&
+            stage.localSearchTrigger === 'dark-background-support' &&
+            stage.darkBackgroundSupportConvergence?.accepted !== true
+        ));
+    assert.equal(
+        nonConvergentAcceptedStage,
+        undefined,
+        `a rejected convergence proof must not reach the accepted stage: ${JSON.stringify(
+            nonConvergentAcceptedStage
+        )}`
+    );
+});
+
+test('processWatermarkImageData should clear a strong projected small watermark on a dark flat background', async (t) => {
+    const samplePath = externalSamplePath(
+        '2026-07-26',
+        'pilio_2081050736048738304_2081050725697196032_source.jpg'
+    );
+    try {
+        await access(samplePath);
+    } catch {
+        t.skip('external projected small dark-background sample is not available');
+        return;
+    }
+
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const alpha96NewMargin = getEmbeddedAlphaMap('96-20260520');
+    const alpha36V2 = getEmbeddedAlphaMap('36-v2');
+    const cache = new Map([
+        [48, alpha48],
+        [96, alpha96],
+        ['96-20260520', alpha96NewMargin],
+        ['36-v2', alpha36V2]
+    ]);
+    const originalImageData = await decodeImageDataInNode(samplePath);
+    const result = processWatermarkImageData(originalImageData, {
+        alpha48,
+        alpha96,
+        alpha96Variants: {
+            '20260520': alpha96NewMargin
+        },
+        getAlphaMap: (size) => {
+            if (cache.has(size)) return cache.get(size);
+            if (typeof size === 'string') return null;
+            const alphaMap = interpolateAlphaMap(alpha96, 96, size);
+            cache.set(size, alphaMap);
+            return alphaMap;
+        }
+    });
+
+    assert.deepEqual(result.meta.position, {
+        x: 464,
+        y: 917,
+        width: 36,
+        height: 36
+    });
+    assert.ok(
+        Math.abs(result.meta.detection.processedSpatialScore) <= 0.18,
+        `spatial=${result.meta.detection.processedSpatialScore}, source=${result.meta.source}`
+    );
+    assert.ok(
+        result.meta.detection.processedGradientScore <= 0.22,
+        `gradient=${result.meta.detection.processedGradientScore}, source=${result.meta.source}`
+    );
+    assert.equal(result.meta.qualitySignals?.texture?.hardReject, true);
+    assert.equal(result.meta.qualitySignals?.rawDamageWarning, true);
+    assert.deepEqual(
+        {
+            accepted:
+                result.meta.qualitySignals?.darkBackgroundSupportConvergence
+                    ?.accepted,
+            mode:
+                result.meta.qualitySignals?.darkBackgroundSupportConvergence
+                    ?.mode,
+            textureHardRejectResolved:
+                result.meta.qualitySignals?.darkBackgroundSupportConvergence
+                    ?.textureHardRejectResolved
+        },
+        {
+            accepted: true,
+            mode: 'projected-small-dark-support',
+            textureHardRejectResolved: true
+        }
+    );
+    assert.equal(result.meta.qualitySignals?.damageWarning, false);
+    assert.equal(
+        result.meta.qualitySignals?.damageRiskResolution,
+        'dark-background-support-converged'
+    );
+    assert.equal(result.meta.qualityStatus, 'clean');
+});
+
+test('processWatermarkImageData should not apply projected small dark support repair to a textured neighbor', async (t) => {
+    const samplePath = externalSamplePath(
+        '2026-07-25',
+        'pilio_2081045289732411392_2081045278630088704_source.jpg'
+    );
+    try {
+        await access(samplePath);
+    } catch {
+        t.skip('external projected small textured-background sample is not available');
+        return;
+    }
+
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const alpha96NewMargin = getEmbeddedAlphaMap('96-20260520');
+    const alpha36V2 = getEmbeddedAlphaMap('36-v2');
+    const cache = new Map([
+        [48, alpha48],
+        [96, alpha96],
+        ['96-20260520', alpha96NewMargin],
+        ['36-v2', alpha36V2]
+    ]);
+    const originalImageData = await decodeImageDataInNode(samplePath);
+    const result = processWatermarkImageData(originalImageData, {
+        alpha48,
+        alpha96,
+        alpha96Variants: {
+            '20260520': alpha96NewMargin
+        },
+        getAlphaMap: (size) => {
+            if (cache.has(size)) return cache.get(size);
+            if (typeof size === 'string') return null;
+            const alphaMap = interpolateAlphaMap(alpha96, 96, size);
+            cache.set(size, alphaMap);
+            return alphaMap;
+        }
+    });
+
+    assert.deepEqual(result.meta.position, {
+        x: 917,
+        y: 464,
+        width: 36,
+        height: 36
+    });
+    assert.notEqual(
+        result.meta.qualitySignals?.darkBackgroundSupportConvergence?.mode,
+        'projected-small-dark-support'
+    );
+    assert.equal(
+        result.meta.alphaAdjustmentStages?.some((stage) => (
+            stage.darkBackgroundSupportConvergence?.mode ===
+                'projected-small-dark-support'
+        )),
+        false
+    );
+});
+
+test('processWatermarkImageData should not mistake periodic textures for catalog watermarks', () => {
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    for (const size of [256, 512]) {
+        const width = size;
+        const height = size;
+        const data = new Uint8ClampedArray(width * height * 4);
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const value = Math.max(
+                    0,
+                    Math.min(255, 128 + Math.round(55 * Math.sin(x / 5) + 35 * Math.cos(y / 7)))
+                );
+                const offset = (y * width + x) * 4;
+                data[offset] = value;
+                data[offset + 1] = value;
+                data[offset + 2] = value;
+                data[offset + 3] = 255;
+            }
+        }
+        const imageData = { width, height, data };
+        const original = new Uint8ClampedArray(data);
+
+        const result = processWatermarkImageData(imageData, {
+            alpha48,
+            alpha96,
+            getAlphaMap: (candidateSize) => (
+                candidateSize === 48
+                    ? alpha48
+                    : candidateSize === 96
+                        ? alpha96
+                        : interpolateAlphaMap(alpha96, 96, candidateSize)
+            )
+        });
+
+        assert.equal(result.meta.applied, false, `size=${size}`);
+        assert.equal(result.meta.skipReason, 'no-watermark-detected', `size=${size}`);
+        assert.deepEqual(result.imageData.data, original, `size=${size}`);
+    }
+});
+
+test('processWatermarkImageData should reject repeated watermark-shaped texture while keeping one localized mark', () => {
+    const width = 256;
+    const height = 256;
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const createWatermarkShapedTexture = (positions) => {
+        const data = new Uint8ClampedArray(width * height * 4);
+        for (let index = 0; index < width * height; index++) {
+            const offset = index * 4;
+            data[offset] = 100;
+            data[offset + 1] = 100;
+            data[offset + 2] = 100;
+            data[offset + 3] = 255;
+        }
+        for (const [patchX, patchY] of positions) {
+            for (let y = 0; y < 48; y++) {
+                for (let x = 0; x < 48; x++) {
+                    const value = Math.round(100 + alpha48[y * 48 + x] * 120);
+                    const offset = ((patchY + y) * width + patchX + x) * 4;
+                    data[offset] = value;
+                    data[offset + 1] = value;
+                    data[offset + 2] = value;
+                }
+            }
+        }
+        return { width, height, data };
+    };
+    const process = (imageData) => processWatermarkImageData(imageData, {
+        alpha48,
+        alpha96,
+        adaptiveMode: 'never',
+        getAlphaMap: (candidateSize) => (
+            candidateSize === 48
+                ? alpha48
+                : candidateSize === 96
+                    ? alpha96
+                    : interpolateAlphaMap(alpha96, 96, candidateSize)
+        )
+    });
+
+    const localized = createWatermarkShapedTexture([[176, 176]]);
+    const localizedResult = process(localized);
+    assert.equal(localizedResult.meta.applied, true);
+
+    const repeated = createWatermarkShapedTexture(
+        [80, 128, 176].flatMap((y) => (
+            [80, 128, 176].map((x) => [x, y])
+        ))
+    );
+    const original = new Uint8ClampedArray(repeated.data);
+    const repeatedResult = process(repeated);
+
+    assert.equal(
+        repeatedResult.meta.applied,
+        false,
+        JSON.stringify({
+            source: repeatedResult.meta.source,
+            position: repeatedResult.meta.position,
+            detection: repeatedResult.meta.detection,
+            riskFlags: repeatedResult.meta.riskFlags
+        })
+    );
+    assert.equal(repeatedResult.meta.skipReason, 'no-watermark-detected');
+    assert.deepEqual(repeatedResult.imageData.data, original);
+});
+
 test('processWatermarkImageData should not attempt extra passes when the first pass already clears a single watermark layer', () => {
     const alpha96 = createSyntheticAlphaMap(96);
     const alpha48 = interpolateAlphaMap(alpha96, 96, 48);
@@ -106,6 +541,12 @@ test('processWatermarkImageData should return best effort when getAlphaMap is om
     const alpha96 = createSyntheticAlphaMap(96);
     const alpha48 = interpolateAlphaMap(alpha96, 96, 48);
     const imageData = createPatternImageData(1008, 1071);
+    applySyntheticWatermark(
+        imageData,
+        alpha48,
+        { x: 1008 - 32 - 48, y: 1071 - 32 - 48, width: 48, height: 48 },
+        1
+    );
     const original = new Uint8ClampedArray(imageData.data);
 
     const result = processWatermarkImageData(imageData, {
@@ -175,38 +616,45 @@ test('processWatermarkImageData should cleanup residual edges on allenk V2 36px 
     const alpha36V2 = getEmbeddedAlphaMap('36-v2');
     const imageData = await decodeImageDataInNode(path.resolve('tests/fixtures/gemini-v2-36-small-watermark.png'));
 
-    const result = processWatermarkImageData(imageData, {
-        alpha48,
-        alpha96,
-        getAlphaMap: (size) => size === '36-v2'
-            ? alpha36V2
-            : (size === 48 ? alpha48 : (size === 96 ? alpha96 : interpolateAlphaMap(alpha96, 96, size)))
-    });
+    for (const adaptiveMode of ['auto', 'never']) {
+        const result = processWatermarkImageData(imageData, {
+            alpha48,
+            alpha96,
+            adaptiveMode,
+            getAlphaMap: (size) => size === '36-v2'
+                ? alpha36V2
+                : (size === 48 ? alpha48 : (size === 96 ? alpha96 : interpolateAlphaMap(alpha96, 96, size)))
+        });
 
-    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
-    assert.deepEqual(result.meta.config, {
-        logoSize: 36,
-        marginRight: 71,
-        marginBottom: 71,
-        alphaVariant: 'v2'
-    });
-    assert.ok(
-        result.meta.source.includes('v2-small-edge-cleanup'),
-        `expected v2 cleanup source, got ${result.meta.source}`
-    );
-    assert.ok(
-        Math.abs(result.meta.detection.processedSpatialScore) <= 0.08,
-        `expected v2 cleanup to preserve low spatial residual, got ${result.meta.detection.processedSpatialScore}`
-    );
-    assert.ok(
-        result.meta.detection.processedGradientScore < 0.08,
-        `expected v2 cleanup to reduce gradient residual, got ${result.meta.detection.processedGradientScore}`
-    );
-    assert.equal(result.meta.detection.residualVisibility?.visiblePositiveHalo, true);
-    assert.ok(
-        result.meta.detection.residualVisibility.positiveHaloLum > 6,
-        `expected final meta to report visible v2 positive halo, got ${JSON.stringify(result.meta.detection.residualVisibility)}`
-    );
+        assert.equal(
+            result.meta.applied,
+            true,
+            `adaptiveMode=${adaptiveMode} skipReason=${result.meta.skipReason}`
+        );
+        assert.deepEqual(result.meta.config, {
+            logoSize: 36,
+            marginRight: 71,
+            marginBottom: 71,
+            alphaVariant: 'v2'
+        });
+        assert.ok(
+            result.meta.source.includes('v2-small-edge-cleanup'),
+            `adaptiveMode=${adaptiveMode} expected v2 cleanup source, got ${result.meta.source}`
+        );
+        assert.ok(
+            Math.abs(result.meta.detection.processedSpatialScore) <= 0.08,
+            `adaptiveMode=${adaptiveMode} expected v2 cleanup to preserve low spatial residual, got ${result.meta.detection.processedSpatialScore}`
+        );
+        assert.ok(
+            result.meta.detection.processedGradientScore < 0.08,
+            `adaptiveMode=${adaptiveMode} expected v2 cleanup to reduce gradient residual, got ${result.meta.detection.processedGradientScore}`
+        );
+        assert.equal(result.meta.detection.residualVisibility?.visiblePositiveHalo, true);
+        assert.ok(
+            result.meta.detection.residualVisibility.positiveHaloLum > 6,
+            `adaptiveMode=${adaptiveMode} expected final meta to report visible v2 positive halo, got ${JSON.stringify(result.meta.detection.residualVisibility)}`
+        );
+    }
 });
 
 test('Issue 99 small preview-anchor residual should require targeted cleanup', async () => {
@@ -464,6 +912,100 @@ test('processWatermarkImageData should process dark-polarity 96px 192px-margin w
     assert.ok(
         result.meta.detection.processedGradientScore < 0.08,
         `processedGradient=${result.meta.detection.processedGradientScore}`
+    );
+});
+
+test('processWatermarkImageData should process ultra-weak dark-polarity 48px 96px-margin watermarks', () => {
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const width = 1100;
+    const height = 960;
+    const truthData = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const offset = (y * width + x) * 4;
+            const value = 220 + Math.round(
+                8 * Math.sin(x / 120) +
+                6 * Math.cos(y / 90)
+            );
+            truthData[offset] = value;
+            truthData[offset + 1] = value + 2;
+            truthData[offset + 2] = value + 5;
+            truthData[offset + 3] = 255;
+        }
+    }
+    const truthImageData = { width, height, data: truthData };
+    const imageData = {
+        width: truthImageData.width,
+        height: truthImageData.height,
+        data: new Uint8ClampedArray(truthImageData.data)
+    };
+    const position = {
+        x: imageData.width - 96 - 48,
+        y: imageData.height - 96 - 48,
+        width: 48,
+        height: 48
+    };
+    const watermarkAlphaGain = 0.1;
+
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const alpha = alpha48[row * position.width + col] * watermarkAlphaGain;
+            if (alpha <= 0.001) continue;
+            const offset = (
+                (position.y + row) * imageData.width +
+                position.x +
+                col
+            ) * 4;
+            for (let channel = 0; channel < 3; channel++) {
+                imageData.data[offset + channel] = Math.round(
+                    (1 - alpha) * imageData.data[offset + channel]
+                );
+            }
+        }
+    }
+
+    const result = processWatermarkImageData(imageData, {
+        alpha48,
+        alpha96,
+        getAlphaMap: (size) => {
+            if (size === 48) return alpha48;
+            if (size === 96) return alpha96;
+            return interpolateAlphaMap(alpha96, 96, size);
+        }
+    });
+
+    let sourceError = 0;
+    let outputError = 0;
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const offset = (
+                (position.y + row) * imageData.width +
+                position.x +
+                col
+            ) * 4;
+            for (let channel = 0; channel < 3; channel++) {
+                const truth = truthImageData.data[offset + channel];
+                sourceError += Math.abs(imageData.data[offset + channel] - truth);
+                outputError += Math.abs(result.imageData.data[offset + channel] - truth);
+            }
+        }
+    }
+
+    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
+    assert.ok(
+        result.meta.source.includes('dark-polarity'),
+        `source=${result.meta.source}`
+    );
+    assert.deepEqual(result.meta.config, {
+        logoSize: 48,
+        marginRight: 96,
+        marginBottom: 96
+    });
+    assert.ok(result.meta.alphaGain <= 0.2, `alphaGain=${result.meta.alphaGain}`);
+    assert.ok(
+        outputError <= sourceError * 0.25,
+        `sourceError=${sourceError} outputError=${outputError}`
     );
 });
 

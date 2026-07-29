@@ -266,3 +266,627 @@ test('collectInitialWatermarkCandidates should not introduce automatic geometry 
     assert.equal(result.hypotheses.some((item) => item.family === 'geometry'), false);
     assert.equal(result.hypotheses.some((item) => item.family === 'aggressive'), false);
 });
+
+test('collectInitialWatermarkCandidates should not promote diagnostic trials when no selector confirms a target', () => {
+    const rejected = {
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaMap: new Float32Array(48 * 48).fill(0.2),
+        alphaGain: 1,
+        accepted: false,
+        evaluation: { eligible: false },
+        originalEvidence: { tier: 'none' },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: {}
+    };
+
+    const result = collectInitialWatermarkCandidates(createBaseInput(() => ({
+        selectedTrial: null,
+        candidatePool: [rejected],
+        source: 'skipped',
+        decisionTier: 'insufficient'
+    })));
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.deepEqual(result.hypotheses, []);
+});
+
+test('collectInitialWatermarkCandidates should keep selector-confirmed best effort even when restoration is unsafe', () => {
+    const selected = {
+        source: 'standard+preview-anchor+aggressive-located',
+        config: { logoSize: 24, marginRight: 15, marginBottom: 15 },
+        position: { x: 61, y: 61, width: 24, height: 24 },
+        alphaMap: new Float32Array(24 * 24).fill(0.2),
+        alphaGain: 1,
+        accepted: false,
+        evaluation: { eligible: false },
+        originalSpatialScore: 0.34,
+        originalGradientScore: 0.22,
+        originalEvidence: { tier: 'strong' },
+        damage: { safe: false },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: { previewAnchor: true }
+    };
+
+    const result = collectInitialWatermarkCandidates(createBaseInput(() => ({
+        selectedTrial: selected,
+        candidatePool: [selected],
+        source: selected.source,
+        decisionTier: 'direct-match'
+    })));
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === selected));
+});
+
+test('collectInitialWatermarkCandidates should not trust a weak aggressive label after restoration rejection', () => {
+    const weakAggressive = {
+        source: 'standard+aggressive-located',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaMap: new Float32Array(48 * 48).fill(0.2),
+        alphaGain: 1,
+        accepted: false,
+        evaluation: { eligible: false },
+        originalSpatialScore: 0.25,
+        originalGradientScore: 0.03,
+        originalEvidence: { tier: 'medium' },
+        damage: { safe: false },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: {}
+    };
+
+    const result = collectInitialWatermarkCandidates(createBaseInput(() => ({
+        selectedTrial: weakAggressive,
+        candidatePool: [weakAggressive],
+        source: weakAggressive.source,
+        decisionTier: 'direct-match'
+    })));
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.deepEqual(result.hypotheses, []);
+});
+
+test('collectInitialWatermarkCandidates should retain a safe validated match as unconfirmed best effort', () => {
+    const weakValidated = {
+        source: 'standard+catalog+gain+validated',
+        config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaMap: new Float32Array(48 * 48).fill(0.2),
+        alphaGain: 0.25,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.35,
+        originalGradientScore: 0.08,
+        processedSpatialScore: 0.19,
+        processedGradientScore: 0.1,
+        residual: { cleared: false },
+        originalEvidence: { tier: 'medium' },
+        damage: { safe: true },
+        rankingKey: [1, 0, 0, 0, 0, 0],
+        provenance: { catalogVariant: true }
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: weakValidated,
+            candidatePool: [weakValidated],
+            source: weakValidated.source,
+            decisionTier: 'validated-match'
+        })),
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.equal(result.bestEffortFallback, true);
+    assert.equal(result.bestEffortReason, 'presence-witness-unconfirmed');
+
+    const fallback = result.hypotheses.find((hypothesis) => (
+        hypothesis.position.x === weakValidated.position.x &&
+        hypothesis.position.y === weakValidated.position.y &&
+        hypothesis.position.width === weakValidated.position.width
+    ));
+    assert.ok(fallback);
+    assert.ok(fallback.alphaGain <= weakValidated.alphaGain);
+});
+
+test('collectInitialWatermarkCandidates should drop a no-effect conservative best-effort trial', () => {
+    const originalImageData = {
+        width: 100,
+        height: 100,
+        data: new Uint8ClampedArray(100 * 100 * 4)
+    };
+    for (let offset = 0; offset < originalImageData.data.length; offset += 4) {
+        originalImageData.data[offset] = 250;
+        originalImageData.data[offset + 1] = 250;
+        originalImageData.data[offset + 2] = 250;
+        originalImageData.data[offset + 3] = 255;
+    }
+    const selectedTrial = {
+        source: 'standard+preview-anchor+validated',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaMap: new Float32Array(48 * 48).fill(0.2),
+        alphaGain: 1,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.16,
+        originalGradientScore: 0.05,
+        processedSpatialScore: 0.01,
+        processedGradientScore: 0.08,
+        residual: { cleared: false },
+        damage: { safe: true },
+        rankingKey: [1, 0, 0, 0, 0, 0],
+        provenance: { previewAnchor: true }
+    };
+    const input = createBaseInput(() => ({
+        selectedTrial,
+        candidatePool: [selectedTrial],
+        source: selectedTrial.source,
+        decisionTier: 'validated-match'
+    }));
+
+    const result = collectInitialWatermarkCandidates({
+        ...input,
+        originalImageData,
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.bestEffortFallback, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === selectedTrial));
+    assert.equal(result.hypotheses.some((hypothesis) => (
+        hypothesis.trial?.provenance?.topNConservative === true
+    )), false);
+});
+
+test('collectInitialWatermarkCandidates should keep a cleared medium-evidence validated match', () => {
+    const clearedValidated = {
+        source: 'standard+catalog+gain+validated',
+        config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaMap: new Float32Array(48 * 48).fill(0.2),
+        alphaGain: 0.55,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.18,
+        originalGradientScore: 0.27,
+        processedSpatialScore: 0.03,
+        processedGradientScore: 0.07,
+        residual: { cleared: true },
+        originalEvidence: { tier: 'medium' },
+        damage: { safe: true },
+        rankingKey: [1, 0, 0, 0, 0, 0],
+        provenance: { catalogVariant: true }
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: clearedValidated,
+            candidatePool: [clearedValidated],
+            source: clearedValidated.source,
+            decisionTier: 'validated-match'
+        })),
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === clearedValidated));
+});
+
+test('collectInitialWatermarkCandidates should accept cleared restoration when repeated texture weakens localization', () => {
+    const width = 160;
+    const height = 160;
+    const data = new Uint8ClampedArray(width * height * 4);
+    const alphaMap = new Float32Array(48 * 48);
+    for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 48; x++) {
+            alphaMap[y * 48 + x] = ((x * 17 + y * 31) % 97) / 160;
+        }
+    }
+    for (const patchX of [48, 96]) {
+        for (let y = 0; y < 48; y++) {
+            for (let x = 0; x < 48; x++) {
+                const value = Math.round(alphaMap[y * 48 + x] * 220);
+                const offset = ((96 + y) * width + patchX + x) * 4;
+                data[offset] = value;
+                data[offset + 1] = value;
+                data[offset + 2] = value;
+                data[offset + 3] = 255;
+            }
+        }
+    }
+    const clearedDirect = {
+        source: 'standard+validated',
+        config: { logoSize: 48, marginRight: 16, marginBottom: 16 },
+        position: { x: 96, y: 96, width: 48, height: 48 },
+        alphaMap,
+        alphaGain: 1,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.4,
+        originalGradientScore: 0.2,
+        processedSpatialScore: 0.05,
+        processedGradientScore: 0.04,
+        residual: { cleared: true },
+        originalEvidence: { tier: 'strong' },
+        damage: { safe: true },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: {}
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: clearedDirect,
+            candidatePool: [clearedDirect],
+            source: clearedDirect.source,
+            decisionTier: 'direct-match'
+        })),
+        originalImageData: { width, height, data },
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === clearedDirect));
+});
+
+test('collectInitialWatermarkCandidates should not let best effort bypass a repeated-template collision', () => {
+    const width = 256;
+    const height = 256;
+    const data = new Uint8ClampedArray(width * height * 4);
+    const alphaMap = new Float32Array(48 * 48);
+    for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 48; x++) {
+            alphaMap[y * 48 + x] = ((x * 17 + y * 31) % 97) / 160;
+        }
+    }
+    for (const [patchX, patchY] of [
+        [128, 176],
+        [176, 128],
+        [128, 128]
+    ]) {
+        for (let y = 0; y < 48; y++) {
+            for (let x = 0; x < 48; x++) {
+                const value = Math.round(alphaMap[y * 48 + x] * 220);
+                const offset = ((patchY + y) * width + patchX + x) * 4;
+                data[offset] = value;
+                data[offset + 1] = value;
+                data[offset + 2] = value;
+                data[offset + 3] = 255;
+            }
+        }
+    }
+    const weakTarget = {
+        source: 'standard+catalog+gain+validated',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: { x: 176, y: 176, width: 48, height: 48 },
+        alphaMap,
+        alphaGain: 0.25,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.29,
+        originalGradientScore: 0.5,
+        processedSpatialScore: 0.05,
+        processedGradientScore: 0.1,
+        residual: { cleared: true },
+        originalEvidence: { tier: 'medium' },
+        damage: { safe: true },
+        rankingKey: [1, 0, 0, 0, 0, 0],
+        provenance: { catalogVariant: true }
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: weakTarget,
+            candidatePool: [weakTarget],
+            source: weakTarget.source,
+            decisionTier: 'validated-match'
+        })),
+        originalImageData: { width, height, data },
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.equal(result.bestEffortFallback, false);
+    assert.deepEqual(result.hypotheses, []);
+
+    const localizedWitness = {
+        ...weakTarget,
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 188, marginBottom: 188 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaGain: 1,
+        originalSpatialScore: 0.8,
+        originalGradientScore: 0.5,
+        processedSpatialScore: 0.02,
+        processedGradientScore: 0.03,
+        provenance: {}
+    };
+    const confirmedResult = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: localizedWitness,
+            candidatePool: [weakTarget, localizedWitness],
+            source: localizedWitness.source,
+            decisionTier: 'direct-match'
+        })),
+        originalImageData: { width, height, data },
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(confirmedResult.presenceConfirmed, true);
+    assert.ok(confirmedResult.hypotheses.some((hypothesis) => (
+        hypothesis.trial === localizedWitness
+    )));
+    assert.equal(confirmedResult.hypotheses.some((hypothesis) => (
+        hypothesis.trial === weakTarget
+    )), false);
+});
+
+test('collectInitialWatermarkCandidates should keep the small-v2 exception catalog-scoped and damage-safe', () => {
+    const createTrial = (overrides = {}) => ({
+        source: 'standard+catalog+validated',
+        config: { logoSize: 36, marginRight: 71, marginBottom: 71, alphaVariant: 'v2' },
+        position: { x: 52, y: 52, width: 36, height: 36 },
+        alphaMap: new Float32Array(36 * 36).fill(0.2),
+        alphaGain: 1,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.2,
+        originalGradientScore: 0.1,
+        processedSpatialScore: 0.02,
+        processedGradientScore: 0.3,
+        residual: { cleared: false },
+        originalEvidence: { tier: 'medium' },
+        damage: { safe: true },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: {
+            alphaVariant: 'v2',
+            catalogFamily: 'gemini-v2-small'
+        },
+        ...overrides
+    });
+
+    for (const trial of [
+        createTrial({ damage: { safe: false } }),
+        createTrial({
+            provenance: {
+                alphaVariant: 'v2',
+                catalogFamily: 'unrelated-family'
+            }
+        })
+    ]) {
+        const result = collectInitialWatermarkCandidates({
+            ...createBaseInput(() => ({
+                selectedTrial: trial,
+                candidatePool: [trial],
+                source: trial.source,
+                decisionTier: 'validated-match'
+            })),
+            allowAdaptiveSearch: false
+        });
+
+        assert.equal(result.presenceConfirmed, false);
+        assert.deepEqual(result.hypotheses, []);
+    }
+});
+
+test('collectInitialWatermarkCandidates should preserve partial legacy selector metadata', () => {
+    const legacySelected = {
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaMap: new Float32Array(48 * 48).fill(0.2),
+        alphaGain: 1,
+        accepted: true,
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: {}
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: legacySelected,
+            candidatePool: [legacySelected],
+            source: legacySelected.source,
+            decisionTier: 'validated-match'
+        })),
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === legacySelected));
+});
+
+test('collectInitialWatermarkCandidates should use an eligible direct-match pool trial as presence evidence', () => {
+    const directMatch = {
+        source: 'standard+preview-anchor',
+        config: { logoSize: 35, marginRight: 23, marginBottom: 23 },
+        position: { x: 42, y: 42, width: 35, height: 35 },
+        alphaMap: new Float32Array(35 * 35).fill(0.2),
+        alphaGain: 1,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.88,
+        originalGradientScore: 0.45,
+        originalEvidence: { tier: 'strong' },
+        damage: { safe: true },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: { previewAnchor: true }
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: null,
+            candidatePool: [directMatch],
+            source: 'skipped',
+            decisionTier: 'insufficient'
+        })),
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === directMatch));
+});
+
+test('collectInitialWatermarkCandidates should retain the pool trial that confirmed presence', () => {
+    const alphaMap = new Float32Array(48 * 48).fill(0.2);
+    const shared = {
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: { x: 20, y: 20, width: 48, height: 48 },
+        alphaMap,
+        alphaGain: 1,
+        provenance: {}
+    };
+    const diagnostic = {
+        ...shared,
+        accepted: false,
+        evaluation: { eligible: false },
+        originalSpatialScore: 0,
+        originalGradientScore: 0,
+        rankingKey: [0, 0, 0, 0, 0, 0]
+    };
+    const witness = {
+        ...shared,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.8,
+        originalGradientScore: 0.4,
+        rankingKey: [9, 0, 0, 0, 0, 0]
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: null,
+            candidatePool: [diagnostic, witness],
+            source: 'skipped',
+            decisionTier: 'insufficient'
+        })),
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === witness));
+});
+
+test('collectInitialWatermarkCandidates should lock a strong localized geometry ahead of a disjoint weak safe fallback', () => {
+    const alphaMap = new Float32Array(48 * 48);
+    for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 48; x++) {
+            alphaMap[y * 48 + x] = ((x * 17 + y * 31) % 97) / 160;
+        }
+    }
+    const strongGeometry = {
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 4, marginBottom: 4 },
+        position: { x: 48, y: 48, width: 48, height: 48 },
+        alphaMap,
+        alphaGain: 1,
+        accepted: false,
+        evaluation: { eligible: false, blockedGate: 'baseValidationAccepted' },
+        originalSpatialScore: 0.999,
+        originalGradientScore: 0.999,
+        processedSpatialScore: -0.61,
+        processedGradientScore: 0.49,
+        originalEvidence: { tier: 'strong' },
+        damage: { safe: false },
+        rankingKey: [9, 0, 0, 0, 0, 0],
+        provenance: {}
+    };
+    const weakSafeFallback = {
+        source: 'standard+catalog+gain+validated',
+        config: { logoSize: 48, marginRight: 52, marginBottom: 52 },
+        position: { x: 0, y: 0, width: 48, height: 48 },
+        alphaMap,
+        alphaGain: 1.15,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.067,
+        originalGradientScore: 0.04,
+        processedSpatialScore: -0.389,
+        processedGradientScore: 0.063,
+        residual: { cleared: false },
+        originalEvidence: { tier: 'medium' },
+        damage: { safe: true },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: { catalogVariant: true }
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: weakSafeFallback,
+            candidatePool: [weakSafeFallback, strongGeometry],
+            source: weakSafeFallback.source,
+            decisionTier: 'validated-match'
+        })),
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => hypothesis.trial === strongGeometry));
+    assert.equal(result.hypotheses.some((hypothesis) => (
+        hypothesis.trial === weakSafeFallback
+    )), false);
+});
+
+test('collectInitialWatermarkCandidates should not geometry-lock a localized content star with only moderate direct evidence', () => {
+    const alphaMap = new Float32Array(48 * 48);
+    for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 48; x++) {
+            alphaMap[y * 48 + x] = ((x * 17 + y * 31) % 97) / 160;
+        }
+    }
+    const contentStar = {
+        source: 'standard+preview-anchor',
+        config: { logoSize: 48, marginRight: 4, marginBottom: 4 },
+        position: { x: 48, y: 48, width: 48, height: 48 },
+        alphaMap,
+        alphaGain: 1,
+        accepted: false,
+        evaluation: { eligible: false },
+        originalSpatialScore: 0.83,
+        originalGradientScore: 0.455,
+        processedSpatialScore: -0.94,
+        processedGradientScore: 0.92,
+        originalEvidence: { tier: 'strong' },
+        damage: { safe: false },
+        rankingKey: [9, 0, 0, 0, 0, 0],
+        provenance: { previewAnchor: true }
+    };
+    const weakSafeFallback = {
+        source: 'standard+preview-anchor+validated',
+        config: { logoSize: 48, marginRight: 52, marginBottom: 52 },
+        position: { x: 0, y: 0, width: 48, height: 48 },
+        alphaMap,
+        alphaGain: 0.5,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.28,
+        originalGradientScore: 0.04,
+        processedSpatialScore: 0.13,
+        processedGradientScore: 0.06,
+        residual: { cleared: false },
+        originalEvidence: { tier: 'medium' },
+        damage: { safe: true },
+        rankingKey: [0, 0, 0, 0, 0, 0],
+        provenance: { previewAnchor: true }
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput(() => ({
+            selectedTrial: weakSafeFallback,
+            candidatePool: [weakSafeFallback, contentStar],
+            source: weakSafeFallback.source,
+            decisionTier: 'validated-match'
+        })),
+        allowAdaptiveSearch: false
+    });
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.equal(result.bestEffortFallback, true);
+    assert.ok(result.hypotheses.some((hypothesis) => (
+        hypothesis.trial === weakSafeFallback
+    )));
+    assert.equal(result.hypotheses.some((hypothesis) => (
+        hypothesis.trial === contentStar
+    )), false);
+});

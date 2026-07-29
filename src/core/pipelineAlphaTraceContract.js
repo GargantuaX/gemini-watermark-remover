@@ -21,13 +21,15 @@ export function normalizeAlphaAdjustmentStageForTrace(stagePayload = {}) {
         profileExponent = null,
         alphaStrategy = null,
         repairStrategy = null,
-        allowSameAlphaGain = false
+        allowSameAlphaGain = false,
+        ...stageExtras
     } = stagePayload;
 
     if (!stage || !Number.isFinite(fromAlphaGain) || !Number.isFinite(toAlphaGain)) return null;
     if (!allowSameAlphaGain && Math.abs(fromAlphaGain - toAlphaGain) < 0.0001) return null;
 
     return {
+        ...stageExtras,
         stage,
         fromAlphaGain,
         toAlphaGain,

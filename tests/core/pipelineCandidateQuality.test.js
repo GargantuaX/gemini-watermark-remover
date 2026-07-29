@@ -367,6 +367,21 @@ test('createCandidateImperfectionSignals should report high residuals at existin
     assert.equal(imperfections.score, 1);
 });
 
+test('createCandidateImperfectionSignals should report polarity-aware dark halos at their active threshold', () => {
+    const imperfections = createCandidateImperfectionSignals({
+        positiveHaloLum: 0,
+        darkPolarityHaloLum: 2.1,
+        darkPolarityHaloThreshold: 1.75,
+        spatialResidual: 0.01,
+        gradientResidual: 0.01
+    });
+
+    assert.equal(imperfections.detected, true);
+    assert.equal(imperfections.severity, 'high');
+    assert.deepEqual(imperfections.types, ['dark-polarity-halo']);
+    assert.ok(imperfections.score > 1.1 && imperfections.score < 1.3);
+});
+
 test('createCandidateQualitySignals should produce finite losses from real pixels', () => {
     const originalImageData = createImageData(16, 16, 120);
     const candidateImageData = createImageData(16, 16, 118);
@@ -405,6 +420,156 @@ test('createCandidateQualitySignals should produce finite losses from real pixel
     assert.ok(Number.isFinite(signals.imperfections.score));
     assert.ok(['clean', 'visible-residual', 'possible-content-damage', 'mixed']
         .includes(signals.qualityStatus));
+});
+
+test('createCandidateQualitySignals should include a dark-polarity halo in residual loss', () => {
+    const originalImageData = createImageData(16, 16, 80);
+    const candidateImageData = createImageData(16, 16, 80);
+    const alphaMap = Float32Array.from([
+        0, 0.2, 0.2, 0,
+        0.2, 0.3, 0.3, 0.2,
+        0.2, 0.3, 0.3, 0.2,
+        0, 0.2, 0.2, 0
+    ], (value) => -value);
+    const position = { x: 8, y: 8, width: 4, height: 4 };
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            if (Math.abs(alphaMap[row * position.width + col]) < 0.18) continue;
+            const offset = ((position.y + row) * 16 + position.x + col) * 4;
+            candidateImageData.data[offset] = 77;
+            candidateImageData.data[offset + 1] = 77;
+            candidateImageData.data[offset + 2] = 77;
+        }
+    }
+
+    const signals = createCandidateQualitySignals({
+        originalImageData,
+        candidateImageData,
+        hypothesis: {
+            id: 'dark-polarity-halo',
+            family: 'standard',
+            trial: {
+                source: 'standard+dark-polarity',
+                position,
+                alphaMap,
+                alphaGain: 0.1
+            }
+        }
+    });
+
+    assert.equal(signals.qualityStatus, 'visible-residual');
+    assert.ok(
+        signals.residualComponents.halo > 0.2,
+        `halo=${signals.residualComponents.halo}`
+    );
+    assert.ok(signals.imperfections.types.includes('dark-polarity-halo'));
+});
+
+test('createCandidateQualitySignals should resolve support-confined dark clipping only with a verified convergence marker', () => {
+    const originalImageData = createImageData(16, 16, 0);
+    const candidateImageData = createImageData(16, 16, 0);
+    const alphaMap = new Float32Array([
+        0, 0, 0, 0,
+        0, 0.6, 0.6, 0,
+        0, 0.6, 0.6, 0,
+        0, 0, 0, 0
+    ]);
+    const position = { x: 8, y: 8, width: 4, height: 4 };
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            if (alphaMap[row * position.width + col] <= 0) continue;
+            const offset = (
+                (position.y + row) * originalImageData.width +
+                position.x +
+                col
+            ) * 4;
+            originalImageData.data[offset] = 120;
+            originalImageData.data[offset + 1] = 120;
+            originalImageData.data[offset + 2] = 120;
+        }
+    }
+    const hypothesis = {
+        id: 'support-confined-dark',
+        family: 'standard',
+        trial: {
+            source: 'standard',
+            position,
+            alphaMap,
+            alphaGain: 1
+        }
+    };
+
+    const rawSignals = createCandidateQualitySignals({
+        originalImageData,
+        candidateImageData,
+        hypothesis
+    });
+    assert.equal(rawSignals.rawDamageWarning, true);
+    assert.equal(rawSignals.damageWarning, true);
+    assert.equal(rawSignals.qualityStatus, 'possible-content-damage');
+
+    const resolvedSignals = createCandidateQualitySignals({
+        originalImageData,
+        candidateImageData,
+        hypothesis,
+        finalCandidate: {
+            position,
+            alphaMap,
+            alphaGain: 1,
+            darkBackgroundSupportConvergence: { accepted: true }
+        }
+    });
+    assert.equal(resolvedSignals.rawDamageWarning, true);
+    assert.equal(resolvedSignals.damageWarning, false);
+    assert.equal(
+        resolvedSignals.damageRiskResolution,
+        'dark-background-support-converged'
+    );
+    assert.equal(resolvedSignals.qualityStatus, 'clean');
+});
+
+test('createCandidateQualitySignals should not reward spatial evidence with the wrong polarity', () => {
+    const originalImageData = createImageData(16, 16, 180);
+    const candidateImageData = createImageData(16, 16, 180);
+    const alphaMap = new Float32Array([
+        0, 0.2, 0.2, 0,
+        0.2, 0.6, 0.6, 0.2,
+        0.2, 0.6, 0.6, 0.2,
+        0, 0.2, 0.2, 0
+    ]);
+    const position = { x: 8, y: 8, width: 4, height: 4 };
+
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const alpha = alphaMap[row * position.width + col];
+            const pixelIndex = ((position.y + row) * originalImageData.width + position.x + col) * 4;
+            const wrongPolarityValue = 180 - Math.round(alpha * 100);
+            originalImageData.data[pixelIndex] = wrongPolarityValue;
+            originalImageData.data[pixelIndex + 1] = wrongPolarityValue;
+            originalImageData.data[pixelIndex + 2] = wrongPolarityValue;
+        }
+    }
+
+    const signals = createCandidateQualitySignals({
+        originalImageData,
+        candidateImageData,
+        hypothesis: {
+            id: 'wrong-polarity',
+            family: 'standard',
+            trial: {
+                source: 'standard',
+                position,
+                alphaMap,
+                alphaGain: 1
+            }
+        }
+    });
+
+    assert.ok(
+        signals.original.spatialScore < -0.95,
+        `spatialScore=${signals.original.spatialScore}`
+    );
+    assert.ok(signals.evidenceLoss >= 0.45, `evidenceLoss=${signals.evidenceLoss}`);
 });
 
 test('rankCompletedCandidates should prefer content-safe recovery over polarity damage', () => {

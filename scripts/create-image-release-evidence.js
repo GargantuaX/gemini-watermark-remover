@@ -13,8 +13,12 @@ const DEFAULT_PATHS = Object.freeze({
     contrast: path.resolve('.artifacts/top-n-candidate-selection/contrast-report.json'),
     curatedBefore: path.resolve('.artifacts/same-anchor-96-imperfection-preference/before-424-report.json'),
     curatedAfter: path.resolve('.artifacts/expanded-sample-validation/curated-top-n/combined-report.json'),
-    manualReport: path.resolve('.artifacts/same-anchor-imperfection-review/report.json'),
-    manualDecisions: path.resolve('.artifacts/same-anchor-imperfection-review/review.json'),
+    manualReport: path.resolve(
+        '.artifacts/same-anchor-96-imperfection-preference/before-review/report.json'
+    ),
+    manualDecisions: path.resolve(
+        '.artifacts/same-anchor-96-imperfection-preference/before-review/review.json'
+    ),
     automated: path.resolve('.artifacts/release-image-quality/automated-results.json'),
     packageJson: path.resolve('package.json'),
     latestExtension: path.resolve('release/latest-extension.json'),

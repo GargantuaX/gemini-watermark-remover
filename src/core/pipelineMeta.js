@@ -3,6 +3,7 @@ import {
     createDetectionCandidateFromSelectedTrial,
     createRejectedDecisionPath
 } from './candidateEvaluation.js';
+import { reconcileAlphaTrialWithFinalQualitySignals } from './pipelineAlphaTrial.js';
 
 function normalizeMetaPosition(position) {
     if (!position) return null;
@@ -73,6 +74,22 @@ function normalizeCandidateSummary(summary) {
         qualityStatus: normalizeQualityStatus(summary.qualityStatus),
         qualitySignals: summary.qualitySignals ?? null,
         error: typeof summary.error === 'string' ? summary.error : null
+    };
+}
+
+function reconcileDecisionPathQuality(decisionPath, qualitySignals) {
+    if (!decisionPath?.alphaTrial) {
+        return decisionPath;
+    }
+    const alphaTrial = reconcileAlphaTrialWithFinalQualitySignals(
+        decisionPath.alphaTrial,
+        qualitySignals
+    );
+    if (alphaTrial === decisionPath.alphaTrial) return decisionPath;
+
+    return {
+        ...decisionPath,
+        alphaTrial
     };
 }
 
@@ -186,7 +203,7 @@ export function createAcceptedWatermarkMeta({
     qualitySignals = null,
     candidateSummaries = null
 } = {}) {
-    const decisionPath = createAcceptedDecisionPath({
+    const initialDecisionPath = createAcceptedDecisionPath({
         selectedTrial,
         selectionSource,
         source,
@@ -206,6 +223,10 @@ export function createAcceptedWatermarkMeta({
         suppressionGain,
         residualVisibility
     });
+    const decisionPath = reconcileDecisionPathQuality(
+        initialDecisionPath,
+        qualitySignals
+    );
 
     return createWatermarkMeta({
         position,
@@ -258,6 +279,10 @@ export function attachTopNSelectionMeta(meta, {
         qualitySignals,
         candidateSummaries
     });
+    const decisionPath = reconcileDecisionPathQuality(
+        meta?.decisionPath,
+        normalized.qualitySignals
+    );
 
     return {
         ...meta,
@@ -269,7 +294,8 @@ export function attachTopNSelectionMeta(meta, {
         selectionConfidence: normalized.selectionConfidence,
         selectedCandidate: normalized.selectedCandidate,
         qualitySignals: normalized.qualitySignals,
-        candidateSummaries: normalized.candidateSummaries
+        candidateSummaries: normalized.candidateSummaries,
+        decisionPath
     };
 }
 

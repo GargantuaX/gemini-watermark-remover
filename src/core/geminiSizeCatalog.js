@@ -465,7 +465,6 @@ export function resolveOfficialGeminiSearchConfigEntries(
         })
         .filter(Boolean)
         .sort((a, b) => a.score - b.score);
-
     const deduped = [];
     const seen = new Set();
     for (const candidate of candidates) {

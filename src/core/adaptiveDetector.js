@@ -196,6 +196,52 @@ export function computeSizeAdjustedConfidence(confidence, size, referenceSize = 
     return confidence * sizeWeight;
 }
 
+function compareAdaptiveCandidatePriority(left, right) {
+    const leftScore = Number.isFinite(left?.adjustedScore)
+        ? left.adjustedScore
+        : computeSizeAdjustedConfidence(left?.confidence, left?.size);
+    const rightScore = Number.isFinite(right?.adjustedScore)
+        ? right.adjustedScore
+        : computeSizeAdjustedConfidence(right?.confidence, right?.size);
+    if (Math.abs(leftScore - rightScore) > 1e-12) {
+        return leftScore - rightScore;
+    }
+
+    const leftSize = Number.isFinite(left?.size) ? left.size : 0;
+    const rightSize = Number.isFinite(right?.size) ? right.size : 0;
+    const leftDistance = Math.abs(leftSize - REFERENCE_WATERMARK_SIZE);
+    const rightDistance = Math.abs(rightSize - REFERENCE_WATERMARK_SIZE);
+    if (leftDistance !== rightDistance) {
+        return rightDistance - leftDistance;
+    }
+
+    const leftConfidence = Number.isFinite(left?.confidence) ? left.confidence : 0;
+    const rightConfidence = Number.isFinite(right?.confidence) ? right.confidence : 0;
+    if (leftConfidence !== rightConfidence) {
+        return leftConfidence - rightConfidence;
+    }
+    if (leftSize !== rightSize) {
+        return leftSize - rightSize;
+    }
+
+    const leftX = Number.isFinite(left?.x) ? left.x : Infinity;
+    const rightX = Number.isFinite(right?.x) ? right.x : Infinity;
+    if (leftX !== rightX) {
+        return rightX - leftX;
+    }
+    const leftY = Number.isFinite(left?.y) ? left.y : Infinity;
+    const rightY = Number.isFinite(right?.y) ? right.y : Infinity;
+    return rightY - leftY;
+}
+
+export function selectAdaptiveFineCandidate(currentBest, candidate) {
+    if (!currentBest) return candidate;
+    if (!candidate) return currentBest;
+    return compareAdaptiveCandidatePriority(candidate, currentBest) > 0
+        ? candidate
+        : currentBest;
+}
+
 function buildSeedConfigs(width, height, defaultConfig) {
     // Start adaptive search from both the coarse default anchor and any
     // catalog-projected anchors for official or near-official Gemini sizes.
@@ -445,10 +491,10 @@ export function detectAdaptiveWatermarkRegion({
         })
         .filter(Boolean);
 
-    const bestSeed = seedCandidates.reduce((best, candidate) => {
-        if (!best || candidate.confidence > best.confidence) return candidate;
-        return best;
-    }, null);
+    const bestSeed = seedCandidates.reduce(
+        (best, candidate) => selectAdaptiveFineCandidate(best, candidate),
+        null
+    );
     if (bestSeed && bestSeed.confidence >= threshold + 0.08) {
         return {
             found: true,
@@ -483,7 +529,7 @@ export function detectAdaptiveWatermarkRegion({
     const topK = [];
     const pushTopK = (candidate) => {
         topK.push(candidate);
-        topK.sort((a, b) => b.adjustedScore - a.adjustedScore);
+        topK.sort((left, right) => -compareAdaptiveCandidatePriority(left, right));
         if (topK.length > 5) topK.length = 5;
     };
 
@@ -545,14 +591,12 @@ export function detectAdaptiveWatermarkRegion({
                     const score = scoreCandidate(context, tpl.alpha, tpl.grad, { x, y, size });
                     if (!score) continue;
 
-                    if (score.confidence > best.confidence) {
-                        best = {
-                            x,
-                            y,
-                            size,
-                            ...score
-                        };
-                    }
+                    best = selectAdaptiveFineCandidate(best, {
+                        x,
+                        y,
+                        size,
+                        ...score
+                    });
                 }
             }
         }

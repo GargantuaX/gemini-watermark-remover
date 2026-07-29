@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+
+const PROJECT_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+const PACKAGE_SCRIPT = fileURLToPath(
+  new URL('../../scripts/package-extension-release.js', import.meta.url)
+);
 
 async function readText(relativePath) {
   return readFile(new URL(`../../${relativePath}`, import.meta.url), 'utf8');
@@ -13,6 +18,22 @@ async function readText(relativePath) {
 
 async function readBinary(relativePath) {
   return readFile(new URL(`../../${relativePath}`, import.meta.url));
+}
+
+async function createPackagedExtensionFixture() {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'gwr-extension-package-official-'));
+  await mkdir(path.join(tempDir, 'dist'), { recursive: true });
+  await cp(
+    path.join(PROJECT_ROOT, 'dist', 'extension'),
+    path.join(tempDir, 'dist', 'extension'),
+    { recursive: true }
+  );
+  const packageBuild = spawnSync(process.execPath, [PACKAGE_SCRIPT], {
+    cwd: tempDir,
+    encoding: 'utf8'
+  });
+  assert.equal(packageBuild.status, 0, packageBuild.stderr || packageBuild.stdout);
+  return tempDir;
 }
 
 test('production build should emit a MV3 extension that packages the shared userscript runtime', async () => {
@@ -89,25 +110,33 @@ test('production build should emit a MV3 extension that packages the shared user
 });
 
 test('extension package should replace the local debug manifest with the official release manifest', async () => {
-  const packageBuild = spawnSync('pnpm', ['package:extension'], {
-    cwd: new URL('../..', import.meta.url),
-    encoding: 'utf8',
-    shell: process.platform === 'win32'
-  });
-  assert.equal(packageBuild.status, 0, packageBuild.stderr || packageBuild.stdout);
+  const releaseBefore = await readText('release/latest-extension.json');
+  const tempDir = await createPackagedExtensionFixture();
+  try {
+    const latest = JSON.parse(
+      await readFile(path.join(tempDir, 'release', 'latest-extension.json'), 'utf8')
+    );
+    assert.equal(latest.name, 'gemini-watermark-remover-extension');
+    assert.equal(latest.source, 'dist/extension');
+    assert.equal(existsSync(path.join(tempDir, 'release', 'latest-extension-local.json')), false);
 
-  const latest = JSON.parse(await readText('release/latest-extension.json'));
-  assert.equal(latest.name, 'gemini-watermark-remover-extension');
-  assert.equal(latest.source, 'dist/extension');
-  assert.equal(existsSync(new URL('../../release/latest-extension-local.json', import.meta.url)), false);
-
-  const zipText = (await readBinary(`release/${latest.file}`)).toString('utf8');
-  assert.match(zipText, /"name": "Gemini Watermark Remover"/);
-  assert.match(zipText, /"short_name": "GWR"/);
-  assert.match(zipText, /"default_title": "Gemini Watermark Remover"/);
-  assert.doesNotMatch(zipText, /Gemini Watermark Remover Local/);
-  assert.doesNotMatch(zipText, /local test build/);
-  assert.doesNotMatch(zipText, /version_name/);
+    const zipText = (
+      await readFile(path.join(tempDir, 'release', latest.file))
+    ).toString('utf8');
+    assert.match(zipText, /"name": "Gemini Watermark Remover"/);
+    assert.match(zipText, /"short_name": "GWR"/);
+    assert.match(zipText, /"default_title": "Gemini Watermark Remover"/);
+    assert.doesNotMatch(zipText, /Gemini Watermark Remover Local/);
+    assert.doesNotMatch(zipText, /local test build/);
+    assert.doesNotMatch(zipText, /version_name/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+  assert.equal(
+    await readText('release/latest-extension.json'),
+    releaseBefore,
+    'packaging tests must not overwrite repository release metadata'
+  );
 });
 
 test('extension package should be deterministic across repeated runs', async () => {
@@ -158,15 +187,10 @@ test('extension package should be deterministic across repeated runs', async () 
 });
 
 test('production build should preserve packaged extension release artifacts', async () => {
-  const packageBuild = spawnSync('pnpm', ['package:extension'], {
-    cwd: new URL('../..', import.meta.url),
-    encoding: 'utf8',
-    shell: process.platform === 'win32'
-  });
-  assert.equal(packageBuild.status, 0, packageBuild.stderr || packageBuild.stdout);
-
   const latestBefore = await readText('release/latest-extension.json');
   const latest = JSON.parse(latestBefore);
+  const zipBefore = await readBinary(`release/${latest.file}`);
+  const checksumBefore = await readBinary(`release/${latest.file}.sha256.txt`);
 
   const build = spawnSync('pnpm', ['build'], {
     cwd: new URL('../..', import.meta.url),
@@ -180,4 +204,9 @@ test('production build should preserve packaged extension release artifacts', as
   assert.equal(existsSync(new URL('../../release/latest-extension.json', import.meta.url)), true);
   assert.equal(existsSync(new URL('../../release/latest-extension-local.json', import.meta.url)), false);
   assert.equal(await readText('release/latest-extension.json'), latestBefore);
+  assert.deepEqual(await readBinary(`release/${latest.file}`), zipBefore);
+  assert.deepEqual(
+    await readBinary(`release/${latest.file}.sha256.txt`),
+    checksumBefore
+  );
 });

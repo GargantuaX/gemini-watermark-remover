@@ -58,6 +58,26 @@ test('normalizeAlphaAdjustmentStageForTrace should normalize stage fields and ga
     });
 });
 
+test('normalizeAlphaAdjustmentStageForTrace should preserve stage extras without leaking internal gates', () => {
+    const localSearchTrigger = {
+        reason: 'damage-warning',
+        newlyClippedRatio: 0.019965277777777776
+    };
+    const normalized = normalizeAlphaAdjustmentStageForTrace({
+        stage: 'evidence-gated-local-alpha-search',
+        fromAlphaGain: 1,
+        toAlphaGain: 0.85,
+        alphaStrategy: 'evidence-gated-local-alpha',
+        localSearchTrigger,
+        evaluatedCandidateCount: 7,
+        allowSameAlphaGain: true
+    });
+
+    assert.equal(normalized.localSearchTrigger, localSearchTrigger);
+    assert.equal(normalized.evaluatedCandidateCount, 7);
+    assert.equal('allowSameAlphaGain' in normalized, false);
+});
+
 test('createAlphaTraceContractSummary should expose trace counts', () => {
     assert.deepEqual(createAlphaTraceContractSummary({
         alphaAdjustmentStages: [{ stage: 'fine-alpha' }],

@@ -375,7 +375,8 @@ function measurePreviewBoundaryContinuity(candidateImageData, previewImageData, 
 export function buildPreviewNeighborhoodPrior({
     previewImageData,
     position,
-    radius = 6
+    radius = 6,
+    relaxationPasses = null
 }) {
     if (!previewImageData || !position) {
         throw new TypeError('buildPreviewNeighborhoodPrior requires previewImageData and position');
@@ -437,8 +438,10 @@ export function buildPreviewNeighborhoodPrior({
         return prior;
     }
 
-    const relaxationPasses = Math.max(24, Math.round((position.width + position.height) * 2));
-    for (let pass = 0; pass < relaxationPasses; pass++) {
+    const resolvedRelaxationPasses = Number.isInteger(relaxationPasses)
+        ? Math.max(0, relaxationPasses)
+        : Math.max(24, Math.round((position.width + position.height) * 2));
+    for (let pass = 0; pass < resolvedRelaxationPasses; pass++) {
         for (let row = 0; row < position.height; row++) {
             const y = position.y + row;
             for (let col = 0; col < position.width; col++) {

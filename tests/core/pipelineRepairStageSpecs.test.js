@@ -508,3 +508,47 @@ test('createPostLocatedRepairStageSequenceSpecs should build dynamic post-locate
     assert.equal(accepted[0].suppressionGain, 0.5);
     assert.equal(accepted[1].deriveSuppressionGainFromOriginalSpatial, true);
 });
+
+test('small located prior repair should propagate its convergence marker through stage extras', () => {
+    const convergence = {
+        accepted: true,
+        mode: 'projected-small-dark-support',
+        textureHardRejectResolved: true
+    };
+    const currentState = {
+        finalImageData: { id: 'image-0' },
+        alphaMap: 'alpha-0',
+        position: { x: 464, y: 917, width: 36, height: 36 },
+        config: { logoSize: 36, marginRight: 72, marginBottom: 71 },
+        finalProcessedSpatialScore: 0.43,
+        finalProcessedGradientScore: 0.42,
+        alphaGain: 1.15,
+        source: 'standard+preview-anchor+located-aggressive'
+    };
+    const accepted = [];
+    const stages = createTailRepairStageSequenceSpecs({
+        readState: () => currentState,
+        originalImageData: { id: 'original' },
+        originalSpatialScore: 0.95,
+        originalGradientScore: 0.85,
+        acceptCurrentRepairTrialResult: (stage) => accepted.push(stage),
+        refiners: {
+            refineSmallLocatedPriorRepairResidual: () => ({
+                imageData: { id: 'repaired' },
+                spatialScore: 0.08,
+                gradientScore: 0.05,
+                alphaGain: 1.15,
+                suppressionGain: 0.87,
+                darkBackgroundSupportConvergence: convergence
+            })
+        }
+    });
+
+    runCurrentRepairStageSequence({ stages });
+
+    assert.equal(accepted.length, 1);
+    assert.equal(accepted[0].stage, 'small-located-prior-repair');
+    assert.deepEqual(accepted[0].stageExtras, {
+        darkBackgroundSupportConvergence: convergence
+    });
+});

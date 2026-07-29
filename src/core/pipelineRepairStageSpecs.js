@@ -380,6 +380,10 @@ export function createTailRepairStageSequenceSpecs({
             acceptCurrentRepairTrialResult,
             source: () => `${readPipelineRepairState(readState).source}+small-located-prior`,
             suppressionGain: (result) => result.suppressionGain,
+            stageExtras: (result) => ({
+                darkBackgroundSupportConvergence:
+                    result.darkBackgroundSupportConvergence ?? null
+            }),
         },
         {
             stage: 'known-48-boundary-repair-rescue',

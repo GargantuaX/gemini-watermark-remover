@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
     computeSizeAdjustedConfidence,
+    selectAdaptiveFineCandidate,
     interpolateAlphaMap,
     detectAdaptiveWatermarkRegion,
     computeRegionSpatialCorrelation,
@@ -126,6 +127,29 @@ test('computeSizeAdjustedConfidence should use gentle cube-root size penalty', (
     );
     assert.equal(computeSizeAdjustedConfidence(0.9, 128), 0.9);
     assert.equal(computeSizeAdjustedConfidence(0.9, 0), 0);
+});
+
+test('adaptive fine candidate selection should keep size adjustment when raw confidence favors a tiny template', () => {
+    const largeCandidate = { id: 'large', size: 96, confidence: 0.72 };
+    const tinyCandidate = { id: 'tiny', size: 24, confidence: 0.9 };
+
+    assert.ok(tinyCandidate.confidence > largeCandidate.confidence);
+    assert.equal(selectAdaptiveFineCandidate(largeCandidate, tinyCandidate), largeCandidate);
+    assert.equal(selectAdaptiveFineCandidate(tinyCandidate, largeCandidate), largeCandidate);
+});
+
+test('adaptive candidate selection should resolve adjusted-score ties independently of traversal order', () => {
+    const largeCandidate = { id: 'large', size: 96, confidence: 0.5, x: 10, y: 10 };
+    const tinyCandidate = {
+        id: 'tiny',
+        size: 24,
+        confidence: 0.5 / Math.cbrt(24 / 96),
+        x: 20,
+        y: 20
+    };
+
+    assert.equal(selectAdaptiveFineCandidate(largeCandidate, tinyCandidate), largeCandidate);
+    assert.equal(selectAdaptiveFineCandidate(tinyCandidate, largeCandidate), largeCandidate);
 });
 
 test('detectAdaptiveWatermarkRegion should locate non-standard watermark size', () => {

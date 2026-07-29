@@ -8,6 +8,8 @@ export function runCurrentAlphaTrialStage({
     createTrial,
     acceptCurrentAlphaTrialResult,
     source,
+    stageExtras,
+    eventExtras,
     debugTimings = null,
     timingKey = null,
     nowMs = Date.now
@@ -16,12 +18,19 @@ export function runCurrentAlphaTrialStage({
     const result = typeof createTrial === 'function' ? createTrial() : null;
 
     if (result && typeof acceptCurrentAlphaTrialResult === 'function') {
-        acceptCurrentAlphaTrialResult({
+        const acceptedTrial = {
             stage,
             strategy,
             result,
             source: typeof source === 'function' ? source(result) : source
-        });
+        };
+        if (stageExtras !== undefined) {
+            acceptedTrial.stageExtras = resolveStageValue(stageExtras, result) ?? {};
+        }
+        if (eventExtras !== undefined) {
+            acceptedTrial.eventExtras = resolveStageValue(eventExtras, result) ?? {};
+        }
+        acceptCurrentAlphaTrialResult(acceptedTrial);
     }
 
     if (debugTimings && timingKey) {
@@ -664,6 +673,7 @@ export function createAlphaRepairPipelineRuntime({
             baselineSpatialScore,
             maxNearBlackRatioIncrease
         } = {}) {
+            const current = readState();
             if (
                 Math.abs(cleanedSpatialScore) > Math.abs(baselineSpatialScore) ||
                 cleanedNearBlackRatio > currentNearBlackRatio + maxNearBlackRatioIncrease
@@ -671,6 +681,17 @@ export function createAlphaRepairPipelineRuntime({
                 return null;
             }
 
+            safeRecordAlphaAdjustmentStage({
+                stage: 'preview-background-cleanup',
+                fromAlphaGain: current?.alphaGain,
+                toAlphaGain: current?.alphaGain,
+                beforeSpatialScore: current?.finalProcessedSpatialScore,
+                beforeGradientScore: current?.finalProcessedGradientScore,
+                afterSpatialScore: cleanedSpatialScore,
+                afterGradientScore: cleanedGradientScore,
+                repairStrategy: 'preview-background-cleanup',
+                allowSameAlphaGain: true
+            });
             return commitPipelineResult({
                 result: {
                     imageData: cleanedImageData,

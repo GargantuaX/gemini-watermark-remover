@@ -16,13 +16,21 @@ import {
 import {
     assessAlphaBandHalo,
     assessCalibratedWatermarkResidualVisibility,
+    assessReferenceTextureAlignment,
+    assessReferenceTextureAlignmentFromStats,
     assessRemovalDiffArtifacts,
-    assessWatermarkResidualVisibility
+    assessWatermarkResidualVisibility,
+    getRegionTextureStats
 } from './restorationMetrics.js';
-import { scoreBalancedVisualCandidate } from './watermarkScoring.js';
+import {
+    scoreBalancedVisualCandidate,
+    scoreDamage,
+    scoreResidual
+} from './watermarkScoring.js';
 import {
     blurAlphaMap,
-    buildPreviewNeighborhoodPrior
+    buildPreviewNeighborhoodPrior,
+    measurePreviewBoundaryMetrics
 } from './previewAlphaCalibration.js';
 import { runImageWatermarkPipeline } from './imageWatermarkPipeline.js';
 import {
@@ -217,6 +225,51 @@ const OVER_SUBTRACTION_MIN_ABS_SPATIAL_IMPROVEMENT = 0.08;
 const OVER_SUBTRACTION_MIN_GRADIENT_IMPROVEMENT = 0.08;
 const OVER_SUBTRACTION_FINE_ALPHA_STEP = 0.02;
 const OVER_SUBTRACTION_FINE_ALPHA_WINDOW = 0.04;
+const LOCAL_ALPHA_SEARCH_MIN_ORIGINAL_SPATIAL = 0.25;
+const LOCAL_ALPHA_SEARCH_MIN_ORIGINAL_GRADIENT = 0.2;
+const LOCAL_ALPHA_SEARCH_DAMAGE_COARSE_STEP = 0.05;
+const LOCAL_ALPHA_SEARCH_DAMAGE_MAX_DROP = 0.2;
+const LOCAL_ALPHA_SEARCH_FINE_STEP = 0.002;
+const LOCAL_ALPHA_SEARCH_OVERSHOOT_WINDOW = 0.05;
+const LOCAL_ALPHA_SEARCH_OVERSHOOT_STEP = 0.01;
+const LOCAL_ALPHA_SEARCH_MAX_ABS_SPATIAL = 0.18;
+const LOCAL_ALPHA_SEARCH_MAX_GRADIENT = 0.22;
+const LOCAL_ALPHA_SEARCH_MAX_NEWLY_CLIPPED_RATIO = 0.02;
+const LOCAL_ALPHA_SEARCH_DAMAGE_WEIGHT = 0.25;
+const LOCAL_ALPHA_SEARCH_MIN_COST_IMPROVEMENT = 0.02;
+const LOCAL_ALPHA_SEARCH_COST_TIE = 0.002;
+// assessWatermarkResidualVisibility reads a 4px outer ring. Keep the scratch
+// window at least that wide so trial eligibility matches full-image scoring.
+const LOCAL_ALPHA_SEARCH_SCRATCH_PAD = 4;
+// On an almost-black support, valid inverse-alpha removal can trip the generic
+// clipping gate. This path is intentionally narrow and must converge against
+// several independently reconstructed neighborhood priors before acceptance.
+const DARK_SUPPORT_SEARCH_SCRATCH_PAD = 12;
+const DARK_SUPPORT_SEARCH_MIN_ORIGINAL_SPATIAL = 0.95;
+const DARK_SUPPORT_SEARCH_MIN_ORIGINAL_GRADIENT = 0.8;
+const DARK_SUPPORT_SEARCH_MIN_ORIGINAL_NEAR_BLACK = 0.2;
+const DARK_SUPPORT_SEARCH_MIN_GAIN = 0.58;
+const DARK_SUPPORT_SEARCH_MAX_GAIN = 0.64;
+const DARK_SUPPORT_SEARCH_GAIN_STEP = 0.002;
+const DARK_SUPPORT_MAX_ABS_SPATIAL = 0.18;
+const DARK_SUPPORT_MAX_GRADIENT = 0.18;
+const DARK_SUPPORT_MAX_NEWLY_CLIPPED_RATIO = 0.25;
+const DARK_SUPPORT_MAX_OUTSIDE_ALPHA_CLIP_RATIO = 0.005;
+const DARK_SUPPORT_MIN_STRONG_ALPHA_CLIP_RATIO = 0.8;
+const DARK_SUPPORT_ALPHA_MIN = 0.05;
+const DARK_SUPPORT_ALPHA_STRONG_MIN = 0.2;
+const DARK_SUPPORT_MAX_TEXTURE_PENALTY = 0.02;
+const DARK_SUPPORT_MAX_PRIOR_MEAN_LUMINANCE = 8;
+const DARK_SUPPORT_MAX_CANDIDATE_MEAN_LUMINANCE = 8;
+const DARK_SUPPORT_MAX_PRIOR_MEAN_DELTA = 1.5;
+const DARK_SUPPORT_MAX_PRIOR_MAE = 2.25;
+const DARK_SUPPORT_MAX_PRIOR_WEIGHTED_MAE = 3.5;
+const DARK_SUPPORT_MAX_BOUNDARY_SCORE = 0.3;
+const DARK_SUPPORT_MAX_OPPOSITE_HALO_LUMINANCE = 1;
+const DARK_SUPPORT_MIN_ABS_SPATIAL_IMPROVEMENT = 0.2;
+const DARK_SUPPORT_MIN_GRADIENT_IMPROVEMENT = 0.2;
+const DARK_SUPPORT_PRIOR_RELAXATION_PASSES = 32;
+const DARK_SUPPORT_PRIOR_RADII = Object.freeze([4, 8, 12]);
 const WEAK_ALPHA_FINE_TUNE_MIN_ORIGINAL_SPATIAL = 0.45;
 const WEAK_ALPHA_FINE_TUNE_MIN_POSITIVE_RESIDUAL = 0.05;
 const WEAK_ALPHA_FINE_TUNE_MIN_ABS_SPATIAL_IMPROVEMENT = 0.04;
@@ -296,6 +349,23 @@ const KNOWN_48_POWER_PROFILE_RESCUE_CANDIDATES = Object.freeze([
     { exponent: 1.08, alphaGain: 0.6, maxSpatial: 0.14 },
     { exponent: 0.88, alphaGain: 0.55, maxSpatial: 0.16 }
 ]);
+const LARGE_MARGIN_48_PROFILE_ALPHA_RESCUE = Object.freeze({
+    exponent: 0.9,
+    alphaGain: 0.85
+});
+const LARGE_MARGIN_48_PROFILE_MIN_ORIGINAL_SPATIAL = 0.65;
+const LARGE_MARGIN_48_PROFILE_MIN_ORIGINAL_GRADIENT = 0.4;
+const LARGE_MARGIN_48_PROFILE_MAX_ABS_CURRENT_SPATIAL = 0.1;
+const LARGE_MARGIN_48_PROFILE_MAX_CURRENT_GRADIENT = 0.1;
+const LARGE_MARGIN_48_PROFILE_MIN_CURRENT_POSITIVE_HALO = 12;
+const LARGE_MARGIN_48_PROFILE_MIN_CURRENT_CLIPPED_RATIO = 0.05;
+const LARGE_MARGIN_48_PROFILE_MAX_CURRENT_CLIPPED_RATIO = 0.11;
+const LARGE_MARGIN_48_PROFILE_MAX_CURRENT_ARTIFACT = 0.13;
+const LARGE_MARGIN_48_PROFILE_MAX_SPATIAL = 0.12;
+const LARGE_MARGIN_48_PROFILE_MAX_GRADIENT = 0.1;
+const LARGE_MARGIN_48_PROFILE_MAX_POSITIVE_HALO = 4;
+const LARGE_MARGIN_48_PROFILE_MAX_CLIPPED_RATIO = 0.02;
+const LARGE_MARGIN_48_PROFILE_MAX_ARTIFACT = 0.12;
 const KNOWN_48_POWER_PROFILE_RESCUE_MIN_ORIGINAL_SPATIAL = 0.9;
 const KNOWN_48_POWER_PROFILE_RESCUE_MIN_ORIGINAL_GRADIENT = 0.8;
 const KNOWN_48_POWER_PROFILE_RESCUE_MIN_CURRENT_SPATIAL = 0.3;
@@ -369,6 +439,39 @@ const SMALL_LOCATED_PRIOR_REPAIR_MAX_GRADIENT = 0.24;
 const SMALL_LOCATED_PRIOR_REPAIR_MAX_ARTIFACT = 0.28;
 const SMALL_LOCATED_PRIOR_REPAIR_MAX_CLIPPED = 0.005;
 const SMALL_LOCATED_PRIOR_REPAIR_MAX_DARK_HALO = 3;
+// The extra 3px models the observed projected/JPEG edge footprint around a
+// validated 36px candidate. It is a repair support expansion, not a catalog size.
+const PROJECTED_SMALL_DARK_SUPPORT_SIZE = 36;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_MARGIN = 64;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_MARGIN = 80;
+const PROJECTED_SMALL_DARK_SUPPORT_EXPANSION = 3;
+const PROJECTED_SMALL_DARK_SUPPORT_PRIOR_RADII = Object.freeze([2, 4, 8]);
+const PROJECTED_SMALL_DARK_SUPPORT_PRESET = Object.freeze({
+    minAlpha: 0.002,
+    maxAlpha: 0.99,
+    strength: 1.3,
+    gamma: 0.35
+});
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_ORIGINAL_SPATIAL = 0.95;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_ORIGINAL_GRADIENT = 0.8;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_ORIGINAL_NEAR_BLACK = 0.5;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_CURRENT_SPATIAL = 0.35;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_CURRENT_GRADIENT = 0.35;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_CURRENT_GRADIENT = 0.5;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_POSITIVE_HALO = 12;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_ABS_SPATIAL = 0.18;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_GRADIENT = 0.18;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_ABS_SPATIAL_IMPROVEMENT = 0.2;
+const PROJECTED_SMALL_DARK_SUPPORT_MIN_GRADIENT_IMPROVEMENT = 0.2;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_ARTIFACT = 0.42;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_CLIPPED = 0.005;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_POSITIVE_HALO = 1;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_MEAN_LUMINANCE = 4;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_CANDIDATE_MEAN_LUMINANCE = 4;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_MEAN_DELTA = 0.5;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_MAE = 1;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_WEIGHTED_MAE = 0.5;
+const PROJECTED_SMALL_DARK_SUPPORT_MAX_BOUNDARY_SCORE = 0.35;
 const KNOWN_48_ANTI_TEMPLATE_RESCUE_MID_BOOST_SIZE = 46;
 const KNOWN_48_ANTI_TEMPLATE_RESCUE_MID_BOOST_MARGIN = 97;
 const KNOWN_48_ANTI_TEMPLATE_RESCUE_MID_BOOST_MIN_ALPHA = 0.12;
@@ -576,6 +679,723 @@ function recalibrateAlphaStrength({
     };
 }
 
+function createLocalAlphaSearchInstrumentation({ debugEnabled = false } = {}) {
+    return {
+        debugEnabled,
+        trialCount: 0,
+        trialAllocatedPixels: 0,
+        maxTrialBufferPixels: 0,
+        trialFullImageCloneCount: 0,
+        fullImageMaterializationCount: 0,
+        darkSupportTrialCount: 0,
+        darkSupportAcceptedTrialCount: 0,
+        darkSupportBestProbe: null,
+        acceptedTrials: []
+    };
+}
+
+function createLocalAlphaSearchWindow(
+    imageData,
+    position,
+    scratchPad = LOCAL_ALPHA_SEARCH_SCRATCH_PAD
+) {
+    const x = Math.max(0, position.x - scratchPad);
+    const y = Math.max(0, position.y - scratchPad);
+    const right = Math.min(
+        imageData.width,
+        position.x + position.width + scratchPad
+    );
+    const bottom = Math.min(
+        imageData.height,
+        position.y + position.height + scratchPad
+    );
+    return {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
+        position: {
+            x: position.x - x,
+            y: position.y - y,
+            width: position.width,
+            height: position.height
+        }
+    };
+}
+
+function extractLocalAlphaSearchScratch(imageData, window) {
+    const scratch = {
+        width: window.width,
+        height: window.height,
+        data: new Uint8ClampedArray(window.width * window.height * 4)
+    };
+    for (let row = 0; row < window.height; row++) {
+        const sourceStart = ((window.y + row) * imageData.width + window.x) * 4;
+        const sourceEnd = sourceStart + window.width * 4;
+        scratch.data.set(
+            imageData.data.subarray(sourceStart, sourceEnd),
+            row * window.width * 4
+        );
+    }
+    return scratch;
+}
+
+function createLocalAlphaSearchContext(
+    originalImageData,
+    position,
+    scratchPad = LOCAL_ALPHA_SEARCH_SCRATCH_PAD
+) {
+    const window = createLocalAlphaSearchWindow(
+        originalImageData,
+        position,
+        scratchPad
+    );
+    return {
+        window,
+        position: window.position,
+        originalScratch: extractLocalAlphaSearchScratch(originalImageData, window)
+    };
+}
+
+function cloneLocalAlphaTrialScratch({
+    originalScratch,
+    originalImageData,
+    instrumentation
+}) {
+    const scratch = cloneImageData(originalScratch);
+    if (instrumentation?.debugEnabled === true) {
+        const pixels = scratch.width * scratch.height;
+        instrumentation.trialCount++;
+        instrumentation.trialAllocatedPixels += pixels;
+        instrumentation.maxTrialBufferPixels = Math.max(
+            instrumentation.maxTrialBufferPixels,
+            pixels
+        );
+        if (pixels >= originalImageData.width * originalImageData.height) {
+            instrumentation.trialFullImageCloneCount++;
+        }
+    }
+    return scratch;
+}
+
+function evaluateLocalAlphaGainCandidate({
+    originalImageData,
+    candidateImageData = null,
+    alphaMap,
+    position,
+    alphaGain,
+    originalSpatialScore,
+    originalNearBlackRatio,
+    searchContext = createLocalAlphaSearchContext(originalImageData, position),
+    instrumentation = null
+}) {
+    const scratchPosition = searchContext.position;
+    const scratchImageData = candidateImageData
+        ? extractLocalAlphaSearchScratch(candidateImageData, searchContext.window)
+        : cloneLocalAlphaTrialScratch({
+            originalScratch: searchContext.originalScratch,
+            originalImageData,
+            instrumentation
+        });
+    if (!candidateImageData) {
+        removeWatermark(scratchImageData, alphaMap, scratchPosition, { alphaGain });
+    }
+
+    const spatialScore = computeRegionSpatialCorrelation({
+        imageData: scratchImageData,
+        alphaMap,
+        region: {
+            x: scratchPosition.x,
+            y: scratchPosition.y,
+            size: scratchPosition.width
+        }
+    });
+    const gradientScore = computeRegionGradientCorrelation({
+        imageData: scratchImageData,
+        alphaMap,
+        region: {
+            x: scratchPosition.x,
+            y: scratchPosition.y,
+            size: scratchPosition.width
+        }
+    });
+    const nearBlackRatio = calculateNearBlackRatio(scratchImageData, scratchPosition);
+    const nearBlackIncrease = nearBlackRatio - originalNearBlackRatio;
+    const texture = assessReferenceTextureAlignmentFromStats({
+        originalImageData,
+        referenceImageData: originalImageData,
+        candidateTextureStats: getRegionTextureStats(
+            scratchImageData,
+            scratchPosition
+        ),
+        position
+    });
+    const artifacts = assessRemovalDiffArtifacts({
+        originalImageData: searchContext.originalScratch,
+        candidateImageData: scratchImageData,
+        alphaMap,
+        position: scratchPosition,
+        alphaGain
+    });
+    const damage = scoreDamage({
+        hardReject: texture?.hardReject === true,
+        nearBlackIncrease,
+        texturePenalty: texture?.texturePenalty ?? 0,
+        newlyClippedRatio: artifacts?.newlyClippedRatio ?? 0,
+        halo: artifacts?.halo ?? null
+    });
+    const suppressionGain = originalSpatialScore - spatialScore;
+    const residual = scoreResidual({
+        processedSpatial: spatialScore,
+        processedGradient: gradientScore,
+        suppressionGain,
+        artifactCost: artifacts?.visualArtifactCost ?? 0
+    });
+    const residualVisibility = assessWatermarkResidualVisibility({
+        imageData: scratchImageData,
+        position: scratchPosition,
+        alphaMap
+    });
+    const cost = residual.score + damage.penalty * LOCAL_ALPHA_SEARCH_DAMAGE_WEIGHT;
+
+    return {
+        scratchImageData,
+        alphaMap,
+        position,
+        alphaGain,
+        spatialScore,
+        gradientScore,
+        nearBlackRatio,
+        nearBlackIncrease,
+        suppressionGain,
+        texture,
+        artifacts,
+        damage,
+        residual,
+        residualVisibility,
+        cost
+    };
+}
+
+function measureDarkSupportClipping({
+    originalImageData,
+    candidateImageData,
+    alphaMap,
+    position
+}) {
+    let newlyClippedCount = 0;
+    let outsideAlphaSupportCount = 0;
+    let strongAlphaSupportCount = 0;
+    const total = position.width * position.height;
+
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const localIndex = row * position.width + col;
+            const pixelIndex = (
+                (position.y + row) * originalImageData.width +
+                position.x +
+                col
+            ) * 4;
+            const newlyClipped = [0, 1, 2].some((channel) => (
+                candidateImageData.data[pixelIndex + channel] === 0 &&
+                originalImageData.data[pixelIndex + channel] > 5
+            ));
+            if (!newlyClipped) continue;
+
+            newlyClippedCount++;
+            const alpha = Math.abs(alphaMap[localIndex]);
+            if (alpha < DARK_SUPPORT_ALPHA_MIN) {
+                outsideAlphaSupportCount++;
+            }
+            if (alpha >= DARK_SUPPORT_ALPHA_STRONG_MIN) {
+                strongAlphaSupportCount++;
+            }
+        }
+    }
+
+    return {
+        newlyClippedRatio: newlyClippedCount / Math.max(1, total),
+        outsideAlphaSupportRatio: newlyClippedCount > 0
+            ? outsideAlphaSupportCount / newlyClippedCount
+            : 0,
+        strongAlphaSupportRatio: newlyClippedCount > 0
+            ? strongAlphaSupportCount / newlyClippedCount
+            : 1
+    };
+}
+
+function measureDarkSupportPriorConvergence({
+    candidateImageData,
+    priorImageData,
+    alphaMap,
+    position
+}) {
+    let absoluteDelta = 0;
+    let weightedAbsoluteDelta = 0;
+    let alphaWeight = 0;
+    let candidateLuminance = 0;
+    let priorLuminance = 0;
+    let channelCount = 0;
+    let pixelCount = 0;
+
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const localIndex = row * position.width + col;
+            const alpha = Math.abs(alphaMap[localIndex]);
+            const pixelIndex = (
+                (position.y + row) * candidateImageData.width +
+                position.x +
+                col
+            ) * 4;
+            const candidateR = candidateImageData.data[pixelIndex];
+            const candidateG = candidateImageData.data[pixelIndex + 1];
+            const candidateB = candidateImageData.data[pixelIndex + 2];
+            const priorR = priorImageData.data[pixelIndex];
+            const priorG = priorImageData.data[pixelIndex + 1];
+            const priorB = priorImageData.data[pixelIndex + 2];
+
+            for (let channel = 0; channel < 3; channel++) {
+                const delta = Math.abs(
+                    candidateImageData.data[pixelIndex + channel] -
+                    priorImageData.data[pixelIndex + channel]
+                );
+                absoluteDelta += delta;
+                weightedAbsoluteDelta += delta * alpha;
+                channelCount++;
+            }
+            alphaWeight += alpha;
+            candidateLuminance += (
+                0.2126 * candidateR +
+                0.7152 * candidateG +
+                0.0722 * candidateB
+            );
+            priorLuminance += (
+                0.2126 * priorR +
+                0.7152 * priorG +
+                0.0722 * priorB
+            );
+            pixelCount++;
+        }
+    }
+
+    const candidateMeanLuminance =
+        candidateLuminance / Math.max(1, pixelCount);
+    const priorMeanLuminance = priorLuminance / Math.max(1, pixelCount);
+    return {
+        meanAbsoluteDelta: absoluteDelta / Math.max(1, channelCount),
+        weightedMeanAbsoluteDelta:
+            weightedAbsoluteDelta / Math.max(1e-8, alphaWeight * 3),
+        candidateMeanLuminance,
+        priorMeanLuminance,
+        meanLuminanceDelta: Math.abs(
+            candidateMeanLuminance -
+            priorMeanLuminance
+        )
+    };
+}
+
+function createDarkSupportSearchContext(originalImageData, position) {
+    const searchContext = createLocalAlphaSearchContext(
+        originalImageData,
+        position,
+        DARK_SUPPORT_SEARCH_SCRATCH_PAD
+    );
+    const priors = DARK_SUPPORT_PRIOR_RADII.map((radius) => ({
+        radius,
+        imageData: buildPreviewNeighborhoodPrior({
+            previewImageData: searchContext.originalScratch,
+            position: searchContext.position,
+            radius,
+            relaxationPasses: DARK_SUPPORT_PRIOR_RELAXATION_PASSES
+        })
+    }));
+    return {
+        ...searchContext,
+        priors
+    };
+}
+
+function assessDarkBackgroundSupportConvergence({
+    candidate,
+    searchContext
+}) {
+    const priorMetrics = searchContext.priors.map(({ radius, imageData }) => ({
+        radius,
+        ...measureDarkSupportPriorConvergence({
+            candidateImageData: candidate.scratchImageData,
+            priorImageData: imageData,
+            alphaMap: candidate.alphaMap,
+            position: searchContext.position
+        })
+    }));
+    const clipping = measureDarkSupportClipping({
+        originalImageData: searchContext.originalScratch,
+        candidateImageData: candidate.scratchImageData,
+        alphaMap: candidate.alphaMap,
+        position: searchContext.position
+    });
+    const boundary = measurePreviewBoundaryMetrics(
+        candidate.scratchImageData,
+        searchContext.originalScratch,
+        searchContext.position
+    );
+    const maximumPriorMeanLuminance = Math.max(
+        ...priorMetrics.map((item) => item.priorMeanLuminance)
+    );
+    const maximumCandidateMeanLuminance = Math.max(
+        ...priorMetrics.map((item) => item.candidateMeanLuminance)
+    );
+    const maximumPriorMeanDelta = Math.max(
+        ...priorMetrics.map((item) => item.meanLuminanceDelta)
+    );
+    const maximumPriorMae = Math.max(
+        ...priorMetrics.map((item) => item.meanAbsoluteDelta)
+    );
+    const maximumPriorWeightedMae = Math.max(
+        ...priorMetrics.map((item) => item.weightedMeanAbsoluteDelta)
+    );
+    const accepted = Boolean(
+        candidate.residualVisibility?.visible === false &&
+        Math.abs(candidate.spatialScore) <= DARK_SUPPORT_MAX_ABS_SPATIAL &&
+        candidate.gradientScore <= DARK_SUPPORT_MAX_GRADIENT &&
+        candidate.texture?.hardReject !== true &&
+        Number(candidate.texture?.texturePenalty ?? Infinity) <=
+            DARK_SUPPORT_MAX_TEXTURE_PENALTY &&
+        Number(candidate.artifacts?.newlyClippedRatio ?? Infinity) <=
+            DARK_SUPPORT_MAX_NEWLY_CLIPPED_RATIO &&
+        Number(candidate.artifacts?.oppositeDirectionHaloLum ?? Infinity) <=
+            DARK_SUPPORT_MAX_OPPOSITE_HALO_LUMINANCE &&
+        clipping.outsideAlphaSupportRatio <=
+            DARK_SUPPORT_MAX_OUTSIDE_ALPHA_CLIP_RATIO &&
+        clipping.strongAlphaSupportRatio >=
+            DARK_SUPPORT_MIN_STRONG_ALPHA_CLIP_RATIO &&
+        maximumPriorMeanLuminance <=
+            DARK_SUPPORT_MAX_PRIOR_MEAN_LUMINANCE &&
+        maximumCandidateMeanLuminance <=
+            DARK_SUPPORT_MAX_CANDIDATE_MEAN_LUMINANCE &&
+        maximumPriorMeanDelta <= DARK_SUPPORT_MAX_PRIOR_MEAN_DELTA &&
+        maximumPriorMae <= DARK_SUPPORT_MAX_PRIOR_MAE &&
+        maximumPriorWeightedMae <= DARK_SUPPORT_MAX_PRIOR_WEIGHTED_MAE &&
+        boundary.normalizedScore <= DARK_SUPPORT_MAX_BOUNDARY_SCORE
+    );
+
+    return {
+        accepted,
+        priorRadii: [...DARK_SUPPORT_PRIOR_RADII],
+        maximumPriorMeanLuminance,
+        maximumCandidateMeanLuminance,
+        maximumPriorMeanDelta,
+        maximumPriorMae,
+        maximumPriorWeightedMae,
+        boundaryScore: boundary.normalizedScore,
+        clipping
+    };
+}
+
+function materializeLocalAlphaGainCandidate({
+    candidate,
+    originalImageData,
+    instrumentation
+}) {
+    const imageData = cloneImageData(originalImageData);
+    if (instrumentation?.debugEnabled === true) {
+        instrumentation.fullImageMaterializationCount++;
+    }
+    removeWatermark(imageData, candidate.alphaMap, candidate.position, {
+        alphaGain: candidate.alphaGain
+    });
+    const { scratchImageData, ...rest } = candidate;
+    return {
+        ...rest,
+        imageData
+    };
+}
+
+function isEligibleLocalAlphaGainCandidate(candidate) {
+    const standardEligible = Boolean(
+        candidate &&
+        candidate.residualVisibility?.visible === false &&
+        Math.abs(candidate.spatialScore) <= LOCAL_ALPHA_SEARCH_MAX_ABS_SPATIAL &&
+        candidate.gradientScore <= LOCAL_ALPHA_SEARCH_MAX_GRADIENT &&
+        (candidate.artifacts?.newlyClippedRatio ?? 0) <=
+            LOCAL_ALPHA_SEARCH_MAX_NEWLY_CLIPPED_RATIO
+    );
+    return standardEligible ||
+        candidate?.darkBackgroundSupportConvergence?.accepted === true;
+}
+
+function pickBetterLocalAlphaGainCandidate(currentBest, candidate) {
+    if (!isEligibleLocalAlphaGainCandidate(candidate)) return currentBest;
+    if (!currentBest) return candidate;
+    if (candidate.damage.safe !== currentBest.damage.safe) {
+        return candidate.damage.safe ? candidate : currentBest;
+    }
+    if (candidate.cost < currentBest.cost - LOCAL_ALPHA_SEARCH_COST_TIE) {
+        return candidate;
+    }
+    if (
+        Math.abs(candidate.cost - currentBest.cost) <= LOCAL_ALPHA_SEARCH_COST_TIE &&
+        candidate.alphaGain > currentBest.alphaGain
+    ) {
+        return candidate;
+    }
+    return currentBest;
+}
+
+function fineTuneEvidenceGatedLocalAlpha({
+    originalImageData,
+    currentImageData,
+    alphaMap,
+    position,
+    currentSpatialScore,
+    currentGradientScore,
+    currentAlphaGain,
+    originalSpatialScore,
+    originalGradientScore,
+    originalNearBlackRatio,
+    instrumentation = null
+}) {
+    if (
+        position?.width !== 48 ||
+        position?.height !== 48 ||
+        originalSpatialScore < LOCAL_ALPHA_SEARCH_MIN_ORIGINAL_SPATIAL ||
+        originalGradientScore < LOCAL_ALPHA_SEARCH_MIN_ORIGINAL_GRADIENT ||
+        !Number.isFinite(currentAlphaGain) ||
+        currentAlphaGain <= 0
+    ) {
+        return null;
+    }
+
+    const searchContext = createLocalAlphaSearchContext(originalImageData, position);
+    if (
+        currentAlphaGain < 1 &&
+        assessWatermarkResidualVisibility({
+            imageData: currentImageData,
+            position,
+            alphaMap
+        })?.visible !== true
+    ) {
+        return null;
+    }
+
+    const current = evaluateLocalAlphaGainCandidate({
+        originalImageData,
+        candidateImageData: currentImageData,
+        alphaMap,
+        position,
+        alphaGain: currentAlphaGain,
+        originalSpatialScore,
+        originalNearBlackRatio,
+        searchContext
+    });
+    const damageTriggered = currentAlphaGain === 1 && current.damage.safe === false;
+    const overshootTriggered =
+        currentAlphaGain < 1 &&
+        current.residualVisibility?.visible === true &&
+        currentSpatialScore <= OVER_SUBTRACTION_SPATIAL_THRESHOLD;
+    if (!damageTriggered && !overshootTriggered) return null;
+
+    let best = null;
+    let trigger = null;
+
+    if (damageTriggered) {
+        let lowerBracket = null;
+        const coarseStepCount = Math.round(
+            LOCAL_ALPHA_SEARCH_DAMAGE_MAX_DROP / LOCAL_ALPHA_SEARCH_DAMAGE_COARSE_STEP
+        );
+        for (let step = 1; step <= coarseStepCount; step++) {
+            const alphaGain = Number((
+                currentAlphaGain - step * LOCAL_ALPHA_SEARCH_DAMAGE_COARSE_STEP
+            ).toFixed(3));
+            if (alphaGain <= 0) break;
+            const candidate = evaluateLocalAlphaGainCandidate({
+                originalImageData,
+                alphaMap,
+                position,
+                alphaGain,
+                originalSpatialScore,
+                originalNearBlackRatio,
+                searchContext,
+                instrumentation
+            });
+            if (
+                candidate.damage.safe === true &&
+                (candidate.artifacts?.newlyClippedRatio ?? 0) <=
+                    LOCAL_ALPHA_SEARCH_MAX_NEWLY_CLIPPED_RATIO
+            ) {
+                lowerBracket = candidate;
+                break;
+            }
+        }
+        if (!lowerBracket) {
+            if (
+                originalSpatialScore <
+                    DARK_SUPPORT_SEARCH_MIN_ORIGINAL_SPATIAL ||
+                originalGradientScore <
+                    DARK_SUPPORT_SEARCH_MIN_ORIGINAL_GRADIENT ||
+                originalNearBlackRatio <
+                    DARK_SUPPORT_SEARCH_MIN_ORIGINAL_NEAR_BLACK
+            ) {
+                return null;
+            }
+
+            const darkSupportSearchContext = createDarkSupportSearchContext(
+                originalImageData,
+                position
+            );
+            const stepCount = Math.round(
+                (
+                    DARK_SUPPORT_SEARCH_MAX_GAIN -
+                    DARK_SUPPORT_SEARCH_MIN_GAIN
+                ) /
+                DARK_SUPPORT_SEARCH_GAIN_STEP
+            );
+            for (let step = 0; step <= stepCount; step++) {
+                const alphaGain = Number((
+                    DARK_SUPPORT_SEARCH_MIN_GAIN +
+                    step * DARK_SUPPORT_SEARCH_GAIN_STEP
+                ).toFixed(3));
+                const candidate = evaluateLocalAlphaGainCandidate({
+                    originalImageData,
+                    alphaMap,
+                    position,
+                    alphaGain,
+                    originalSpatialScore,
+                    originalNearBlackRatio,
+                    searchContext: darkSupportSearchContext,
+                    instrumentation
+                });
+                candidate.darkBackgroundSupportConvergence =
+                    assessDarkBackgroundSupportConvergence({
+                        candidate,
+                        searchContext: darkSupportSearchContext
+                    });
+                if (instrumentation?.debugEnabled === true) {
+                    instrumentation.darkSupportTrialCount++;
+                    if (
+                        candidate.darkBackgroundSupportConvergence.accepted ===
+                        true
+                    ) {
+                        instrumentation.darkSupportAcceptedTrialCount++;
+                        if (
+                            !instrumentation.darkSupportBestProbe ||
+                            candidate.cost <
+                                instrumentation.darkSupportBestProbe.cost
+                        ) {
+                            instrumentation.darkSupportBestProbe = {
+                                alphaGain,
+                                spatialScore: candidate.spatialScore,
+                                gradientScore: candidate.gradientScore,
+                                cost: candidate.cost,
+                                damageSafe: candidate.damage.safe === true,
+                                convergence:
+                                    candidate.darkBackgroundSupportConvergence
+                            };
+                        }
+                    }
+                }
+                if (
+                    candidate.darkBackgroundSupportConvergence.accepted !== true
+                ) {
+                    continue;
+                }
+                best = pickBetterLocalAlphaGainCandidate(best, candidate);
+            }
+            if (!best) return null;
+            trigger = 'dark-background-support';
+        } else {
+            const fineStepCount = Math.floor(
+                (currentAlphaGain - lowerBracket.alphaGain) /
+                LOCAL_ALPHA_SEARCH_FINE_STEP
+            );
+            for (let step = 0; step <= fineStepCount; step++) {
+                const alphaGain = Number((
+                    lowerBracket.alphaGain + step * LOCAL_ALPHA_SEARCH_FINE_STEP
+                ).toFixed(3));
+                if (alphaGain >= currentAlphaGain) continue;
+                const candidate = step === 0
+                    ? lowerBracket
+                    : evaluateLocalAlphaGainCandidate({
+                        originalImageData,
+                        alphaMap,
+                        position,
+                        alphaGain,
+                        originalSpatialScore,
+                        originalNearBlackRatio,
+                        searchContext,
+                        instrumentation
+                    });
+                best = pickBetterLocalAlphaGainCandidate(best, candidate);
+            }
+            trigger = 'damage';
+        }
+    } else {
+        const stepCount = Math.round(
+            LOCAL_ALPHA_SEARCH_OVERSHOOT_WINDOW / LOCAL_ALPHA_SEARCH_OVERSHOOT_STEP
+        );
+        for (let step = stepCount; step >= 1; step--) {
+            const alphaGain = Number((
+                currentAlphaGain - step * LOCAL_ALPHA_SEARCH_OVERSHOOT_STEP
+            ).toFixed(3));
+            if (alphaGain <= 0) continue;
+            const candidate = evaluateLocalAlphaGainCandidate({
+                originalImageData,
+                alphaMap,
+                position,
+                alphaGain,
+                originalSpatialScore,
+                originalNearBlackRatio,
+                searchContext,
+                instrumentation
+            });
+            best = pickBetterLocalAlphaGainCandidate(best, candidate);
+        }
+        trigger = 'overshoot';
+    }
+
+    const darkSupportImproved = Boolean(
+        trigger === 'dark-background-support' &&
+        best?.darkBackgroundSupportConvergence?.accepted === true &&
+        Math.abs(current.spatialScore) - Math.abs(best.spatialScore) >=
+            DARK_SUPPORT_MIN_ABS_SPATIAL_IMPROVEMENT &&
+        current.gradientScore - best.gradientScore >=
+            DARK_SUPPORT_MIN_GRADIENT_IMPROVEMENT
+    );
+    if (
+        !best ||
+        (
+            !darkSupportImproved &&
+            best.cost > current.cost - LOCAL_ALPHA_SEARCH_MIN_COST_IMPROVEMENT
+        )
+    ) {
+        return null;
+    }
+
+    const materialized = materializeLocalAlphaGainCandidate({
+        candidate: best,
+        originalImageData,
+        instrumentation
+    });
+    instrumentation?.acceptedTrials.push({
+        trigger,
+        damageSafe: best.damage.safe === true,
+        darkBackgroundSupportConvergence:
+            best.darkBackgroundSupportConvergence ?? null,
+        alphaMap: best.alphaMap,
+        position: best.position,
+        alphaGain: best.alphaGain,
+        spatialScore: best.spatialScore,
+        gradientScore: best.gradientScore
+    });
+
+    return {
+        ...materialized,
+        localSearchTrigger: trigger,
+        beforeDamage: current.damage,
+        beforeResidual: current.residual
+    };
+}
+
 function recalibrateOverSubtractedAlpha({
     originalImageData,
     alphaMap,
@@ -679,6 +1499,7 @@ function recalibrateOverSubtractedAlpha({
 
 function fineTuneWeakPositiveResidualAlpha({
     originalImageData,
+    currentImageData,
     alphaMap,
     position,
     currentSpatialScore,
@@ -695,6 +1516,14 @@ function fineTuneWeakPositiveResidualAlpha({
     ) {
         return null;
     }
+    const currentResidualVisibility = currentImageData
+        ? assessWatermarkResidualVisibility({
+            imageData: currentImageData,
+            position,
+            alphaMap
+        })
+        : null;
+    if (currentResidualVisibility?.visible === false) return null;
 
     const maxAllowedNearBlackRatio = Math.min(1, originalNearBlackRatio + MAX_NEAR_BLACK_RATIO_INCREASE);
     let best = null;
@@ -3212,6 +4041,97 @@ function scoreKnown48AntiTemplateRescueCandidate({
     };
 }
 
+function refineLargeMargin48ProfileAlphaRescue({
+    originalImageData,
+    currentImageData,
+    currentAlphaMap,
+    currentPosition,
+    currentConfig,
+    currentSpatialScore,
+    currentGradientScore,
+    currentAlphaGain,
+    originalSpatialScore,
+    originalGradientScore
+}) {
+    if (
+        !isKnown48LargeMarginConfig(currentConfig) ||
+        currentPosition?.width !== 48 ||
+        currentPosition?.height !== 48 ||
+        currentAlphaGain !== 1 ||
+        originalSpatialScore < LARGE_MARGIN_48_PROFILE_MIN_ORIGINAL_SPATIAL ||
+        originalGradientScore < LARGE_MARGIN_48_PROFILE_MIN_ORIGINAL_GRADIENT ||
+        Math.abs(currentSpatialScore) > LARGE_MARGIN_48_PROFILE_MAX_ABS_CURRENT_SPATIAL ||
+        currentGradientScore > LARGE_MARGIN_48_PROFILE_MAX_CURRENT_GRADIENT
+    ) {
+        return null;
+    }
+
+    const currentVisibility = assessWatermarkResidualVisibility({
+        imageData: currentImageData,
+        position: currentPosition,
+        alphaMap: currentAlphaMap
+    });
+    if (
+        currentVisibility?.visible !== true ||
+        currentVisibility.positiveHaloLum < LARGE_MARGIN_48_PROFILE_MIN_CURRENT_POSITIVE_HALO
+    ) {
+        return null;
+    }
+
+    const currentArtifacts = assessRemovalDiffArtifacts({
+        originalImageData,
+        candidateImageData: currentImageData,
+        alphaMap: currentAlphaMap,
+        position: currentPosition,
+        alphaGain: currentAlphaGain
+    });
+    const currentClippedRatio = currentArtifacts?.newlyClippedRatio ?? 0;
+    if (
+        currentClippedRatio < LARGE_MARGIN_48_PROFILE_MIN_CURRENT_CLIPPED_RATIO ||
+        currentClippedRatio > LARGE_MARGIN_48_PROFILE_MAX_CURRENT_CLIPPED_RATIO ||
+        (currentArtifacts?.visualArtifactCost ?? Infinity) >
+            LARGE_MARGIN_48_PROFILE_MAX_CURRENT_ARTIFACT
+    ) {
+        return null;
+    }
+
+    const profileAlphaMap = powerKnown48AlphaMap(
+        currentAlphaMap,
+        LARGE_MARGIN_48_PROFILE_ALPHA_RESCUE.exponent
+    );
+    const candidate = scoreKnown48AntiTemplateRescueCandidate({
+        originalImageData,
+        alphaMap: profileAlphaMap,
+        position: currentPosition,
+        alphaGain: LARGE_MARGIN_48_PROFILE_ALPHA_RESCUE.alphaGain,
+        baselineGradientScore: currentGradientScore,
+        maxSpatial: LARGE_MARGIN_48_PROFILE_MAX_SPATIAL,
+        maxVisualArtifact: LARGE_MARGIN_48_PROFILE_MAX_ARTIFACT
+    });
+    if (
+        !candidate ||
+        candidate.residualVisibility?.visible !== false ||
+        candidate.gradientScore > LARGE_MARGIN_48_PROFILE_MAX_GRADIENT ||
+        candidate.residualVisibility.positiveHaloLum >
+            LARGE_MARGIN_48_PROFILE_MAX_POSITIVE_HALO ||
+        (candidate.artifacts?.newlyClippedRatio ?? Infinity) >
+            LARGE_MARGIN_48_PROFILE_MAX_CLIPPED_RATIO ||
+        (candidate.artifacts?.visualArtifactCost ?? Infinity) >
+            LARGE_MARGIN_48_PROFILE_MAX_ARTIFACT
+    ) {
+        return null;
+    }
+
+    return {
+        ...candidate,
+        alphaMapSource: 'known-48-power-0.90',
+        profileExponent: LARGE_MARGIN_48_PROFILE_ALPHA_RESCUE.exponent,
+        originalSpatialScore,
+        originalGradientScore,
+        suppressionGain: originalSpatialScore - candidate.spatialScore
+    };
+}
+
 function refineKnown48AntiTemplateResidual({
     originalImageData,
     currentImageData,
@@ -4045,6 +4965,258 @@ function refineKnown48SmallMarginPriorRepairResidual({
     return best;
 }
 
+function refineProjectedSmallDarkSupportResidual({
+    originalImageData,
+    currentImageData,
+    currentAlphaMap,
+    currentPosition,
+    currentConfig,
+    currentSpatialScore,
+    currentGradientScore,
+    currentAlphaGain,
+    originalSpatialScore,
+    originalGradientScore,
+    source
+}) {
+    const marginRight = Number(currentConfig?.marginRight);
+    const marginBottom = Number(currentConfig?.marginBottom);
+    if (
+        typeof source !== 'string' ||
+        !source.includes('preview-anchor') ||
+        !source.includes('located-aggressive') ||
+        currentPosition?.width !== PROJECTED_SMALL_DARK_SUPPORT_SIZE ||
+        currentPosition?.height !== PROJECTED_SMALL_DARK_SUPPORT_SIZE ||
+        currentConfig?.logoSize !== PROJECTED_SMALL_DARK_SUPPORT_SIZE ||
+        currentConfig?.alphaVariant ||
+        !Number.isFinite(marginRight) ||
+        !Number.isFinite(marginBottom) ||
+        marginRight < PROJECTED_SMALL_DARK_SUPPORT_MIN_MARGIN ||
+        marginRight > PROJECTED_SMALL_DARK_SUPPORT_MAX_MARGIN ||
+        marginBottom < PROJECTED_SMALL_DARK_SUPPORT_MIN_MARGIN ||
+        marginBottom > PROJECTED_SMALL_DARK_SUPPORT_MAX_MARGIN ||
+        originalSpatialScore < PROJECTED_SMALL_DARK_SUPPORT_MIN_ORIGINAL_SPATIAL ||
+        originalGradientScore < PROJECTED_SMALL_DARK_SUPPORT_MIN_ORIGINAL_GRADIENT ||
+        currentSpatialScore < PROJECTED_SMALL_DARK_SUPPORT_MIN_CURRENT_SPATIAL ||
+        currentGradientScore < PROJECTED_SMALL_DARK_SUPPORT_MIN_CURRENT_GRADIENT ||
+        currentGradientScore > PROJECTED_SMALL_DARK_SUPPORT_MAX_CURRENT_GRADIENT
+    ) {
+        return null;
+    }
+
+    const originalNearBlackRatio = calculateNearBlackRatio(
+        originalImageData,
+        currentPosition
+    );
+    const currentVisibility = assessWatermarkResidualVisibility({
+        imageData: currentImageData,
+        position: currentPosition,
+        alphaMap: currentAlphaMap
+    });
+    if (
+        originalNearBlackRatio < PROJECTED_SMALL_DARK_SUPPORT_MIN_ORIGINAL_NEAR_BLACK ||
+        currentVisibility?.visible !== true ||
+        currentVisibility.visiblePositiveHalo !== true ||
+        Number(currentVisibility.positiveHaloLum ?? 0) <
+            PROJECTED_SMALL_DARK_SUPPORT_MIN_POSITIVE_HALO
+    ) {
+        return null;
+    }
+
+    const expansion = PROJECTED_SMALL_DARK_SUPPORT_EXPANSION;
+    const expandedSize = currentPosition.width + expansion * 2;
+    const expandedPosition = {
+        x: currentPosition.x - expansion,
+        y: currentPosition.y - expansion,
+        width: expandedSize,
+        height: expandedSize
+    };
+    if (
+        expandedPosition.x < 0 ||
+        expandedPosition.y < 0 ||
+        expandedPosition.x + expandedPosition.width > originalImageData.width ||
+        expandedPosition.y + expandedPosition.height > originalImageData.height
+    ) {
+        return null;
+    }
+
+    const expandedAlphaMap = interpolateAlphaMap(
+        currentAlphaMap,
+        currentPosition.width,
+        expandedSize
+    );
+    const priors = PROJECTED_SMALL_DARK_SUPPORT_PRIOR_RADII.map((radius) => ({
+        radius,
+        imageData: buildPreviewNeighborhoodPrior({
+            previewImageData: originalImageData,
+            position: expandedPosition,
+            radius,
+            relaxationPasses: DARK_SUPPORT_PRIOR_RELAXATION_PASSES
+        })
+    }));
+    let best = null;
+
+    for (const prior of priors) {
+        const candidateImageData = applyKnown48BoundaryRepair({
+            imageData: currentImageData,
+            priorImageData: prior.imageData,
+            alphaMap: expandedAlphaMap,
+            position: expandedPosition,
+            preset: PROJECTED_SMALL_DARK_SUPPORT_PRESET
+        });
+        const spatialScore = computeRegionSpatialCorrelation({
+            imageData: candidateImageData,
+            alphaMap: currentAlphaMap,
+            region: {
+                x: currentPosition.x,
+                y: currentPosition.y,
+                size: currentPosition.width
+            }
+        });
+        const gradientScore = computeRegionGradientCorrelation({
+            imageData: candidateImageData,
+            alphaMap: currentAlphaMap,
+            region: {
+                x: currentPosition.x,
+                y: currentPosition.y,
+                size: currentPosition.width
+            }
+        });
+        const residualVisibility = assessWatermarkResidualVisibility({
+            imageData: candidateImageData,
+            position: currentPosition,
+            alphaMap: currentAlphaMap
+        });
+        const artifacts = assessRemovalDiffArtifacts({
+            originalImageData,
+            candidateImageData,
+            alphaMap: currentAlphaMap,
+            position: currentPosition,
+            alphaGain: currentAlphaGain
+        });
+        const expandedArtifacts = assessRemovalDiffArtifacts({
+            originalImageData,
+            candidateImageData,
+            alphaMap: expandedAlphaMap,
+            position: expandedPosition,
+            alphaGain: currentAlphaGain
+        });
+        const priorMetrics = priors.map((candidatePrior) => ({
+            radius: candidatePrior.radius,
+            ...measureDarkSupportPriorConvergence({
+                candidateImageData,
+                priorImageData: candidatePrior.imageData,
+                alphaMap: expandedAlphaMap,
+                position: expandedPosition
+            })
+        }));
+        const clipping = measureDarkSupportClipping({
+            originalImageData,
+            candidateImageData,
+            alphaMap: expandedAlphaMap,
+            position: expandedPosition
+        });
+        const boundary = measurePreviewBoundaryMetrics(
+            candidateImageData,
+            originalImageData,
+            expandedPosition
+        );
+        const maximumPriorMeanLuminance = Math.max(
+            ...priorMetrics.map((item) => item.priorMeanLuminance)
+        );
+        const maximumCandidateMeanLuminance = Math.max(
+            ...priorMetrics.map((item) => item.candidateMeanLuminance)
+        );
+        const maximumPriorMeanDelta = Math.max(
+            ...priorMetrics.map((item) => item.meanLuminanceDelta)
+        );
+        const maximumPriorMae = Math.max(
+            ...priorMetrics.map((item) => item.meanAbsoluteDelta)
+        );
+        const maximumPriorWeightedMae = Math.max(
+            ...priorMetrics.map((item) => item.weightedMeanAbsoluteDelta)
+        );
+        const spatialImprovement =
+            Math.abs(currentSpatialScore) - Math.abs(spatialScore);
+        const gradientImprovement = currentGradientScore - gradientScore;
+        const visualArtifactCost = Number(
+            expandedArtifacts?.visualArtifactCost ?? Infinity
+        );
+        const accepted = Boolean(
+            residualVisibility?.visible === false &&
+            Math.abs(spatialScore) <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_ABS_SPATIAL &&
+            gradientScore <= PROJECTED_SMALL_DARK_SUPPORT_MAX_GRADIENT &&
+            spatialImprovement >=
+                PROJECTED_SMALL_DARK_SUPPORT_MIN_ABS_SPATIAL_IMPROVEMENT &&
+            gradientImprovement >=
+                PROJECTED_SMALL_DARK_SUPPORT_MIN_GRADIENT_IMPROVEMENT &&
+            visualArtifactCost <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_ARTIFACT &&
+            Number(expandedArtifacts?.newlyClippedRatio ?? Infinity) <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_CLIPPED &&
+            Number(residualVisibility?.positiveHaloLum ?? Infinity) <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_POSITIVE_HALO &&
+            clipping.outsideAlphaSupportRatio <=
+                DARK_SUPPORT_MAX_OUTSIDE_ALPHA_CLIP_RATIO &&
+            clipping.strongAlphaSupportRatio >=
+                DARK_SUPPORT_MIN_STRONG_ALPHA_CLIP_RATIO &&
+            maximumPriorMeanLuminance <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_MEAN_LUMINANCE &&
+            maximumCandidateMeanLuminance <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_CANDIDATE_MEAN_LUMINANCE &&
+            maximumPriorMeanDelta <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_MEAN_DELTA &&
+            maximumPriorMae <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_MAE &&
+            maximumPriorWeightedMae <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_PRIOR_WEIGHTED_MAE &&
+            boundary.normalizedScore <=
+                PROJECTED_SMALL_DARK_SUPPORT_MAX_BOUNDARY_SCORE
+        );
+        if (!accepted) continue;
+
+        const darkBackgroundSupportConvergence = {
+            accepted: true,
+            mode: 'projected-small-dark-support',
+            textureHardRejectResolved: true,
+            supportExpansion: expansion,
+            selectedPriorRadius: prior.radius,
+            priorRadii: [...PROJECTED_SMALL_DARK_SUPPORT_PRIOR_RADII],
+            maximumPriorMeanLuminance,
+            maximumCandidateMeanLuminance,
+            maximumPriorMeanDelta,
+            maximumPriorMae,
+            maximumPriorWeightedMae,
+            boundaryScore: boundary.normalizedScore,
+            clipping
+        };
+        const cost =
+            Math.abs(spatialScore) +
+            Math.max(0, gradientScore) * 0.7 +
+            visualArtifactCost * 0.35;
+        if (!best || cost < best.cost) {
+            best = {
+                imageData: candidateImageData,
+                alphaMap: currentAlphaMap,
+                position: currentPosition,
+                config: currentConfig,
+                alphaGain: currentAlphaGain,
+                spatialScore,
+                gradientScore,
+                residualVisibility,
+                artifacts,
+                expandedArtifacts,
+                spatialImprovement,
+                suppressionGain: originalSpatialScore - spatialScore,
+                darkBackgroundSupportConvergence,
+                cost
+            };
+        }
+    }
+
+    return best;
+}
+
 function refineSmallLocatedPriorRepairResidual({
     originalImageData,
     currentImageData,
@@ -4058,6 +5230,21 @@ function refineSmallLocatedPriorRepairResidual({
     originalGradientScore,
     source
 }) {
+    const projectedSmallDarkSupport = refineProjectedSmallDarkSupportResidual({
+        originalImageData,
+        currentImageData,
+        currentAlphaMap,
+        currentPosition,
+        currentConfig,
+        currentSpatialScore,
+        currentGradientScore,
+        currentAlphaGain,
+        originalSpatialScore,
+        originalGradientScore,
+        source
+    });
+    if (projectedSmallDarkSupport) return projectedSmallDarkSupport;
+
     if (
         typeof source !== 'string' ||
         !source.includes('located-aggressive') ||
@@ -4619,9 +5806,109 @@ function createAcceptedPipelineExecutorConfig() {
     };
 }
 
-function createAcceptedPipelineRefiners() {
+function hasSameLocalAlphaPosition(left, right) {
+    return Boolean(
+        left &&
+        right &&
+        left.x === right.x &&
+        left.y === right.y &&
+        left.width === right.width &&
+        left.height === right.height
+    );
+}
+
+function findSelectedLocalAlphaTrial({ result, instrumentation }) {
+    const stage = result?.meta?.alphaAdjustmentStages?.find(
+        (item) => item.stage === 'evidence-gated-local-alpha-search'
+    );
+    if (!stage) return null;
+
+    const candidates = instrumentation.acceptedTrials.filter((trial) => (
+        hasSameLocalAlphaPosition(trial.position, result.meta.position) &&
+        Math.abs(trial.alphaGain - stage.toAlphaGain) <= 1e-9
+    ));
+    if (candidates.length !== 1) return null;
+    const selected = candidates.reduce((best, trial) => {
+        const distance =
+            Math.abs(trial.spatialScore - stage.afterSpatialScore) +
+            Math.abs(trial.gradientScore - stage.afterGradientScore);
+        if (!best || distance < best.distance) return { trial, stage, distance };
+        return best;
+    }, null);
+    return selected?.distance <= 1e-9 ? selected : null;
+}
+
+function attachLocalAlphaSearchDiagnostics({
+    result,
+    instrumentation
+}) {
+    if (!instrumentation) return result;
+
+    if (result?.debugTimings) {
+        Object.assign(result.debugTimings, {
+            localAlphaSearchTrialCount: instrumentation.trialCount,
+            localAlphaSearchTrialAllocatedPixels: instrumentation.trialAllocatedPixels,
+            localAlphaSearchMaxTrialBufferPixels: instrumentation.maxTrialBufferPixels,
+            localAlphaSearchTrialFullImageCloneCount:
+                instrumentation.trialFullImageCloneCount,
+            localAlphaSearchFullImageMaterializationCount:
+                instrumentation.fullImageMaterializationCount,
+            darkSupportSearchTrialCount:
+                instrumentation.darkSupportTrialCount,
+            darkSupportSearchAcceptedTrialCount:
+                instrumentation.darkSupportAcceptedTrialCount,
+            darkSupportSearchBestProbe:
+                instrumentation.darkSupportBestProbe
+        });
+    }
+
+    const selected = findSelectedLocalAlphaTrial({ result, instrumentation });
+    if (!selected || !result?.imageData) return result;
+
+    const finalDamageSafe = typeof result.meta.decisionPath?.alphaTrial?.damage?.safe === 'boolean'
+        ? result.meta.decisionPath.alphaTrial.damage.safe
+        : result.meta.qualitySignals?.damageWarning !== true;
+    const darkBackgroundSupportConvergence =
+        result.meta.qualitySignals?.darkBackgroundSupportConvergence?.accepted === true
+            ? result.meta.qualitySignals.darkBackgroundSupportConvergence
+            : null;
+    const riskResolution = finalDamageSafe
+        ? selected.trial.damageSafe
+            ? null
+            : 'repaired-downstream'
+        : darkBackgroundSupportConvergence
+            ? 'dark-background-support-converged'
+            : 'best-effort-damage';
+    const localAlphaSearch = {
+        trigger: selected.trial.trigger,
+        acceptedTrialDamageSafe: selected.trial.damageSafe,
+        finalDamageSafe,
+        riskResolution
+    };
+
+    return {
+        ...result,
+        meta: {
+            ...result.meta,
+            qualitySignals: {
+                ...result.meta.qualitySignals,
+                localAlphaSearch,
+                darkBackgroundSupportConvergence
+            }
+        }
+    };
+}
+
+function createAcceptedPipelineRefiners({
+    localAlphaSearchInstrumentation = null
+} = {}) {
     return {
         recalibrateAlphaStrength,
+        refineLargeMargin48ProfileAlphaRescue,
+        fineTuneEvidenceGatedLocalAlpha: (input) => fineTuneEvidenceGatedLocalAlpha({
+            ...input,
+            instrumentation: localAlphaSearchInstrumentation
+        }),
         recalibrateOverSubtractedAlpha,
         fineTuneDarkCatalogAlpha,
         fineTuneWeakPositiveResidualAlpha,
@@ -4649,24 +5936,39 @@ function createAcceptedPipelineRefiners() {
     };
 }
 
-function createAcceptedPipelineDependencies() {
+function createAcceptedPipelineDependencies({
+    localAlphaSearchInstrumentation = null
+} = {}) {
     return {
         metrics: createAcceptedPipelineMetrics(),
         gates: createAcceptedPipelineGates(),
         config: createAcceptedPipelineExecutorConfig(),
-        refiners: createAcceptedPipelineRefiners()
+        refiners: createAcceptedPipelineRefiners({
+            localAlphaSearchInstrumentation
+        })
     };
 }
 
 export function processWatermarkImageData(imageData, options = {}) {
-    return runImageWatermarkPipeline(createImageWatermarkPipelineRequest({
+    const instrumentationByCandidateId = new Map();
+    const result = runImageWatermarkPipeline(createImageWatermarkPipelineRequest({
         imageData,
         options,
         nowMs,
         cloneImageData,
         alphaGainCandidates: ALPHA_GAIN_CANDIDATES,
         alphaPriorityGains: STANDARD_ALPHA_PRIORITY_GAINS,
-        createAcceptedPipelineDependencies,
+        createAcceptedPipelineDependencies: (hypothesis) => {
+            const instrumentation = createLocalAlphaSearchInstrumentation({
+                debugEnabled: options.debugTimings === true
+            });
+            if (hypothesis?.id != null) {
+                instrumentationByCandidateId.set(hypothesis.id, instrumentation);
+            }
+            return createAcceptedPipelineDependencies({
+                localAlphaSearchInstrumentation: instrumentation
+            });
+        },
         cleanupConfig: createImageWatermarkPipelineCleanupConfig({
             previewEdgeCleanupMaxSize: PREVIEW_EDGE_CLEANUP_MAX_SIZE,
             known48EdgeCleanupMinSize: KNOWN_48_EDGE_CLEANUP_MIN_SIZE,
@@ -4676,4 +5978,11 @@ export function processWatermarkImageData(imageData, options = {}) {
         }),
         visualPostProcessingEnabled: ENABLE_VISUAL_POST_PROCESSING
     }));
+    const selectedCandidateId = result?.meta?.selectedCandidate?.id;
+    return attachLocalAlphaSearchDiagnostics({
+        result,
+        instrumentation: selectedCandidateId == null
+            ? null
+            : instrumentationByCandidateId.get(selectedCandidateId) ?? null
+    });
 }

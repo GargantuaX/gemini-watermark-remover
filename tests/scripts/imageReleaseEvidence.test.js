@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+    IMAGE_RELEASE_SOURCE_PATHS,
     buildImageReleaseEvidence,
     compareCuratedReports,
     summarizeExact96Review,
@@ -12,7 +13,10 @@ import {
 } from '../../scripts/image-release-evidence.js';
 import { parseNodeTestSummary, resolvePnpmInvocation } from '../../scripts/run-image-release-validation.js';
 import { checkImageReleaseEvidence } from '../../scripts/check-image-release-evidence.js';
-import { createImageReleaseEvidence } from '../../scripts/create-image-release-evidence.js';
+import {
+    DEFAULT_PATHS,
+    createImageReleaseEvidence
+} from '../../scripts/create-image-release-evidence.js';
 
 function curatedResult(fileName, {
     candidateId,
@@ -240,6 +244,33 @@ test('resolvePnpmInvocation avoids spawning cmd shims directly on Windows', () =
         command: 'pnpm',
         prefixArgs: []
     });
+});
+
+test('image release evidence covers the mutable alpha pipeline modules', () => {
+    const covered = new Set(IMAGE_RELEASE_SOURCE_PATHS);
+    const required = [
+        'src/core/geminiSizeCatalog.js',
+        'src/core/pipelineAlphaStageSpecs.js',
+        'src/core/pipelineAlphaTraceContract.js',
+        'src/core/pipelineAlphaTrial.js',
+        'src/core/pipelineRuntime.js',
+        'src/core/previewAlphaCalibration.js'
+    ];
+
+    assert.deepEqual(
+        required.filter((sourcePath) => !covered.has(sourcePath)),
+        [],
+        'release evidence must hash every mutable module in the image alpha pipeline'
+    );
+});
+
+test('image release evidence defaults to the immutable reviewed snapshot', () => {
+    const snapshotDirectory = path.resolve(
+        '.artifacts/same-anchor-96-imperfection-preference/before-review'
+    );
+
+    assert.equal(DEFAULT_PATHS.manualReport, path.join(snapshotDirectory, 'report.json'));
+    assert.equal(DEFAULT_PATHS.manualDecisions, path.join(snapshotDirectory, 'review.json'));
 });
 
 test('checkImageReleaseEvidence reuses the pure contract for readiness and CLI callers', async () => {

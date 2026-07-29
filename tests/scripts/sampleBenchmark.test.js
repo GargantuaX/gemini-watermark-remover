@@ -24,8 +24,23 @@ import {
     resolveInitialStandardConfig
 } from '../../src/core/watermarkConfig.js';
 import { processWatermarkImageData } from '../../src/core/watermarkProcessor.js';
-import { classifyExternalBenchmarkCase } from '../../scripts/run-external-gemini-watermark-sample-benchmark.js';
+import {
+    classifyExternalBenchmarkCase,
+    resolveExternalBenchmarkAlphaMaps
+} from '../../scripts/run-external-gemini-watermark-sample-benchmark.js';
 import { createPatternImageData } from '../core/syntheticWatermarkTestUtils.js';
+
+test('external benchmark should load the same embedded 96px variants as the SDK', () => {
+    const alphaMaps = resolveExternalBenchmarkAlphaMaps();
+
+    assert.deepEqual(Object.keys(alphaMaps.alpha96Variants).sort(), [
+        '20260520',
+        'outline-dark',
+        'outline-light'
+    ]);
+    assert.ok(alphaMaps.alpha96Variants['outline-light'] instanceof Float32Array);
+    assert.ok(alphaMaps.alpha96Variants['outline-dark'] instanceof Float32Array);
+});
 
 test('runSampleBenchmark should include embedded outline alpha variants', async () => {
     const sampleDir = await mkdtemp(path.join(tmpdir(), 'gwr-outline-benchmark-'));
@@ -53,6 +68,22 @@ test('runSampleBenchmark should include embedded outline alpha variants', async 
     assert.equal(report.results.length, 1);
     assert.equal(report.results[0].actualAnchor?.alphaVariant, 'outline-dark');
     assert.match(report.results[0].source, /outline-dark/);
+    assert.equal(
+        Object.hasOwn(report.results[0], 'finalDamageWarning'),
+        true,
+        'report should expose the final post-restoration damage verdict'
+    );
+    assert.equal(
+        Object.hasOwn(report.results[0], 'selectionDamageSafe'),
+        true,
+        'report should keep the selector-time safety diagnostic separate'
+    );
+    assert.equal(
+        Object.hasOwn(report.results[0], 'qualitySignals'),
+        true,
+        'report should preserve final quality metrics for lifecycle monitoring'
+    );
+    assert.equal(Object.hasOwn(report.results[0], 'damageSafe'), false);
 });
 
 test('classifyBenchmarkCase should mark skipped expected Gemini sample as missed detection', () => {
@@ -87,6 +118,426 @@ test('classifyBenchmarkCase should separate weak suppression from residual edge 
 
     assert.equal(weakSuppression.bucket, 'weak-suppression');
     assert.equal(residualEdge.bucket, 'residual-edge');
+});
+
+const benchmarkCaseClassifiers = [
+    {
+        name: 'sample benchmark',
+        classify: (record) => classifyBenchmarkCase({
+            expectedGemini: true,
+            ...record
+        })
+    },
+    {
+        name: 'external benchmark',
+        classify: classifyExternalBenchmarkCase
+    }
+];
+
+test('benchmark classifiers should reject strong negative spatial overshoot', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: -0.31,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match'
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'residual-overshoot'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should respect a calibrated clean residual verdict', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: 0.317768,
+            processedGradientScore: 0.036947,
+            suppressionGain: 0.455735,
+            decisionTier: 'validated-match',
+            residualVisibility: {
+                rawVisible: true,
+                visible: false,
+                calibratedVisible: false,
+                metricRisk: 'positive-halo-background-collision',
+                visibleSpatialResidual: true,
+                visiblePositiveHalo: true,
+                visibleGradientResidual: false
+            }
+        });
+
+        assert.deepEqual(result, {
+            status: 'pass',
+            bucket: 'pass'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should not trust unknown metric risks or hide strong gradients', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const unknownRisk = classify({
+            applied: true,
+            residualScore: 0.31,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            residualVisibility: {
+                rawVisible: true,
+                visible: false,
+                calibratedVisible: false,
+                metricRisk: 'future-unreviewed-risk',
+                visibleSpatialResidual: true,
+                visiblePositiveHalo: false,
+                visibleGradientResidual: false
+            }
+        });
+        const strongGradient = classify({
+            applied: true,
+            residualScore: 0.31,
+            processedGradientScore: 0.31,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            residualVisibility: {
+                rawVisible: true,
+                visible: false,
+                calibratedVisible: false,
+                metricRisk: 'positive-spatial-background-collision',
+                visibleSpatialResidual: true,
+                visiblePositiveHalo: false,
+                visibleGradientResidual: false
+            }
+        });
+        const lowVarianceStrongGradient = classify({
+            applied: true,
+            residualScore: -0.31,
+            processedGradientScore: 0.31,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            residualVisibility: {
+                rawVisible: true,
+                visible: false,
+                calibratedVisible: false,
+                metricRisk: 'flat-low-variance-spatial-correlation',
+                visibleSpatialResidual: true,
+                visiblePositiveHalo: false,
+                visibleGradientResidual: false
+            }
+        });
+
+        assert.deepEqual(unknownRisk, {
+            status: 'fail',
+            bucket: 'residual-edge'
+        }, `${name}: unknown risk`);
+        assert.deepEqual(strongGradient, {
+            status: 'fail',
+            bucket: 'residual-edge'
+        }, `${name}: spatial risk with strong gradient`);
+        assert.deepEqual(lowVarianceStrongGradient, {
+            status: 'fail',
+            bucket: 'residual-edge'
+        }, `${name}: low-variance risk with strong gradient`);
+    }
+});
+
+test('benchmark classifiers should only exempt negative overshoot for the explicit low-variance metric risk', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const lowVarianceResult = classify({
+            applied: true,
+            residualScore: -0.423388,
+            processedGradientScore: 0.042947,
+            suppressionGain: 1.421172,
+            decisionTier: 'validated-match',
+            residualVisibility: {
+                rawVisible: true,
+                visible: false,
+                calibratedVisible: false,
+                metricRisk: 'flat-low-variance-spatial-correlation',
+                visibleSpatialResidual: true,
+                visiblePositiveHalo: false,
+                visibleGradientResidual: false
+            }
+        });
+        const unrelatedMetricRiskResult = classify({
+            applied: true,
+            residualScore: -0.31,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            residualVisibility: {
+                rawVisible: true,
+                visible: false,
+                calibratedVisible: false,
+                metricRisk: 'flat-clipped-low-texture-spatial-correlation',
+                visibleSpatialResidual: true,
+                visiblePositiveHalo: false,
+                visibleGradientResidual: false
+            }
+        });
+
+        assert.deepEqual(lowVarianceResult, {
+            status: 'pass',
+            bucket: 'pass'
+        }, name);
+        assert.deepEqual(unrelatedMetricRiskResult, {
+            status: 'fail',
+            bucket: 'residual-overshoot'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should reject strong gradient residuals', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: 0.05,
+            processedGradientScore: 0.31,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match'
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'residual-edge'
+        }, name);
+    }
+});
+
+test('allowWeakResidual should not exempt gradient or halo visibility failures', () => {
+    const failures = [
+        {
+            residualScore: 0.05,
+            processedGradientScore: 0.31,
+            residualVisibility: {
+                visible: true,
+                visibleGradientResidual: true
+            }
+        },
+        {
+            residualScore: 0.05,
+            processedGradientScore: 0.04,
+            residualVisibility: {
+                visible: true,
+                visiblePositiveHalo: true
+            }
+        }
+    ];
+
+    for (const record of failures) {
+        const result = classifyBenchmarkCase({
+            expectedGemini: true,
+            applied: true,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            allowWeakResidual: true,
+            ...record
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'residual-edge'
+        });
+    }
+});
+
+test('allowWeakResidual should require bounded residual and minimum suppression', () => {
+    const weakSuppression = classifyBenchmarkCase({
+        expectedGemini: true,
+        applied: true,
+        residualScore: 0.99,
+        processedGradientScore: 0.01,
+        suppressionGain: 0.01,
+        decisionTier: 'validated-match',
+        allowWeakResidual: true,
+        residualVisibility: {
+            visible: true,
+            visibleSpatialResidual: true,
+            visiblePositiveHalo: false,
+            visibleGradientResidual: false
+        }
+    });
+    const excessiveResidual = classifyBenchmarkCase({
+        expectedGemini: true,
+        applied: true,
+        residualScore: 0.99,
+        processedGradientScore: 0.01,
+        suppressionGain: 0.5,
+        decisionTier: 'validated-match',
+        allowWeakResidual: true,
+        residualVisibility: {
+            visible: true,
+            visibleSpatialResidual: true,
+            visiblePositiveHalo: false,
+            visibleGradientResidual: false
+        }
+    });
+    const goldBoundary = classifyBenchmarkCase({
+        expectedGemini: true,
+        applied: true,
+        residualScore: 0.317768,
+        processedGradientScore: 0.036947,
+        suppressionGain: 0.455735,
+        decisionTier: 'validated-match',
+        allowWeakResidual: true,
+        residualVisibility: {
+            visible: true,
+            visibleSpatialResidual: true,
+            visiblePositiveHalo: false,
+            visibleGradientResidual: false
+        }
+    });
+
+    assert.deepEqual(weakSuppression, {
+        status: 'fail',
+        bucket: 'weak-suppression'
+    });
+    assert.deepEqual(excessiveResidual, {
+        status: 'fail',
+        bucket: 'residual-edge'
+    });
+    assert.deepEqual(goldBoundary, {
+        status: 'pass',
+        bucket: 'pass'
+    });
+});
+
+test('benchmark classifiers should not let the canonical 96px exception hide explicit visible residuals', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            actualAnchor: { logoSize: 96, marginRight: 64, marginBottom: 64 },
+            alphaGain: 1,
+            residualScore: 0.31,
+            processedGradientScore: 0.04,
+            originalSpatialScore: 0.77,
+            originalGradientScore: 0.47,
+            suppressionGain: 0.45,
+            decisionTier: 'direct-match',
+            residualVisibility: {
+                visible: true,
+                visiblePositiveHalo: true
+            }
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'residual-edge'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should reject explicitly unsafe content damage', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: 0.05,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            damageSafe: false
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'content-damage'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should prefer final damage signals over safe selection diagnostics', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: 0.05,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            qualitySignals: {
+                damageWarning: true,
+                qualityStatus: 'possible-content-damage'
+            },
+            selectionDamageSafe: true,
+            selectionDebug: {
+                damage: {
+                    safe: true
+                }
+            }
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'content-damage'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should not let stale unsafe selection diagnostics override clean final quality', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: 0.05,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            finalDamageWarning: false,
+            qualityStatus: 'clean',
+            selectionDamageSafe: false,
+            selectionDebug: {
+                damage: {
+                    safe: false
+                }
+            }
+        });
+
+        assert.deepEqual(result, {
+            status: 'pass',
+            bucket: 'pass'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should recognize final damage quality status without a warning field', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: 0.05,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            qualityStatus: 'possible-content-damage',
+            selectionDamageSafe: true
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'content-damage'
+        }, name);
+    }
+});
+
+test('benchmark classifiers should use selection damage as a legacy fallback', () => {
+    for (const { name, classify } of benchmarkCaseClassifiers) {
+        const result = classify({
+            applied: true,
+            residualScore: 0.05,
+            processedGradientScore: 0.04,
+            suppressionGain: 0.48,
+            decisionTier: 'validated-match',
+            selectionDebug: {
+                damage: {
+                    safe: false
+                }
+            }
+        });
+
+        assert.deepEqual(result, {
+            status: 'fail',
+            bucket: 'content-damage'
+        }, name);
+    }
 });
 
 test('classifyBenchmarkCase should allow conservative canonical 96px residuals that avoid over-removal', () => {
@@ -126,6 +577,34 @@ test('classifyExternalBenchmarkCase should allow conservative canonical 96px res
 
     assert.equal(result.status, 'pass');
     assert.equal(result.bucket, 'pass');
+});
+
+test('classifyExternalBenchmarkCase should cap the canonical 96px exception at residual 0.35', () => {
+    const baseRecord = {
+        applied: true,
+        actualAnchor: { logoSize: 96, marginRight: 64, marginBottom: 64 },
+        alphaGain: 1,
+        processedGradientScore: 0.04,
+        originalSpatialScore: 0.77,
+        originalGradientScore: 0.47,
+        suppressionGain: 0.45,
+        decisionTier: 'direct-match'
+    };
+
+    assert.deepEqual(classifyExternalBenchmarkCase({
+        ...baseRecord,
+        residualScore: 0.35
+    }), {
+        status: 'pass',
+        bucket: 'pass'
+    });
+    assert.deepEqual(classifyExternalBenchmarkCase({
+        ...baseRecord,
+        residualScore: 0.9
+    }), {
+        status: 'fail',
+        bucket: 'residual-edge'
+    });
 });
 
 test('classifyBenchmarkCase should treat changed non-Gemini region as false positive', () => {

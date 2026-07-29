@@ -1,3 +1,8 @@
+import {
+    scoreDamage,
+    scoreResidual
+} from './watermarkScoring.js';
+
 function finiteOrNull(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -87,6 +92,41 @@ function classifyAlphaStages(alphaAdjustmentStages) {
     );
 }
 
+function normalizeAlphaProfileStage(stage) {
+    const {
+        stage: stageName,
+        alphaStrategy,
+        repairStrategy,
+        fromAlphaGain,
+        toAlphaGain,
+        beforeSpatialScore,
+        beforeGradientScore,
+        afterSpatialScore,
+        afterGradientScore,
+        suppressionGain,
+        cost,
+        profileExponent,
+        allowSameAlphaGain,
+        ...stageExtras
+    } = stage;
+
+    return compactObject({
+        ...stageExtras,
+        stage: stageName,
+        alphaStrategy: typeof alphaStrategy === 'string' ? alphaStrategy : null,
+        repairStrategy: typeof repairStrategy === 'string' ? repairStrategy : null,
+        fromAlphaGain: finiteOrNull(fromAlphaGain),
+        toAlphaGain: finiteOrNull(toAlphaGain),
+        beforeSpatialScore: finiteOrNull(beforeSpatialScore),
+        beforeGradientScore: finiteOrNull(beforeGradientScore),
+        afterSpatialScore: finiteOrNull(afterSpatialScore),
+        afterGradientScore: finiteOrNull(afterGradientScore),
+        suppressionGain: finiteOrNull(suppressionGain),
+        cost: finiteOrNull(cost),
+        profileExponent: finiteOrNull(profileExponent)
+    });
+}
+
 function inferAlphaTrialStrategy({ source = null, config = null, alphaAdjustmentStages = null } = {}) {
     const sourceText = String(source ?? '');
     const stages = normalizeStageList(alphaAdjustmentStages).map((stage) => stage.stage);
@@ -98,6 +138,18 @@ function inferAlphaTrialStrategy({ source = null, config = null, alphaAdjustment
     }
     if (sourceText.includes('power-profile-rescue') || stages.includes('known-48-power-profile-rescue')) {
         return 'known-48-power-profile';
+    }
+    if (
+        sourceText.includes('profile-alpha-rescue') ||
+        stages.includes('large-margin-48-profile-alpha-rescue')
+    ) {
+        return 'large-margin-48-profile-alpha';
+    }
+    if (
+        sourceText.includes('local-alpha') ||
+        stages.includes('evidence-gated-local-alpha-search')
+    ) {
+        return 'evidence-gated-local-alpha';
     }
     if (sourceText.includes('located-aggressive') || stages.includes('located-aggressive-removal')) {
         return 'located-aggressive-alpha';
@@ -124,8 +176,48 @@ function isPhase2AlphaTrialStrategy(strategy) {
     return strategy === 'new-margin-96-variant' ||
         strategy === 'known-48-positive-residual-rebalance' ||
         strategy === 'known-48-power-profile' ||
+        strategy === 'large-margin-48-profile-alpha' ||
+        strategy === 'evidence-gated-local-alpha' ||
         strategy === 'over-subtraction-fine-alpha' ||
         strategy === 'dark-catalog-fine-alpha';
+}
+
+export function reconcileAlphaTrialWithFinalQualitySignals(
+    alphaTrial = null,
+    finalQualitySignals = null
+) {
+    const finalScores = finalQualitySignals?.final;
+    const artifacts = finalQualitySignals?.artifacts;
+    if (
+        !alphaTrial ||
+        !finalScores ||
+        !artifacts ||
+        !Number.isFinite(finalScores.spatialScore) ||
+        !Number.isFinite(finalScores.gradientScore)
+    ) {
+        return alphaTrial;
+    }
+
+    const damage = scoreDamage({
+        hardReject: finalQualitySignals.texture?.hardReject === true,
+        nearBlackIncrease: finalQualitySignals.nearBlackIncrease,
+        texturePenalty: finalQualitySignals.texture?.texturePenalty,
+        newlyClippedRatio: artifacts.newlyClippedRatio,
+        halo: finalQualitySignals.visibility?.halo ?? artifacts.halo ?? null
+    });
+    const residual = scoreResidual({
+        processedSpatial: finalScores.spatialScore,
+        processedGradient: finalScores.gradientScore,
+        suppressionGain: alphaTrial.scores?.suppressionGain,
+        artifactCost: artifacts.visualArtifactCost
+    });
+
+    return {
+        ...alphaTrial,
+        damage,
+        artifacts,
+        residual
+    };
 }
 
 export function createAlphaTrialFromSelectedTrial({
@@ -141,7 +233,8 @@ export function createAlphaTrialFromSelectedTrial({
     alphaTrialEvents = null,
     processedSpatialScore = null,
     processedGradientScore = null,
-    suppressionGain = null
+    suppressionGain = null,
+    finalQualitySignals = null
 } = {}) {
     const resolvedConfig = normalizeConfig(config ?? selectedTrial?.config ?? detectionCandidate?.config);
     const resolvedPosition = normalizePosition(position ?? selectedTrial?.position ?? detectionCandidate?.position);
@@ -159,7 +252,7 @@ export function createAlphaTrialFromSelectedTrial({
     const processedSpatial = finiteOrNull(processedSpatialScore ?? selectedTrial?.processedSpatialScore);
     const processedGradient = finiteOrNull(processedGradientScore ?? selectedTrial?.processedGradientScore);
 
-    return {
+    const alphaTrial = {
         id: makeCandidateId('alpha', resolvedConfig, resolvedPosition, `${resolvedSource}:${resolvedAlphaGain}`),
         detectionId: detectionCandidate?.id ?? null,
         source: resolvedSource,
@@ -172,19 +265,7 @@ export function createAlphaTrialFromSelectedTrial({
         alphaShape: compactObject({
             variant: resolvedConfig?.alphaVariant ?? null,
             templateWarp: templateWarp ?? null,
-            profileStages: alphaStages.map((stage) => compactObject({
-                stage: stage.stage,
-                alphaStrategy: typeof stage.alphaStrategy === 'string' ? stage.alphaStrategy : null,
-                fromAlphaGain: finiteOrNull(stage.fromAlphaGain),
-                toAlphaGain: finiteOrNull(stage.toAlphaGain),
-                beforeSpatialScore: finiteOrNull(stage.beforeSpatialScore),
-                beforeGradientScore: finiteOrNull(stage.beforeGradientScore),
-                afterSpatialScore: finiteOrNull(stage.afterSpatialScore),
-                afterGradientScore: finiteOrNull(stage.afterGradientScore),
-                suppressionGain: finiteOrNull(stage.suppressionGain),
-                cost: finiteOrNull(stage.cost),
-                profileExponent: finiteOrNull(stage.profileExponent)
-            })),
+            profileStages: alphaStages.map(normalizeAlphaProfileStage),
             stages: alphaStages.map((stage) => stage.stage)
         }),
         acceptedStrategies: trialEvents.filter((event) => event.decision === 'accept'),
@@ -201,6 +282,8 @@ export function createAlphaTrialFromSelectedTrial({
         residual: selectedTrial?.residual ?? null,
         provenance: selectedTrial?.provenance ?? null
     };
+
+    return reconcileAlphaTrialWithFinalQualitySignals(alphaTrial, finalQualitySignals);
 }
 
 export function createAlphaTrialContractSummary(alphaTrial = null) {

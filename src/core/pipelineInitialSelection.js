@@ -6,11 +6,41 @@ import {
     createCandidateHypothesis,
     selectDiverseCandidateHypotheses
 } from './pipelineCandidatePool.js';
+import { computeRegionSpatialCorrelation } from './adaptiveDetector.js';
 import { calculateNearBlackRatio } from './restorationMetrics.js';
+import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
 const AGGRESSIVE_FALLBACK_MAX_NEAR_BLACK_INCREASE = 0.05;
 const AGGRESSIVE_FALLBACK_MAX_NEAR_WHITE_INCREASE = 0.05;
+const MIN_VALIDATED_GRADIENT_IMPROVEMENT = 0.01;
+const MIN_VALIDATED_SPATIAL_SCORE = 0.6;
+const MIN_VALIDATED_SPATIAL_SUPPRESSION = 0.3;
+const MIN_LOCALIZED_PEAK_PROMINENCE = 0.06;
+// A rejected restoration can still reveal the right geometry. Only let
+// near-perfect, localized source evidence lock out disjoint weak fallbacks.
+const STRONG_GEOMETRY_MIN_SPATIAL_SCORE = 0.95;
+const STRONG_GEOMETRY_MIN_GRADIENT_SCORE = 0.8;
+const GEOMETRY_LOCK_MIN_SIZE_RATIO = 0.75;
+const GEOMETRY_LOCK_MIN_OVERLAP_RATIO = 0.5;
+const SMALL_V2_MIN_SPATIAL_SCORE = 0.16;
+const SMALL_V2_MIN_SPATIAL_SUPPRESSION = 0.13;
+const SMALL_V2_MAX_ABS_SPATIAL_RESIDUAL = 0.08;
+const BEST_EFFORT_SPATIAL_COLLISION_MIN_SCORE = 0.3;
+const BEST_EFFORT_NONLOCAL_GRADIENT_EXCEPTION_MIN_SCORE = 0.28;
+const REPEATED_TEMPLATE_CONTROL_MIN_SPATIAL_SCORE = 0.3;
+const LOCALIZATION_CONTROL_OFFSETS = [
+    [-1, 0],
+    [0, -1],
+    [-1, -1],
+    [-2, 0],
+    [0, -2],
+    [-2, -2]
+];
+const REPEATED_TEMPLATE_CONTROL_SQUARES = [
+    [[-1, 0], [0, -1], [-1, -1]],
+    [[-2, 0], [0, -2], [-2, -2]]
+];
 
 function isSafeAggressiveFallbackSelection(selection) {
     const trial = selection?.selectedTrial;
@@ -81,6 +111,411 @@ function sameTrialIdentity(left, right) {
         leftPosition?.height === rightPosition?.height;
 }
 
+function hasCompleteBestEffortTrial(trial, originalImageData) {
+    const position = trial?.position;
+    const config = trial?.config;
+    const alphaMap = trial?.alphaMap;
+    const alphaGain = Number(trial?.alphaGain ?? 1);
+    const coordinates = [
+        position?.x,
+        position?.y,
+        position?.width,
+        position?.height
+    ];
+    if (
+        !originalImageData?.data ||
+        !coordinates.every(Number.isInteger) ||
+        position.width <= 0 ||
+        position.height <= 0 ||
+        position.x < 0 ||
+        position.y < 0 ||
+        position.x + position.width > originalImageData.width ||
+        position.y + position.height > originalImageData.height ||
+        !Number.isFinite(config?.logoSize) ||
+        config.logoSize !== position.width ||
+        position.width !== position.height ||
+        !alphaMap ||
+        alphaMap.length !== position.width * position.height ||
+        !Number.isFinite(alphaGain) ||
+        alphaGain <= 0
+    ) {
+        return false;
+    }
+
+    let hasNonZeroAlpha = false;
+    for (const alpha of alphaMap) {
+        if (!Number.isFinite(alpha)) return false;
+        if (alpha !== 0) hasNonZeroAlpha = true;
+    }
+    return hasNonZeroAlpha;
+}
+
+function hasMeasurableRestorationEffect(trial) {
+    const scorePairs = [
+        [trial?.originalSpatialScore, trial?.processedSpatialScore],
+        [trial?.originalGradientScore, trial?.processedGradientScore]
+    ];
+    let comparableScoreCount = 0;
+    for (const [beforeValue, afterValue] of scorePairs) {
+        const before = Number(beforeValue);
+        const after = Number(afterValue);
+        if (!Number.isFinite(before) || !Number.isFinite(after)) continue;
+        comparableScoreCount++;
+        if (Math.abs(before - after) > 1e-8) return true;
+    }
+
+    // Preserve compatibility with legacy/injected selectors that do not
+    // expose paired restoration scores. When scores are present, an exact
+    // no-op must not count as a best-effort output.
+    return comparableScoreCount === 0;
+}
+
+function hasNonlocalizedSpatialCollision(trial, originalImageData) {
+    const originalSpatial = Number(trial?.originalSpatialScore);
+    const originalGradient = Number(trial?.originalGradientScore);
+    if (
+        !Number.isFinite(originalSpatial) ||
+        !Number.isFinite(originalGradient)
+    ) {
+        return false;
+    }
+
+    const localization = measurePresenceLocalization(originalImageData, trial);
+    // Repeated watermark-shaped textures can create a prominent target peak
+    // while still matching several neighboring tiles. Restoration success is
+    // not independent evidence in that case because inverse compositing can
+    // erase any matching content patch.
+    if (localization.repeatedTemplateCollision) {
+        return true;
+    }
+    if (originalSpatial < BEST_EFFORT_SPATIAL_COLLISION_MIN_SCORE) {
+        return false;
+    }
+    return (
+        (
+            !localization.localized &&
+            originalGradient < BEST_EFFORT_NONLOCAL_GRADIENT_EXCEPTION_MIN_SCORE
+        )
+    );
+}
+
+function isSafeSelectorBestEffortSelection(selection, originalImageData) {
+    const trial = selection?.selectedTrial;
+    const isSmallV2 =
+        trial?.config?.alphaVariant === 'v2' ||
+        trial?.provenance?.alphaVariant === 'v2';
+    const catalogScopeAllowed = !isSmallV2 ||
+        trial?.provenance?.catalogFamily === 'gemini-v2-small';
+    return Boolean(
+        trial &&
+        selection.source !== 'skipped' &&
+        (
+            selection.decisionTier === 'direct-match' ||
+            selection.decisionTier === 'validated-match'
+        ) &&
+        trial.accepted === true &&
+        trial.evaluation?.eligible === true &&
+        trial.damage?.safe === true &&
+        catalogScopeAllowed &&
+        !hasNonlocalizedSpatialCollision(trial, originalImageData) &&
+        hasMeasurableRestorationEffect(trial) &&
+        hasCompleteBestEffortTrial(trial, originalImageData)
+    );
+}
+
+function hasStrongRestorationEvidence(trial) {
+    if (
+        trial?.residual?.cleared === true ||
+        trial?.evaluation?.postResidual?.cleared === true
+    ) {
+        return true;
+    }
+    const originalGradient = Number(trial?.originalGradientScore);
+    const processedGradient = Math.abs(Number(trial?.processedGradientScore));
+    if (
+        Number.isFinite(originalGradient) &&
+        Number.isFinite(processedGradient) &&
+        originalGradient - processedGradient >= MIN_VALIDATED_GRADIENT_IMPROVEMENT
+    ) {
+        return true;
+    }
+    return false;
+}
+
+function hasValidatedRestorationEvidence(trial) {
+    if (hasStrongRestorationEvidence(trial)) {
+        return true;
+    }
+    const originalSpatial = Number(trial?.originalSpatialScore);
+    const processedSpatial = Math.abs(Number(trial?.processedSpatialScore));
+    return Number.isFinite(originalSpatial) &&
+        Number.isFinite(processedSpatial) &&
+        originalSpatial >= MIN_VALIDATED_SPATIAL_SCORE &&
+        originalSpatial - processedSpatial >= MIN_VALIDATED_SPATIAL_SUPPRESSION;
+}
+
+function hasEvidenceGatedSmallV2CatalogPresence(trial) {
+    if (
+        trial?.provenance?.alphaVariant !== 'v2' ||
+        trial?.provenance?.catalogFamily !== 'gemini-v2-small' ||
+        trial?.damage?.safe !== true
+    ) {
+        return false;
+    }
+    const originalSpatial = Number(trial.originalSpatialScore);
+    const processedSpatial = Math.abs(Number(trial.processedSpatialScore));
+    return Number.isFinite(originalSpatial) &&
+        Number.isFinite(processedSpatial) &&
+        originalSpatial >= SMALL_V2_MIN_SPATIAL_SCORE &&
+        processedSpatial <= SMALL_V2_MAX_ABS_SPATIAL_RESIDUAL &&
+        originalSpatial - processedSpatial >= SMALL_V2_MIN_SPATIAL_SUPPRESSION;
+}
+
+function measurePresenceLocalization(originalImageData, trial) {
+    const position = trial?.position;
+    const alphaMap = trial?.alphaMap;
+    const width = Number(position?.width);
+    const height = Number(position?.height);
+    const x = Number(position?.x);
+    const y = Number(position?.y);
+    if (
+        !originalImageData?.data ||
+        !Number.isInteger(width) ||
+        !Number.isInteger(height) ||
+        !Number.isInteger(x) ||
+        !Number.isInteger(y) ||
+        width <= 0 ||
+        height <= 0 ||
+        !alphaMap ||
+        alphaMap.length !== width * height
+    ) {
+        // Preserve compatibility with injected/legacy selectors that do not
+        // expose enough geometry to validate a localized peak.
+        return {
+            localized: true,
+            repeatedTemplateCollision: false
+        };
+    }
+
+    const controlScores = [];
+    const controlScoresByOffset = new Map();
+    for (const [offsetX, offsetY] of LOCALIZATION_CONTROL_OFFSETS) {
+        const controlRegion = {
+            x: x + offsetX * width,
+            y: y + offsetY * height,
+            width,
+            height
+        };
+        if (
+            controlRegion.x < 0 ||
+            controlRegion.y < 0 ||
+            controlRegion.x + width > originalImageData.width ||
+            controlRegion.y + height > originalImageData.height
+        ) {
+            continue;
+        }
+        const controlScore = computeRegionSpatialCorrelation({
+            imageData: originalImageData,
+            alphaMap,
+            region: controlRegion
+        });
+        controlScores.push(controlScore);
+        controlScoresByOffset.set(`${offsetX},${offsetY}`, controlScore);
+    }
+    if (controlScores.length === 0) {
+        return {
+            localized: true,
+            repeatedTemplateCollision: false
+        };
+    }
+
+    const reportedSpatial = Number(trial.originalSpatialScore);
+    const candidateSpatial = Number.isFinite(reportedSpatial)
+        ? reportedSpatial
+        : computeRegionSpatialCorrelation({
+            imageData: originalImageData,
+            alphaMap,
+            region: position
+        });
+    const maximumControlScore = Math.max(...controlScores);
+    const repeatedTemplateCollision = REPEATED_TEMPLATE_CONTROL_SQUARES.some(
+        (square) => square.every(([offsetX, offsetY]) => {
+            const score = controlScoresByOffset.get(`${offsetX},${offsetY}`);
+            return Number.isFinite(score) &&
+                score >= REPEATED_TEMPLATE_CONTROL_MIN_SPATIAL_SCORE;
+        })
+    );
+    return {
+        localized: Number.isFinite(candidateSpatial) &&
+            Number.isFinite(maximumControlScore) &&
+            candidateSpatial - maximumControlScore >= MIN_LOCALIZED_PEAK_PROMINENCE,
+        repeatedTemplateCollision
+    };
+}
+
+function hasSelectorConfirmedTarget(selection, originalImageData) {
+    const trial = selection?.selectedTrial;
+    if (
+        !trial ||
+        selection.source === 'skipped' ||
+        selection.decisionTier === 'insufficient'
+    ) {
+        return false;
+    }
+    const directMatch = hasReliableStandardWatermarkSignal({
+        spatialScore: trial.originalSpatialScore,
+        gradientScore: trial.originalGradientScore
+    });
+    const localization = measurePresenceLocalization(originalImageData, trial);
+    if (localization.repeatedTemplateCollision) {
+        return false;
+    }
+    const localizedPresence = localization.localized;
+    const hasCompleteRestorationDecision =
+        trial.accepted === true &&
+        trial.evaluation?.eligible === true;
+    if (directMatch) {
+        return localizedPresence ||
+            (
+                hasCompleteRestorationDecision &&
+                (
+                    hasStrongRestorationEvidence(trial) ||
+                    hasEvidenceGatedSmallV2CatalogPresence(trial)
+                )
+            );
+    }
+    if (trial.accepted === false || trial.evaluation?.eligible === false) {
+        return false;
+    }
+    if (!hasCompleteRestorationDecision) {
+        return true;
+    }
+    return hasStrongRestorationEvidence(trial) ||
+        hasEvidenceGatedSmallV2CatalogPresence(trial) ||
+        (
+            localizedPresence &&
+            hasValidatedRestorationEvidence(trial)
+        );
+}
+
+function findEligiblePresenceTrial(selection, originalImageData) {
+    return (selection?.candidatePool ?? []).find((trial) => {
+        if (trial?.accepted !== true || trial.evaluation?.eligible !== true) {
+            return false;
+        }
+        const directMatch = hasReliableStandardWatermarkSignal({
+                spatialScore: trial.originalSpatialScore,
+                gradientScore: trial.originalGradientScore
+        });
+        const localization = measurePresenceLocalization(originalImageData, trial);
+        if (localization.repeatedTemplateCollision) {
+            return false;
+        }
+        const localizedPresence = localization.localized;
+        return hasStrongRestorationEvidence(trial) ||
+            hasEvidenceGatedSmallV2CatalogPresence(trial) || (
+            localizedPresence &&
+            (directMatch || hasValidatedRestorationEvidence(trial))
+        );
+    });
+}
+
+function isStrongLocalizedGeometryTrial(trial, originalImageData) {
+    const spatialScore = Number(trial?.originalSpatialScore);
+    const gradientScore = Number(trial?.originalGradientScore);
+    if (
+        !Number.isFinite(spatialScore) ||
+        !Number.isFinite(gradientScore) ||
+        spatialScore < STRONG_GEOMETRY_MIN_SPATIAL_SCORE ||
+        gradientScore < STRONG_GEOMETRY_MIN_GRADIENT_SCORE ||
+        !hasReliableStandardWatermarkSignal({
+            spatialScore,
+            gradientScore
+        })
+    ) {
+        return false;
+    }
+    const localization = measurePresenceLocalization(originalImageData, trial);
+    return localization.localized && !localization.repeatedTemplateCollision;
+}
+
+function findStrongLocalizedGeometryTrial(selection, originalImageData) {
+    const trials = [
+        selection?.selectedTrial,
+        ...(selection?.candidatePool ?? [])
+    ];
+    let bestTrial = null;
+    let bestScore = -Infinity;
+    for (const trial of trials) {
+        if (!isStrongLocalizedGeometryTrial(trial, originalImageData)) {
+            continue;
+        }
+        const score = Number(trial.originalSpatialScore) +
+            Number(trial.originalGradientScore);
+        if (score > bestScore) {
+            bestTrial = trial;
+            bestScore = score;
+        }
+    }
+    return bestTrial;
+}
+
+function isGeometryCompatibleWithLock(trial, geometryLockTrial) {
+    if (!geometryLockTrial) return true;
+    const trialPosition = trial?.position;
+    const lockPosition = geometryLockTrial?.position;
+    const trialWidth = Number(trialPosition?.width);
+    const trialHeight = Number(trialPosition?.height);
+    const lockWidth = Number(lockPosition?.width);
+    const lockHeight = Number(lockPosition?.height);
+    if (
+        ![trialPosition?.x, trialPosition?.y, trialWidth, trialHeight,
+            lockPosition?.x, lockPosition?.y, lockWidth, lockHeight]
+            .every(Number.isFinite) ||
+        trialWidth <= 0 ||
+        trialHeight <= 0 ||
+        lockWidth <= 0 ||
+        lockHeight <= 0
+    ) {
+        return false;
+    }
+
+    const widthRatio = Math.min(trialWidth, lockWidth) /
+        Math.max(trialWidth, lockWidth);
+    const heightRatio = Math.min(trialHeight, lockHeight) /
+        Math.max(trialHeight, lockHeight);
+    if (
+        widthRatio < GEOMETRY_LOCK_MIN_SIZE_RATIO ||
+        heightRatio < GEOMETRY_LOCK_MIN_SIZE_RATIO
+    ) {
+        return false;
+    }
+
+    const intersectionWidth = Math.max(0, Math.min(
+        trialPosition.x + trialWidth,
+        lockPosition.x + lockWidth
+    ) - Math.max(trialPosition.x, lockPosition.x));
+    const intersectionHeight = Math.max(0, Math.min(
+        trialPosition.y + trialHeight,
+        lockPosition.y + lockHeight
+    ) - Math.max(trialPosition.y, lockPosition.y));
+    const intersectionArea = intersectionWidth * intersectionHeight;
+    const minimumArea = Math.min(
+        trialWidth * trialHeight,
+        lockWidth * lockHeight
+    );
+    return intersectionArea / minimumArea >= GEOMETRY_LOCK_MIN_OVERLAP_RATIO;
+}
+
+function findWatermarkPresenceWitness(selection, originalImageData) {
+    if (hasSelectorConfirmedTarget(selection, originalImageData)) {
+        return selection.selectedTrial;
+    }
+    return findStrongLocalizedGeometryTrial(selection, originalImageData) ??
+        findEligiblePresenceTrial(selection, originalImageData) ??
+        null;
+}
+
 export function collectInitialWatermarkCandidates(input = {}) {
     const selectCandidate = input.selectCandidate ?? selectInitialCandidate;
     const fixedSelection = selectCandidate({
@@ -95,31 +530,167 @@ export function collectInitialWatermarkCandidates(input = {}) {
             allowAutomaticSearch: true,
             allowAggressiveStrongLocated: true
         });
-    const conservativeTrials = [
-        createConservativeTopNTrial(input.originalImageData, fixedSelection, 0.5, 'fixed'),
-        createConservativeTopNTrial(input.originalImageData, automaticSelection, 0.25, 'automatic')
-    ]
-        .filter(Boolean);
-    const trials = [
-        ...(fixedSelection?.candidatePool ?? []),
+    const fixedPresenceWitness = findWatermarkPresenceWitness(
+        fixedSelection,
+        input.originalImageData
+    );
+    const automaticPresenceWitness = findWatermarkPresenceWitness(
+        automaticSelection,
+        input.originalImageData
+    );
+    const geometryLockWitness =
+        findStrongLocalizedGeometryTrial(
+            fixedSelection,
+            input.originalImageData
+        ) ??
+        findStrongLocalizedGeometryTrial(
+            automaticSelection,
+            input.originalImageData
+        );
+    const presenceConfirmed = Boolean(
+        fixedPresenceWitness || automaticPresenceWitness
+    );
+    const bestEffortSelections = presenceConfirmed
+        ? []
+        : [fixedSelection, automaticSelection]
+            .filter((selection, index, values) => (
+                values.indexOf(selection) === index &&
+                isSafeSelectorBestEffortSelection(
+                    selection,
+                    input.originalImageData
+                )
+            ));
+    const bestEffortFallback = !presenceConfirmed &&
+        bestEffortSelections.length > 0;
+    if (!presenceConfirmed && !bestEffortFallback) {
+        return {
+            hypotheses: [],
+            presenceConfirmed: false,
+            bestEffortFallback: false,
+            bestEffortReason: null,
+            fixedSelection,
+            automaticSelection
+        };
+    }
+    const repeatedTemplateCollisionCache = new Map();
+    const keepNonRepeatedTrial = (trial) => {
+        if (!trial) return false;
+        if (!repeatedTemplateCollisionCache.has(trial)) {
+            repeatedTemplateCollisionCache.set(
+                trial,
+                measurePresenceLocalization(
+                    input.originalImageData,
+                    trial
+                ).repeatedTemplateCollision
+            );
+        }
+        return repeatedTemplateCollisionCache.get(trial) !== true;
+    };
+
+    const includeFixedSelection = (
+        presenceConfirmed ||
+        bestEffortSelections.includes(fixedSelection)
+    ) && isGeometryCompatibleWithLock(
         fixedSelection?.selectedTrial,
-        ...(automaticSelection?.candidatePool ?? []),
+        geometryLockWitness
+    );
+    const includeAutomaticSelection = (
+        presenceConfirmed ||
+        bestEffortSelections.includes(automaticSelection)
+    ) && isGeometryCompatibleWithLock(
         automaticSelection?.selectedTrial,
-        ...conservativeTrials
-    ].filter(Boolean);
+        geometryLockWitness
+    );
+    const conservativeTrials = [
+        includeFixedSelection
+            ? createConservativeTopNTrial(
+                input.originalImageData,
+                fixedSelection,
+                0.5,
+                'fixed'
+            )
+            : null,
+        includeAutomaticSelection
+            ? createConservativeTopNTrial(
+                input.originalImageData,
+                automaticSelection,
+                0.25,
+                'automatic'
+            )
+            : null
+    ]
+        .filter((trial) => (
+            trial &&
+            (
+                !bestEffortFallback ||
+                (
+                    trial.damage?.safe === true &&
+                    trial.hardReject !== true &&
+                    Number(trial.nearBlackIncrease ?? Infinity) < 0.04 &&
+                    Number(trial.nearWhiteIncrease ?? Infinity) < 0.04 &&
+                    hasMeasurableRestorationEffect(trial)
+                )
+            )
+        ));
+    const trials = (
+        bestEffortFallback
+            ? [
+                includeFixedSelection ? fixedSelection?.selectedTrial : null,
+                includeAutomaticSelection ? automaticSelection?.selectedTrial : null,
+                ...conservativeTrials
+            ]
+            : [
+                ...(fixedSelection?.candidatePool ?? []),
+                fixedSelection?.selectedTrial,
+                ...(automaticSelection?.candidatePool ?? []),
+                automaticSelection?.selectedTrial,
+                ...conservativeTrials
+            ]
+    ).filter((trial) => (
+        keepNonRepeatedTrial(trial) &&
+        isGeometryCompatibleWithLock(trial, geometryLockWitness)
+    ));
 
     const diverseHypotheses = selectDiverseCandidateHypotheses(trials, { limit: 5 });
     const fixedSelectedHypothesis = createCandidateHypothesis(
-        fixedSelection?.selectedTrial,
+        includeFixedSelection &&
+            keepNonRepeatedTrial(fixedSelection?.selectedTrial)
+            ? fixedSelection?.selectedTrial
+            : null,
         1000
     );
     const automaticSelectedHypothesis = createCandidateHypothesis(
-        automaticSelection?.selectedTrial,
+        includeAutomaticSelection &&
+            keepNonRepeatedTrial(automaticSelection?.selectedTrial)
+            ? automaticSelection?.selectedTrial
+            : null,
         1001
+    );
+    const fixedPresenceHypothesis = createCandidateHypothesis(
+        keepNonRepeatedTrial(fixedPresenceWitness) &&
+            isGeometryCompatibleWithLock(
+                fixedPresenceWitness,
+                geometryLockWitness
+            )
+            ? fixedPresenceWitness
+            : null,
+        1002
+    );
+    const automaticPresenceHypothesis = createCandidateHypothesis(
+        keepNonRepeatedTrial(automaticPresenceWitness) &&
+            isGeometryCompatibleWithLock(
+                automaticPresenceWitness,
+                geometryLockWitness
+            )
+            ? automaticPresenceWitness
+            : null,
+        1003
     );
     const preferredHypotheses = [
         fixedSelectedHypothesis,
-        automaticSelectedHypothesis
+        automaticSelectedHypothesis,
+        fixedPresenceHypothesis,
+        automaticPresenceHypothesis
     ].filter((hypothesis, index, values) => (
         hypothesis &&
         values.findIndex((candidate) => sameTrialIdentity(
@@ -135,7 +706,13 @@ export function collectInitialWatermarkCandidates(input = {}) {
     const hypotheses = [...preferredHypotheses, ...retainedAlternatives]
         .map((hypothesis) => ({
             ...hypothesis,
-            discoveryRole: hypothesis.trial?.provenance?.topNConservative === true
+            presenceStatus: bestEffortFallback
+                ? 'selector-only'
+                : 'confirmed',
+            discoveryRole: bestEffortFallback &&
+                hypothesis.trial?.provenance?.topNConservative !== true
+                ? 'discovered-alternative'
+                : hypothesis.trial?.provenance?.topNConservative === true
                 ? 'conservative-derived'
                 : sameTrialIdentity(hypothesis.trial, fixedSelection?.selectedTrial)
                     ? 'fixed-selected'
@@ -148,6 +725,11 @@ export function collectInitialWatermarkCandidates(input = {}) {
 
     return {
         hypotheses,
+        presenceConfirmed,
+        bestEffortFallback,
+        bestEffortReason: bestEffortFallback
+            ? 'presence-witness-unconfirmed'
+            : null,
         fixedSelection,
         automaticSelection
     };

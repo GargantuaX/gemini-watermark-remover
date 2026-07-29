@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Best-Effort Product Principle
+
+- Treat best-effort processing as the minimum product guarantee: when the input is available and processing can run, return the best result the current system can produce.
+- A result with visible residuals or minor imperfections is preferable to returning the unchanged input or no result.
+- Low confidence, incomplete catalog coverage, or a quality warning should not by themselves block output. Use the most plausible validated/fallback strategy, produce the result, and surface the uncertainty as non-blocking metadata or UI copy.
+- Do not tell users to refresh or retry when repeating the same action is not expected to change the outcome. Retry guidance is allowed only when there is a concrete, recoverable state change and the user can take an actionable step.
+- Reserve hard failure for cases where processing truly cannot run or no usable input/output can be produced; do not use failure as a substitute for a best-effort result.
+
 ## Debug Workflow
 
 ### Allenk Upstream Reference

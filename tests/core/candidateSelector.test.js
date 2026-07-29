@@ -107,6 +107,87 @@ test('evaluateRestorationCandidate should reject weak nearby dark-polarity trial
     }
 });
 
+test('evaluateRestorationCandidate should reject a weak 48px dark-polarity content collision', async () => {
+    const imageData = await decodeImageDataInNode(path.resolve(
+        'tests/fixtures/release-d119-dark-polarity-false-positive-roi.png'
+    ));
+    const alphaMap = getEmbeddedAlphaMap(48);
+    const darkAlphaMap = Float32Array.from(alphaMap, (value) => -Math.abs(value));
+    const position = { x: 0, y: 0, width: 48, height: 48 };
+    const result = evaluateRestorationCandidate({
+        originalImageData: imageData,
+        alphaMap: darkAlphaMap,
+        position,
+        source: 'standard+catalog+dark-polarity+gain',
+        config: {
+            logoSize: 48,
+            marginRight: 96,
+            marginBottom: 96
+        },
+        baselineNearBlackRatio: calculateNearBlackRatio(imageData, position),
+        alphaGain: 0.06,
+        provenance: {
+            catalogVariant: true,
+            catalogFamily: 'known-current-variant',
+            catalogEvidenceGate: 'required',
+            darkPolarity: true
+        },
+        includeImageData: false
+    });
+
+    assert.equal(result.accepted, false);
+    assert.equal(
+        result.evaluation.blockedGate,
+        'darkPolarityCatalogEvidenceAllowed'
+    );
+    assert.ok(result.originalSpatialScore < 0.6);
+    assert.ok(result.originalGradientScore < 0.3);
+});
+
+test('evaluateRestorationCandidate should keep the 48px dark-polarity rescue inside its validated weak-gain range', () => {
+    const imageData = createPaleFlatImageData(48, 48);
+    const alphaMap = getEmbeddedAlphaMap(48);
+    const darkAlphaMap = Float32Array.from(alphaMap, (value) => -Math.abs(value));
+    const position = { x: 0, y: 0, width: 48, height: 48 };
+    for (let index = 0; index < alphaMap.length; index++) {
+        const alpha = alphaMap[index];
+        const offset = index * 4;
+        for (let channel = 0; channel < 3; channel++) {
+            imageData.data[offset + channel] = Math.round(
+                imageData.data[offset + channel] * (1 - alpha)
+            );
+        }
+    }
+
+    const result = evaluateRestorationCandidate({
+        originalImageData: imageData,
+        alphaMap: darkAlphaMap,
+        position,
+        source: 'standard+catalog+dark-polarity',
+        config: {
+            logoSize: 48,
+            marginRight: 96,
+            marginBottom: 96
+        },
+        baselineNearBlackRatio: calculateNearBlackRatio(imageData, position),
+        alphaGain: 1,
+        provenance: {
+            catalogVariant: true,
+            catalogFamily: 'known-current-variant',
+            catalogEvidenceGate: 'required',
+            darkPolarity: true,
+            weakDarkPolarity48: true
+        },
+        includeImageData: false
+    });
+
+    assert.equal(result.accepted, false);
+    assert.equal(
+        result.evaluation.blockedGate,
+        'darkPolarityCatalogEvidenceAllowed'
+    );
+});
+
 test('evaluateRestorationCandidate should admit the issue101 light-outline template only with strong structural evidence', async () => {
     const alphaMap = getEmbeddedAlphaMap('96-outline-light');
     assert.ok(alphaMap, 'expected the embedded light-outline alpha map');

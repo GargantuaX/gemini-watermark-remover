@@ -27,12 +27,92 @@ export function createFineAlphaTrialSequenceSpecs({
     refiners = {}
 } = {}) {
     const {
+        refineLargeMargin48ProfileAlphaRescue,
+        fineTuneEvidenceGatedLocalAlpha,
         recalibrateOverSubtractedAlpha,
         fineTuneDarkCatalogAlpha,
         fineTuneWeakPositiveResidualAlpha
     } = refiners;
 
+    const evidenceGatedStages = [];
+    if (typeof refineLargeMargin48ProfileAlphaRescue === 'function') {
+        evidenceGatedStages.push({
+            stage: 'large-margin-48-profile-alpha-rescue',
+            strategy: 'large-margin-48-profile-alpha',
+            createTrial: () => {
+                const state = readPipelineAlphaState(readState);
+                return typeof refineLargeMargin48ProfileAlphaRescue === 'function'
+                    ? refineLargeMargin48ProfileAlphaRescue({
+                        originalImageData,
+                        currentImageData: state.finalImageData,
+                        currentAlphaMap: state.alphaMap,
+                        currentPosition: state.position,
+                        currentConfig: state.config,
+                        currentSpatialScore: state.finalProcessedSpatialScore,
+                        currentGradientScore: state.finalProcessedGradientScore,
+                        currentAlphaGain: state.alphaGain,
+                        originalSpatialScore,
+                        originalGradientScore
+                    })
+                    : null;
+            },
+            acceptCurrentAlphaTrialResult,
+            source: () => {
+                const source = readPipelineAlphaState(readState).source;
+                return source.includes('+profile-alpha-rescue')
+                    ? source
+                    : `${source}+profile-alpha-rescue`;
+            },
+            stageExtras: (result) => ({
+                profileExponent: result.profileExponent
+            })
+        });
+    }
+    if (typeof fineTuneEvidenceGatedLocalAlpha === 'function') {
+        evidenceGatedStages.push({
+            stage: 'evidence-gated-local-alpha-search',
+            strategy: 'evidence-gated-local-alpha',
+            createTrial: () => {
+                const state = readPipelineAlphaState(readState);
+                return typeof fineTuneEvidenceGatedLocalAlpha === 'function'
+                    ? fineTuneEvidenceGatedLocalAlpha({
+                        originalImageData,
+                        currentImageData: state.finalImageData,
+                        alphaMap: state.alphaMap,
+                        position: state.position,
+                        currentSpatialScore: state.finalProcessedSpatialScore,
+                        currentGradientScore: state.finalProcessedGradientScore,
+                        currentAlphaGain: state.alphaGain,
+                        originalSpatialScore,
+                        originalGradientScore,
+                        originalNearBlackRatio: resolveNearBlackRatio({
+                            calculateNearBlackRatio,
+                            imageData: originalImageData,
+                            position: state.position
+                        })
+                    })
+                    : null;
+            },
+            acceptCurrentAlphaTrialResult,
+            source: () => {
+                const source = readPipelineAlphaState(readState).source;
+                return source.includes('+fine-alpha')
+                    ? source
+                    : `${source}+fine-alpha`;
+            },
+            stageExtras: (result) => ({
+                localSearchTrigger: result.localSearchTrigger,
+                darkBackgroundSupportConvergence:
+                    result.darkBackgroundSupportConvergence ?? null
+            }),
+            debugTimings,
+            timingKey: debugTimingsEnabled ? 'localAlphaSearchMs' : null,
+            nowMs
+        });
+    }
+
     return [
+        ...evidenceGatedStages,
         {
             stage: 'over-subtraction-recalibration',
             strategy: 'over-subtraction-fine-alpha',
@@ -105,6 +185,7 @@ export function createFineAlphaTrialSequenceSpecs({
                 return typeof fineTuneWeakPositiveResidualAlpha === 'function'
                     ? fineTuneWeakPositiveResidualAlpha({
                         originalImageData,
+                        currentImageData: state.finalImageData,
                         alphaMap: state.alphaMap,
                         position: state.position,
                         currentSpatialScore: state.finalProcessedSpatialScore,

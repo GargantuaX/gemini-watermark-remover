@@ -27,6 +27,14 @@ function createSelectedCandidate(best) {
     };
 }
 
+function findDarkBackgroundSupportConvergence(meta = {}) {
+    const stages = Array.isArray(meta.alphaAdjustmentStages)
+        ? meta.alphaAdjustmentStages
+        : [];
+    const convergence = stages.at(-1)?.darkBackgroundSupportConvergence;
+    return convergence?.accepted === true ? convergence : null;
+}
+
 function createRuntimeFailureResult({
     createRejectedResult,
     originalImageData,
@@ -42,6 +50,26 @@ function createRuntimeFailureResult({
     });
 }
 
+function createNoWatermarkResult({
+    createRejectedResult,
+    originalImageData,
+    collection,
+    debugTimings
+}) {
+    const selection = collection?.automaticSelection ?? collection?.fixedSelection ?? {};
+    return createRejectedResult({
+        imageData: originalImageData,
+        debugTimings,
+        reason: 'no-watermark-detected',
+        adaptiveConfidence: selection.adaptiveConfidence ?? null,
+        originalSpatialScore: selection.standardSpatialScore ?? null,
+        originalGradientScore: selection.standardGradientScore ?? null,
+        source: 'skipped',
+        decisionTier: selection.decisionTier ?? 'insufficient',
+        selectionDebug: null
+    });
+}
+
 function notifyCandidateCompleted({ options, candidate, debugTimings }) {
     if (typeof options?.onCandidateCompleted !== 'function') return;
 
@@ -53,6 +81,41 @@ function notifyCandidateCompleted({ options, candidate, debugTimings }) {
                 (debugTimings.candidateDiagnosticErrorCount ?? 0) + 1;
         }
     }
+}
+
+function appendUniqueRiskFlag(flags, flag) {
+    const normalized = Array.isArray(flags) ? flags : [];
+    return normalized.includes(flag) ? normalized : [...normalized, flag];
+}
+
+function attachPresenceBestEffortMeta(meta, collection) {
+    if (collection?.bestEffortFallback !== true) return meta;
+
+    const riskFlag = 'unconfirmed-watermark-presence';
+    const decisionPath = meta?.decisionPath && typeof meta.decisionPath === 'object'
+        ? {
+            ...meta.decisionPath,
+            riskFlags: appendUniqueRiskFlag(meta.decisionPath.riskFlags, riskFlag),
+            evaluation: meta.decisionPath.evaluation &&
+                typeof meta.decisionPath.evaluation === 'object'
+                ? {
+                    ...meta.decisionPath.evaluation,
+                    riskFlags: appendUniqueRiskFlag(
+                        meta.decisionPath.evaluation.riskFlags,
+                        riskFlag
+                    )
+                }
+                : meta.decisionPath.evaluation
+        }
+        : meta?.decisionPath;
+
+    return {
+        ...meta,
+        presenceConfirmed: false,
+        bestEffortReason:
+            collection.bestEffortReason ?? 'presence-witness-unconfirmed',
+        decisionPath
+    };
 }
 
 export function runImageWatermarkPipeline({
@@ -119,6 +182,26 @@ export function runImageWatermarkPipeline({
         debugTimings.generatedCandidateCount = hypotheses.length;
         debugTimings.earlyExitReason = null;
     }
+    if (
+        collection?.presenceConfirmed === false &&
+        collection?.bestEffortFallback !== true
+    ) {
+        if (debugTimingsEnabled) {
+            debugTimings.candidateExecutionMs = 0;
+            debugTimings.executedCandidateCount = 0;
+            debugTimings.completedCandidateCount = 0;
+            debugTimings.failedCandidateCount = 0;
+            debugTimings.candidateRankingMs = 0;
+            debugTimings.earlyExitReason = 'no-watermark-detected';
+            debugTimings.totalMs = nowMs() - totalStartedAt;
+        }
+        return createNoWatermarkResult({
+            createRejectedResult,
+            originalImageData,
+            collection,
+            debugTimings
+        });
+    }
 
     const completed = [];
     const failures = [];
@@ -135,7 +218,9 @@ export function runImageWatermarkPipeline({
                 debugTimingsEnabled,
                 visualPostProcessingEnabled,
                 cleanupConfig,
-                createAcceptedPipelineDependencies,
+                createAcceptedPipelineDependencies: () => (
+                    createAcceptedPipelineDependencies(hypothesis)
+                ),
                 runAcceptedPipeline,
                 createAcceptedFinalResult
             });
@@ -148,7 +233,16 @@ export function runImageWatermarkPipeline({
                 qualitySignals: measureCandidate({
                     originalImageData,
                     candidateImageData: completedCandidate.result.imageData,
-                    hypothesis
+                    hypothesis,
+                    finalCandidate: {
+                        position: completedCandidate.pipelineState?.position,
+                        alphaMap: completedCandidate.pipelineState?.alphaMap,
+                        alphaGain: completedCandidate.pipelineState?.alphaGain,
+                        darkBackgroundSupportConvergence:
+                            findDarkBackgroundSupportConvergence(
+                                completedCandidate.result.meta
+                            )
+                    }
                 })
             };
             completed.push(candidate);
@@ -197,13 +291,14 @@ export function runImageWatermarkPipeline({
     }
 
     const candidateSummaries = createSummaries(ranked, failures);
-    const meta = attachSelectionMeta(best.result.meta, {
+    const selectionMeta = attachSelectionMeta(best.result.meta, {
         qualityStatus: best.qualitySignals?.qualityStatus,
         selectionConfidence: best.selectionConfidence,
         selectedCandidate: createSelectedCandidate(best),
         qualitySignals: best.qualitySignals,
         candidateSummaries
     });
+    const meta = attachPresenceBestEffortMeta(selectionMeta, collection);
     if (debugTimingsEnabled) {
         debugTimings.candidateRankingMs = nowMs() - rankingStartedAt;
         debugTimings.totalMs = nowMs() - totalStartedAt;

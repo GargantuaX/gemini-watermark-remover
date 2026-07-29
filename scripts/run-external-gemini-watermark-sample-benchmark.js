@@ -6,7 +6,18 @@ import { interpolateAlphaMap } from '../src/core/adaptiveDetector.js';
 import { getEmbeddedAlphaMap } from '../src/core/embeddedAlphaMaps.js';
 import { processWatermarkImageData } from '../src/core/watermarkProcessor.js';
 import { loadLocalEnv } from './local-env.js';
-import { decodeImageDataInNode } from './sample-benchmark.js';
+import {
+    classifyBenchmarkQualityFailure,
+    decodeImageDataInNode
+} from './sample-benchmark.js';
+import {
+    classifyHighPrecisionContourResidual,
+    measureMultichannelContourResidual
+} from './multichannel-contour-residual.js';
+import {
+    classifyProvisionalLumaInteriorResidual,
+    measureAlphaInteriorProjection
+} from './alpha-interior-projection.js';
 
 loadLocalEnv();
 
@@ -18,7 +29,9 @@ const DEFAULT_FAILURES_CSV_PATH = path.join(DEFAULT_OUTPUT_DIR, 'latest-strong-l
 const DEFAULT_BASELINE_PATH = path.join(DEFAULT_OUTPUT_DIR, 'latest-report.json');
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const RESIDUAL_FAIL_THRESHOLD = 0.22;
+const GRADIENT_FAIL_THRESHOLD = 0.22;
 const MIN_EXPECTED_SUPPRESSION_GAIN = 0.3;
+const CONSERVATIVE_CANONICAL_96_MAX_RESIDUAL = 0.35;
 const CONSERVATIVE_CANONICAL_96_MAX_GRADIENT = 0.08;
 const CONSERVATIVE_CANONICAL_96_MIN_SUPPRESSION_GAIN = 0.38;
 const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_SPATIAL = 0.55;
@@ -78,10 +91,12 @@ function roundNumber(value, digits = 6) {
     return Number(value.toFixed(digits));
 }
 
-function resolveAlphaMaps() {
+export function resolveExternalBenchmarkAlphaMaps() {
     const alpha48 = getEmbeddedAlphaMap(48);
     const alpha96 = getEmbeddedAlphaMap(96);
     const alpha96NewMargin = getEmbeddedAlphaMap('96-20260520');
+    const alpha96OutlineLight = getEmbeddedAlphaMap('96-outline-light');
+    const alpha96OutlineDark = getEmbeddedAlphaMap('96-outline-dark');
     const alpha36V2 = getEmbeddedAlphaMap('36-v2');
     const cache = new Map([
         [48, alpha48],
@@ -94,7 +109,9 @@ function resolveAlphaMaps() {
         alpha48,
         alpha96,
         alpha96Variants: {
-            '20260520': alpha96NewMargin
+            '20260520': alpha96NewMargin,
+            'outline-light': alpha96OutlineLight,
+            'outline-dark': alpha96OutlineDark
         },
         getAlphaMap(size) {
             if (cache.has(size)) return cache.get(size);
@@ -103,6 +120,120 @@ function resolveAlphaMaps() {
             cache.set(size, alphaMap);
             return alphaMap;
         }
+    };
+}
+
+function resolveExternalBenchmarkShadowAlphaMap(alphaMaps, meta) {
+    const position = meta?.position ?? null;
+    if (!position) return null;
+    const alphaVariant = meta?.config?.alphaVariant ?? null;
+    const variantMap = alphaVariant
+        ? alphaMaps?.alpha96Variants?.[alphaVariant] ?? null
+        : null;
+    if (variantMap) {
+        const variantSize = Math.sqrt(variantMap.length);
+        if (Number.isInteger(variantSize)) {
+            return variantSize === position.width
+                ? variantMap
+                : interpolateAlphaMap(variantMap, variantSize, position.width);
+        }
+    }
+    return alphaMaps?.getAlphaMap?.(position.width) ?? null;
+}
+
+export function resolveExternalBenchmarkShadowGeometry({ imageData, meta }) {
+    if (meta?.position) {
+        return {
+            position: meta.position,
+            source: 'pipeline'
+        };
+    }
+    if (!imageData || !Number.isInteger(imageData.width) || !Number.isInteger(imageData.height)) {
+        return null;
+    }
+    const logoSize = Math.min(imageData.width, imageData.height) <= 1400 ? 48 : 96;
+    const margin = logoSize * 2;
+    return {
+        position: {
+            x: Math.max(0, imageData.width - margin - logoSize),
+            y: Math.max(0, imageData.height - margin - logoSize),
+            width: logoSize,
+            height: logoSize
+        },
+        source: 'review-fallback'
+    };
+}
+
+export function evaluateExternalBenchmarkContourResidual({ imageData, alphaMaps, meta }) {
+    const position = meta?.position ?? null;
+    if (!position) {
+        return {
+            status: 'unavailable',
+            reason: 'missing-watermark-geometry',
+            flagged: false,
+            reasons: [],
+            metrics: null
+        };
+    }
+
+    const alphaMap = resolveExternalBenchmarkShadowAlphaMap(alphaMaps, meta);
+    if (!alphaMap || alphaMap.length !== position.width * position.height) {
+        return {
+            status: 'unavailable',
+            reason: 'missing-alpha-map',
+            flagged: false,
+            reasons: [],
+            metrics: null
+        };
+    }
+
+    const metrics = measureMultichannelContourResidual({
+        imageData,
+        alphaMap,
+        position
+    });
+    const classification = classifyHighPrecisionContourResidual(metrics);
+    return {
+        status: 'measured',
+        flagged: classification.flagged,
+        reasons: classification.reasons,
+        metrics
+    };
+}
+
+export function evaluateExternalBenchmarkInteriorResidual({ imageData, alphaMaps, meta }) {
+    const position = meta?.position ?? null;
+    if (!position) {
+        return {
+            status: 'unavailable',
+            reason: 'missing-watermark-geometry',
+            flagged: false,
+            reasons: [],
+            evidenceStatus: 'provisional',
+            metrics: null
+        };
+    }
+
+    const alphaMap = resolveExternalBenchmarkShadowAlphaMap(alphaMaps, meta);
+    if (!alphaMap || alphaMap.length !== position.width * position.height) {
+        return {
+            status: 'unavailable',
+            reason: 'missing-alpha-map',
+            flagged: false,
+            reasons: [],
+            evidenceStatus: 'provisional',
+            metrics: null
+        };
+    }
+
+    const metrics = measureAlphaInteriorProjection({ imageData, alphaMap, position });
+    const classification = classifyProvisionalLumaInteriorResidual(metrics);
+    return {
+        status: 'measured',
+        flagged: classification.flagged,
+        reasons: classification.reasons,
+        evidenceStatus: classification.evidenceStatus,
+        metrics
     };
 }
 
@@ -136,6 +267,7 @@ async function listImages(root) {
 function isConservativeCanonical96Pass(record) {
     const anchor = record.actualAnchor;
     const alphaGain = toFiniteNumber(record.alphaGain);
+    const residualScore = toFiniteNumber(record.residualScore);
     const processedGradientScore = toFiniteNumber(record.processedGradientScore);
     const originalSpatialScore = toFiniteNumber(record.originalSpatialScore);
     const originalGradientScore = toFiniteNumber(record.originalGradientScore);
@@ -146,6 +278,8 @@ function isConservativeCanonical96Pass(record) {
         anchor.marginBottom === 64 &&
         alphaGain !== null &&
         alphaGain <= 1 &&
+        residualScore !== null &&
+        residualScore <= CONSERVATIVE_CANONICAL_96_MAX_RESIDUAL &&
         processedGradientScore !== null &&
         processedGradientScore <= CONSERVATIVE_CANONICAL_96_MAX_GRADIENT &&
         originalSpatialScore !== null &&
@@ -164,30 +298,10 @@ export function classifyExternalBenchmarkCase(record) {
         };
     }
 
-    if (
-        toFiniteNumber(record.residualScore) !== null &&
-        record.residualScore >= RESIDUAL_FAIL_THRESHOLD
-    ) {
-        if (isConservativeCanonical96Pass(record)) {
-            return {
-                status: 'pass',
-                bucket: 'pass'
-            };
-        }
-        if (
-            toFiniteNumber(record.suppressionGain) === null ||
-            record.suppressionGain < MIN_EXPECTED_SUPPRESSION_GAIN
-        ) {
-            return {
-                status: 'fail',
-                bucket: 'weak-suppression'
-            };
-        }
-        return {
-            status: 'fail',
-            bucket: 'residual-edge'
-        };
-    }
+    const qualityFailure = classifyBenchmarkQualityFailure(record, {
+        allowConservativeResidual: isConservativeCanonical96Pass(record)
+    });
+    if (qualityFailure) return qualityFailure;
 
     if (record.decisionTier === 'insufficient' || record.decisionTier == null) {
         return {
@@ -241,6 +355,19 @@ function summarize(results) {
         byDecisionTier: {},
         bySource: {},
         byAnchor: {},
+        contourResidualShadow: {
+            measuredCount: 0,
+            unavailableCount: 0,
+            flaggedCount: 0,
+            fallbackGeometryCount: 0
+        },
+        interiorResidualShadow: {
+            evidenceStatus: 'provisional',
+            measuredCount: 0,
+            unavailableCount: 0,
+            flaggedCount: 0,
+            fallbackGeometryCount: 0
+        },
         sourceOnly: null
     };
 
@@ -253,6 +380,28 @@ function summarize(results) {
         incrementBucket(summary.byDecisionTier, record.decisionTier ?? 'null', status);
         incrementBucket(summary.bySource, record.source || 'null', status);
         incrementBucket(summary.byAnchor, anchorKey(record.actualAnchor), status);
+        if (record.contourResidualShadow?.status === 'measured') {
+            summary.contourResidualShadow.measuredCount++;
+            if (record.contourResidualShadow.geometrySource === 'review-fallback') {
+                summary.contourResidualShadow.fallbackGeometryCount++;
+            }
+            if (record.contourResidualShadow.flagged === true) {
+                summary.contourResidualShadow.flaggedCount++;
+            }
+        } else {
+            summary.contourResidualShadow.unavailableCount++;
+        }
+        if (record.interiorResidualShadow?.status === 'measured') {
+            summary.interiorResidualShadow.measuredCount++;
+            if (record.interiorResidualShadow.geometrySource === 'review-fallback') {
+                summary.interiorResidualShadow.fallbackGeometryCount++;
+            }
+            if (record.interiorResidualShadow.flagged === true) {
+                summary.interiorResidualShadow.flaggedCount++;
+            }
+        } else {
+            summary.interiorResidualShadow.unavailableCount++;
+        }
     }
 
     summary.successRate = summary.total > 0
@@ -315,7 +464,7 @@ function compareToBaseline(results, baseline) {
 }
 
 async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
-    const alphaMaps = resolveAlphaMaps();
+    const alphaMaps = resolveExternalBenchmarkAlphaMaps();
     const images = await listImages(sampleRoot);
     const results = [];
 
@@ -323,6 +472,35 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
         const imageData = await decodeImageDataInNode(item.filePath);
         const processed = processWatermarkImageData(imageData, alphaMaps);
         const meta = processed.meta;
+        const shadowGeometry = resolveExternalBenchmarkShadowGeometry({
+            imageData: processed.imageData,
+            meta
+        });
+        const shadowMeta = shadowGeometry
+            ? {
+                ...meta,
+                position: shadowGeometry.position,
+                config: meta.config ?? { logoSize: shadowGeometry.position.width }
+            }
+            : meta;
+        const contourResidualEvaluation = evaluateExternalBenchmarkContourResidual({
+            imageData: processed.imageData,
+            alphaMaps,
+            meta: shadowMeta
+        });
+        const contourResidualShadow = {
+            ...contourResidualEvaluation,
+            geometrySource: shadowGeometry?.source ?? null
+        };
+        const interiorResidualEvaluation = evaluateExternalBenchmarkInteriorResidual({
+            imageData: processed.imageData,
+            alphaMaps,
+            meta: shadowMeta
+        });
+        const interiorResidualShadow = {
+            ...interiorResidualEvaluation,
+            geometrySource: shadowGeometry?.source ?? null
+        };
         const record = {
             fileName: item.fileName,
             filePath: item.filePath,
@@ -355,7 +533,19 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
             suppressionGain: roundNumber(meta.detection?.suppressionGain),
             adaptiveConfidence: roundNumber(meta.detection?.adaptiveConfidence),
             residualVisibility: meta.detection?.residualVisibility ?? null,
-            decisionPath: meta.decisionPath ?? null
+            qualityStatus:
+                meta.qualityStatus ??
+                meta.qualitySignals?.qualityStatus ??
+                null,
+            finalDamageWarning:
+                typeof meta.qualitySignals?.damageWarning === 'boolean'
+                    ? meta.qualitySignals.damageWarning
+                    : null,
+            qualitySignals: meta.qualitySignals ?? null,
+            selectionDamageSafe: meta.selectionDebug?.damage?.safe ?? null,
+            decisionPath: meta.decisionPath ?? null,
+            contourResidualShadow,
+            interiorResidualShadow
         };
         record.classification = classifyExternalBenchmarkCase(record);
         results.push(record);
@@ -383,6 +573,9 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
             originalGradientScore: record.originalGradientScore,
             suppressionGain: record.suppressionGain,
             residualVisibility: record.residualVisibility,
+            qualityStatus: record.qualityStatus,
+            finalDamageWarning: record.finalDamageWarning,
+            selectionDamageSafe: record.selectionDamageSafe,
             decisionPath: record.decisionPath,
             filePath: record.filePath
         }));
@@ -393,7 +586,19 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
         outputDir: path.dirname(outputPath ?? DEFAULT_OUTPUT_PATH),
         policy: {
             residualFailThreshold: RESIDUAL_FAIL_THRESHOLD,
-            minExpectedSuppressionGain: MIN_EXPECTED_SUPPRESSION_GAIN
+            negativeResidualOvershootThreshold: -RESIDUAL_FAIL_THRESHOLD,
+            gradientFailThreshold: GRADIENT_FAIL_THRESHOLD,
+            minExpectedSuppressionGain: MIN_EXPECTED_SUPPRESSION_GAIN,
+            damageSignalPriority: [
+                'qualitySignals.damageWarning',
+                'qualityStatus',
+                'selectionDebug.damage.safe (legacy fallback)'
+            ],
+            conservativeCanonical96: {
+                maxResidualScore: CONSERVATIVE_CANONICAL_96_MAX_RESIDUAL,
+                maxGradientScore: CONSERVATIVE_CANONICAL_96_MAX_GRADIENT,
+                minSuppressionGain: CONSERVATIVE_CANONICAL_96_MIN_SUPPRESSION_GAIN
+            }
         },
         previousSummary: baseline?.summary ?? null,
         summary: summarize(results),
@@ -414,6 +619,14 @@ function renderMarkdown(report) {
         `- Pass: ${report.summary.passCount}/${report.summary.total} (${formatRate(report.summary.passCount, report.summary.total)})`,
         `- Fail: ${report.summary.failCount}`,
         `- Buckets: ${Object.entries(report.summary.buckets).map(([key, value]) => `${key}=${value}`).join(', ')}`,
+        `- Contour residual shadow flags: ${report.summary.contourResidualShadow.flaggedCount}/` +
+            `${report.summary.contourResidualShadow.measuredCount} measured ` +
+            `(${report.summary.contourResidualShadow.unavailableCount} unavailable; ` +
+            `${report.summary.contourResidualShadow.fallbackGeometryCount} review fallback; non-blocking)`,
+        `- Provisional interior residual shadow flags: ${report.summary.interiorResidualShadow.flaggedCount}/` +
+            `${report.summary.interiorResidualShadow.measuredCount} measured ` +
+            `(${report.summary.interiorResidualShadow.unavailableCount} unavailable; ` +
+            `${report.summary.interiorResidualShadow.fallbackGeometryCount} review fallback; non-blocking)`,
         `- Newly passing vs baseline: ${report.newlyPassing.length}`,
         `- Newly failing vs baseline: ${report.newlyFailing.length}`,
         ''
@@ -437,7 +650,9 @@ function renderMarkdown(report) {
         lines.push(
             `- ${failure.fileName} | ${failure.bucket} | applied=${failure.applied} | ` +
             `source=${failure.source || 'null'} | anchor=${anchorKey(failure.anchor)} | ` +
-            `residual=${failure.residualScore ?? 'null'} | gradient=${failure.processedGradientScore ?? 'null'}`
+            `residual=${failure.residualScore ?? 'null'} | gradient=${failure.processedGradientScore ?? 'null'} | ` +
+            `finalDamageWarning=${failure.finalDamageWarning ?? 'null'} | ` +
+            `selectionDamageSafe=${failure.selectionDamageSafe ?? 'null'}`
         );
     }
     lines.push('');
@@ -467,7 +682,10 @@ function renderFailuresCsv(failures) {
         'processedGradientScore',
         'originalSpatialScore',
         'originalGradientScore',
-        'suppressionGain'
+        'suppressionGain',
+        'qualityStatus',
+        'finalDamageWarning',
+        'selectionDamageSafe'
     ];
     const rows = failures.map((failure) => [
         failure.fileName,
@@ -484,7 +702,10 @@ function renderFailuresCsv(failures) {
         failure.processedGradientScore,
         failure.originalSpatialScore,
         failure.originalGradientScore,
-        failure.suppressionGain
+        failure.suppressionGain,
+        failure.qualityStatus,
+        failure.finalDamageWarning,
+        failure.selectionDamageSafe
     ]);
 
     return `${[header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n')}\n`;

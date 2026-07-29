@@ -2830,6 +2830,8 @@ test('createPageImageReplacementController should apply successful helper result
     image.style = {};
     image.src = 'https://lh3.googleusercontent.com/gg/example-token=s1024-rj';
     image.currentSrc = image.src;
+    image.naturalWidth = 1024;
+    image.naturalHeight = 559;
     image.parentElement = container;
     image.closest = (selector) => selector === 'generated-image,.generated-image-container'
       ? container
@@ -3068,6 +3070,8 @@ test('createPageImageReplacementController should apply skipped helper result wi
     image.style = {};
     image.src = 'https://lh3.googleusercontent.com/gg/example-token=s1024-rj';
     image.currentSrc = image.src;
+    image.naturalWidth = 1024;
+    image.naturalHeight = 559;
     image.parentElement = container;
     image.closest = (selector) => selector === 'generated-image,.generated-image-container'
       ? container
@@ -3119,6 +3123,8 @@ test('createPageImageReplacementController should process at most one image per 
       image.style = {};
       image.src = image.dataset.gwrSourceUrl;
       image.currentSrc = image.src;
+      image.naturalWidth = 1024;
+      image.naturalHeight = 559;
       image.parentElement = container;
       image.closest = (selector) => selector === 'generated-image,.generated-image-container'
         ? container
@@ -3189,6 +3195,8 @@ test('createPageImageReplacementController should prioritize fullscreen images a
       image.style = {};
       image.src = image.dataset.gwrSourceUrl;
       image.currentSrc = image.src;
+      image.naturalWidth = 1024;
+      image.naturalHeight = 559;
       image.parentElement = container;
       image.closest = (selector) => {
         if (selector === 'generated-image,.generated-image-container') {
@@ -3344,6 +3352,110 @@ test('createPageImageReplacementController should defer incomplete preview image
 
     assert.deepEqual(started, ['ready', 'delayed']);
     assert.equal(delayedImage.dataset.gwrPageImageState, 'skipped');
+  });
+});
+
+test('createPageImageReplacementController should defer zero-sized rendered images even when an original url is bound', async () => {
+  await withPageImageTestEnv(async ({ MockHTMLImageElement }) => {
+    const scheduledDrains = [];
+    const timers = [];
+    const started = [];
+
+    const makeImage = ({ id, sourceUrl, renderedUrl, complete, naturalWidth, naturalHeight }) => {
+      const container = createMockElement('div');
+      const image = new MockHTMLImageElement();
+      image.dataset = {
+        gwrSourceUrl: sourceUrl,
+        testId: id
+      };
+      image.style = {};
+      image.src = renderedUrl;
+      image.currentSrc = renderedUrl;
+      image.complete = complete;
+      image.naturalWidth = naturalWidth;
+      image.naturalHeight = naturalHeight;
+      image.parentElement = container;
+      image.closest = (selector) => selector === 'generated-image,.generated-image-container'
+        ? container
+        : null;
+      image.addEventListener = () => {};
+      image.removeEventListener = () => {};
+      return image;
+    };
+
+    const transientSourceImage = makeImage({
+      id: 'transient-source',
+      sourceUrl: 'https://lh3.googleusercontent.com/gg/transient=s0',
+      renderedUrl: 'https://lh3.googleusercontent.com/gg/transient=s0',
+      complete: false,
+      naturalWidth: 0,
+      naturalHeight: 0
+    });
+    const delayedBlobImage = makeImage({
+      id: 'delayed',
+      sourceUrl: 'https://lh3.googleusercontent.com/gg/delayed=s0',
+      renderedUrl: 'blob:https://gemini.google.com/delayed',
+      complete: false,
+      naturalWidth: 0,
+      naturalHeight: 0
+    });
+    const readyImage = makeImage({
+      id: 'ready',
+      sourceUrl: 'https://lh3.googleusercontent.com/gg/ready=s0',
+      renderedUrl: 'https://lh3.googleusercontent.com/gg/ready=s0',
+      complete: true,
+      naturalWidth: 1024,
+      naturalHeight: 559
+    });
+
+    const controller = createPageImageReplacementController({
+      logger: createSilentLogger(),
+      scheduleProcessingDrain(callback) {
+        scheduledDrains.push(callback);
+      },
+      setTimeoutImpl(callback, delay) {
+        timers.push({ callback, delay });
+        return timers.length;
+      },
+      clearTimeoutImpl() {},
+      processPageImageSourceImpl: async ({ imageElement }) => {
+        started.push(imageElement.dataset.testId);
+        return {
+          skipped: true,
+          reason: 'preview-fetch-unavailable',
+          candidateDiagnostics: [{ strategy: 'page-fetch', status: 'error' }],
+          candidateDiagnosticsSummary: 'page-fetch,error'
+        };
+      }
+    });
+
+    controller.processRoot({
+      querySelectorAll() {
+        return [transientSourceImage, delayedBlobImage, readyImage];
+      }
+    });
+
+    scheduledDrains[0]();
+    await Promise.resolve();
+
+    assert.deepEqual(started, []);
+    assert.equal(transientSourceImage.dataset.gwrPageImageState, undefined);
+    assert.equal(timers.length, 1);
+    assert.equal(scheduledDrains.length, 2);
+
+    scheduledDrains[1]();
+    await Promise.resolve();
+
+    assert.deepEqual(started, []);
+    assert.equal(delayedBlobImage.dataset.gwrPageImageState, undefined);
+    assert.equal(timers.length, 2);
+    assert.equal(scheduledDrains.length, 3);
+
+    scheduledDrains[2]();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(started, ['ready']);
+    assert.equal(readyImage.dataset.gwrPageImageState, 'skipped');
   });
 });
 

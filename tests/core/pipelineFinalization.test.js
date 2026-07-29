@@ -8,6 +8,51 @@ import {
     createSyntheticAlphaMap
 } from './syntheticWatermarkTestUtils.js';
 
+function createPositiveHaloBackgroundCollisionFixture() {
+    const width = 288;
+    const height = 288;
+    const position = { x: 192, y: 192, width: 96, height: 96 };
+    const alphaMap = createSyntheticAlphaMap(96);
+    const finalImageData = {
+        width,
+        height,
+        data: new Uint8ClampedArray(width * height * 4)
+    };
+    let seed = 123456789;
+    const random = () => {
+        seed = (1664525 * seed + 1013904223) >>> 0;
+        return seed / 4294967296;
+    };
+    for (let index = 0; index < finalImageData.data.length; index += 4) {
+        const value = 40 + Math.floor(random() * 176);
+        finalImageData.data[index] = value;
+        finalImageData.data[index + 1] = value;
+        finalImageData.data[index + 2] = value;
+        finalImageData.data[index + 3] = 255;
+    }
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const alpha = alphaMap[row * position.width + col];
+            const pixelIndex = ((position.y + row) * width + position.x + col) * 4;
+            const value = Math.min(255, finalImageData.data[pixelIndex] + alpha * 30);
+            finalImageData.data[pixelIndex] = value;
+            finalImageData.data[pixelIndex + 1] = value;
+            finalImageData.data[pixelIndex + 2] = value;
+        }
+    }
+
+    return {
+        position,
+        alphaMap,
+        finalImageData,
+        originalImageData: {
+            width,
+            height,
+            data: finalImageData.data.slice()
+        }
+    };
+}
+
 test('createAcceptedPipelineFinalResult should finalize accepted result metadata from state', () => {
     const imageData = createPatternImageData(128, 128);
     const alphaMap = createSyntheticAlphaMap(48);
@@ -231,4 +276,121 @@ test('createAcceptedPipelineFinalResult should preserve imperfect pixels for Top
     assert.equal(result.imageData, finalImageData);
     assert.equal(result.meta.applied, true);
     assert.equal(result.meta.source, 'adaptive+aggressive-located');
+});
+
+test('createAcceptedPipelineFinalResult should expose calibrated visibility while preserving raw residual evidence', () => {
+    const {
+        position,
+        alphaMap,
+        finalImageData,
+        originalImageData
+    } = createPositiveHaloBackgroundCollisionFixture();
+
+    const result = createAcceptedPipelineFinalResult({
+        pipelineState: {
+            finalImageData,
+            alphaMap,
+            position,
+            config: { logoSize: 96, marginRight: 64, marginBottom: 64 },
+            alphaGain: 1,
+            source: 'standard'
+        },
+        resultContext: {
+            selectedTrial: {
+                position,
+                config: { logoSize: 96, marginRight: 64, marginBottom: 64 }
+            },
+            decisionTier: 'direct-match'
+        },
+        originalImageData,
+        resolvedConfig: { logoSize: 96, marginRight: 64, marginBottom: 64 },
+        allowFailClosed: false
+    });
+
+    assert.equal(result.meta.detection.residualVisibility.rawVisible, true);
+    assert.equal(result.meta.detection.residualVisibility.visible, false);
+    assert.equal(
+        result.meta.detection.residualVisibility.metricRisk,
+        'positive-halo-background-collision'
+    );
+});
+
+test('createAcceptedPipelineFinalResult should fail closed unsafe new-margin output using raw visibility', () => {
+    const width = 288;
+    const height = 288;
+    const position = { x: 192, y: 192, width: 96, height: 96 };
+    const config = {
+        logoSize: 96,
+        marginRight: 192,
+        marginBottom: 192,
+        alphaVariant: '20260520'
+    };
+    const alphaMap = createSyntheticAlphaMap(96);
+    const finalImageData = {
+        width,
+        height,
+        data: new Uint8ClampedArray(width * height * 4)
+    };
+    let seed = 123456789;
+    const random = () => {
+        seed = (1664525 * seed + 1013904223) >>> 0;
+        return seed / 4294967296;
+    };
+    for (let index = 0; index < finalImageData.data.length; index += 4) {
+        const value = 40 + Math.floor(random() * 176);
+        finalImageData.data[index] = value;
+        finalImageData.data[index + 1] = value;
+        finalImageData.data[index + 2] = value;
+        finalImageData.data[index + 3] = 255;
+    }
+
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const alpha = alphaMap[row * position.width + col];
+            const pixelIndex = ((position.y + row) * width + position.x + col) * 4;
+            const value = Math.min(255, finalImageData.data[pixelIndex] + alpha * 30);
+            finalImageData.data[pixelIndex] = value;
+            finalImageData.data[pixelIndex + 1] = value;
+            finalImageData.data[pixelIndex + 2] = value;
+        }
+    }
+    const originalImageData = {
+        width,
+        height,
+        data: finalImageData.data.slice()
+    };
+
+    const result = createAcceptedPipelineFinalResult({
+        pipelineState: {
+            finalImageData,
+            alphaMap,
+            position,
+            config,
+            alphaGain: 1,
+            source: 'standard+located-aggressive'
+        },
+        resultContext: {
+            selectedTrial: {
+                position,
+                config,
+                damage: {
+                    safe: false,
+                    reason: 'clipping'
+                }
+            },
+            decisionTier: 'direct-match'
+        },
+        originalImageData,
+        resolvedConfig: config
+    });
+
+    assert.equal(result.imageData, originalImageData);
+    assert.equal(result.meta.applied, false);
+    assert.equal(result.meta.skipReason, 'visible-residual-unsafe-damage');
+    assert.equal(result.meta.detection.residualVisibility.rawVisible, true);
+    assert.equal(result.meta.detection.residualVisibility.visible, false);
+    assert.equal(
+        result.meta.detection.residualVisibility.metricRisk,
+        'positive-halo-background-collision'
+    );
 });

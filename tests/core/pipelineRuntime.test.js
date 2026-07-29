@@ -1413,6 +1413,7 @@ test('createAlphaRepairPipelineRuntime should accept located aggressive results 
 });
 
 test('createAlphaRepairPipelineRuntime should accept safe preview background cleanup results', () => {
+    const alphaAdjustmentStages = [];
     let currentState = {
         finalImageData: { id: 'before' },
         alphaMap: 'alpha-before',
@@ -1427,6 +1428,12 @@ test('createAlphaRepairPipelineRuntime should accept safe preview background cle
         source: 'preview'
     };
     const runtime = createAlphaRepairPipelineRuntime({
+        traceRecorder: {
+            alphaAdjustmentStages,
+            recordAlphaAdjustmentStage: (stage) => {
+                alphaAdjustmentStages.push(stage);
+            }
+        },
         readState: () => currentState,
         applyState: (state) => {
             currentState = state;
@@ -1449,6 +1456,26 @@ test('createAlphaRepairPipelineRuntime should accept safe preview background cle
     assert.equal(currentState.finalProcessedSpatialScore, 0.12);
     assert.equal(currentState.finalProcessedGradientScore, 0.08);
     assert.equal(currentState.source, 'preview+background-cleanup');
+    assert.deepEqual(
+        alphaAdjustmentStages.map((stage) => ({
+            stage: stage.stage,
+            fromAlphaGain: stage.fromAlphaGain,
+            toAlphaGain: stage.toAlphaGain,
+            beforeSpatialScore: stage.beforeSpatialScore,
+            beforeGradientScore: stage.beforeGradientScore,
+            afterSpatialScore: stage.afterSpatialScore,
+            afterGradientScore: stage.afterGradientScore
+        })),
+        [{
+            stage: 'preview-background-cleanup',
+            fromAlphaGain: 1,
+            toAlphaGain: 1,
+            beforeSpatialScore: 0.2,
+            beforeGradientScore: 0.15,
+            afterSpatialScore: 0.12,
+            afterGradientScore: 0.08
+        }]
+    );
 });
 
 test('createAlphaRepairPipelineRuntime should reject unsafe preview background cleanup results', () => {

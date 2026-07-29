@@ -30,7 +30,9 @@ import {
 
 const DEFAULT_OUTPUT_PATH = path.resolve('.artifacts/sample-benchmark/latest.json');
 const RESIDUAL_FAIL_THRESHOLD = 0.22;
+const GRADIENT_FAIL_THRESHOLD = 0.22;
 const MIN_EXPECTED_SUPPRESSION_GAIN = 0.3;
+const ALLOW_WEAK_RESIDUAL_MAX_ABS_SPATIAL = 0.35;
 const CONSERVATIVE_CANONICAL_96_MAX_RESIDUAL = 0.35;
 const CONSERVATIVE_CANONICAL_96_MAX_GRADIENT = 0.05;
 const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_SPATIAL = 0.55;
@@ -44,6 +46,15 @@ const CATALOG_DARK_ALPHA_GAIN_CANDIDATES = Object.freeze([0.9, 0.85, 0.8, 0.95, 
 const FINE_ALPHA_STEP = 0.02;
 const FINE_ALPHA_WINDOW = 0.04;
 const CANDIDATE_RANKING_LIMIT = 8;
+const CALIBRATED_SPATIAL_METRIC_RISKS = new Set([
+    'flat-clipped-low-texture-spatial-correlation',
+    'flat-low-variance-spatial-correlation',
+    'nonlocalized-spatial-background-collision',
+    'positive-halo-background-collision',
+    'positive-spatial-background-collision',
+    'structured-edge-background-collision',
+    'weak-halo-background-collision'
+]);
 const FINE_ALPHA_STAGE_PRIORITY = Object.freeze([
     'weak-positive-residual-fine-alpha',
     'dark-catalog-fine-alpha'
@@ -869,6 +880,123 @@ function resolveBenchmarkPosition({ imageData, meta, alpha48, alpha96 }) {
     return calculateWatermarkPosition(imageData.width, imageData.height, resolvedConfig);
 }
 
+export function classifyBenchmarkQualityFailure(caseRecord, {
+    allowWeakResidual = false,
+    allowConservativeResidual = false
+} = {}) {
+    const finalDamageWarning = typeof caseRecord.finalDamageWarning === 'boolean'
+        ? caseRecord.finalDamageWarning
+        : (
+            typeof caseRecord.qualitySignals?.damageWarning === 'boolean'
+                ? caseRecord.qualitySignals.damageWarning
+                : null
+        );
+    const qualityStatus = typeof caseRecord.qualityStatus === 'string'
+        ? caseRecord.qualityStatus
+        : (
+            typeof caseRecord.qualitySignals?.qualityStatus === 'string'
+                ? caseRecord.qualitySignals.qualityStatus
+                : null
+        );
+    const hasFinalDamageMetadata = finalDamageWarning !== null || qualityStatus !== null;
+    const finalDamageDetected =
+        finalDamageWarning === true ||
+        qualityStatus === 'possible-content-damage' ||
+        qualityStatus === 'mixed';
+    const selectionDamageSafe = typeof caseRecord.selectionDamageSafe === 'boolean'
+        ? caseRecord.selectionDamageSafe
+        : (
+            typeof caseRecord.damageSafe === 'boolean'
+                ? caseRecord.damageSafe
+                : caseRecord.selectionDebug?.damage?.safe
+        );
+    if (
+        finalDamageDetected ||
+        (!hasFinalDamageMetadata && selectionDamageSafe === false)
+    ) {
+        return {
+            status: 'fail',
+            bucket: 'content-damage'
+        };
+    }
+
+    const residualVisibility = caseRecord.residualVisibility;
+    const hasCalibratedSpatialMetricRisk =
+        residualVisibility?.rawVisible === true &&
+        residualVisibility.visible === false &&
+        CALIBRATED_SPATIAL_METRIC_RISKS.has(residualVisibility.metricRisk);
+    const hasLowVarianceSpatialMetricRisk =
+        hasCalibratedSpatialMetricRisk &&
+        residualVisibility.metricRisk === 'flat-low-variance-spatial-correlation';
+    const residualScore = toFiniteNumber(caseRecord.residualScore);
+    if (
+        residualScore !== null &&
+        residualScore <= -RESIDUAL_FAIL_THRESHOLD &&
+        !hasLowVarianceSpatialMetricRisk
+    ) {
+        return {
+            status: 'fail',
+            bucket: 'residual-overshoot'
+        };
+    }
+
+    const processedGradientScore = toFiniteNumber(caseRecord.processedGradientScore);
+    const hasPositiveSpatialResidual =
+        !hasCalibratedSpatialMetricRisk &&
+        residualScore !== null &&
+        residualScore >= RESIDUAL_FAIL_THRESHOLD;
+    const hasGradientResidual =
+        processedGradientScore !== null &&
+        processedGradientScore >= GRADIENT_FAIL_THRESHOLD;
+    const hasVisibleResidual = residualVisibility?.visible === true;
+    const hasNonSpatialVisibleResidual = hasVisibleResidual && (
+        residualVisibility.visibleGradientResidual === true ||
+        residualVisibility.visiblePositiveHalo === true ||
+        residualVisibility.visibleSpatialResidual !== true
+    );
+
+    const suppressionGain = toFiniteNumber(caseRecord.suppressionGain);
+    if (
+        allowWeakResidual &&
+        residualScore !== null &&
+        Math.abs(residualScore) <= ALLOW_WEAK_RESIDUAL_MAX_ABS_SPATIAL &&
+        suppressionGain !== null &&
+        suppressionGain >= MIN_EXPECTED_SUPPRESSION_GAIN &&
+        !hasGradientResidual &&
+        !hasNonSpatialVisibleResidual
+    ) {
+        return null;
+    }
+
+    if (!hasPositiveSpatialResidual && !hasGradientResidual && !hasVisibleResidual) {
+        return null;
+    }
+
+    if (
+        allowConservativeResidual &&
+        hasPositiveSpatialResidual &&
+        !hasGradientResidual &&
+        !hasVisibleResidual
+    ) {
+        return null;
+    }
+
+    if (
+        suppressionGain === null ||
+        suppressionGain < MIN_EXPECTED_SUPPRESSION_GAIN
+    ) {
+        return {
+            status: 'fail',
+            bucket: 'weak-suppression'
+        };
+    }
+
+    return {
+        status: 'fail',
+        bucket: 'residual-edge'
+    };
+}
+
 export function classifyBenchmarkCase(caseRecord) {
     if (caseRecord.expectedGemini) {
         if (caseRecord.applied !== true) {
@@ -892,33 +1020,11 @@ export function classifyBenchmarkCase(caseRecord) {
             };
         }
 
-        if (
-            caseRecord.allowWeakResidual !== true &&
-            toFiniteNumber(caseRecord.residualScore) !== null &&
-            caseRecord.residualScore >= RESIDUAL_FAIL_THRESHOLD
-        ) {
-            if (isConservativeCanonical96Residual(caseRecord)) {
-                return {
-                    status: 'pass',
-                    bucket: 'pass'
-                };
-            }
-
-            if (
-                toFiniteNumber(caseRecord.suppressionGain) === null ||
-                caseRecord.suppressionGain < MIN_EXPECTED_SUPPRESSION_GAIN
-            ) {
-                return {
-                    status: 'fail',
-                    bucket: 'weak-suppression'
-                };
-            }
-
-            return {
-                status: 'fail',
-                bucket: 'residual-edge'
-            };
-        }
+        const qualityFailure = classifyBenchmarkQualityFailure(caseRecord, {
+            allowWeakResidual: caseRecord.allowWeakResidual === true,
+            allowConservativeResidual: isConservativeCanonical96Residual(caseRecord)
+        });
+        if (qualityFailure) return qualityFailure;
 
         if (caseRecord.decisionTier === 'insufficient' || caseRecord.decisionTier == null) {
             return {
@@ -1242,6 +1348,16 @@ async function buildBenchmarkReport({
             suppressionGain: toFiniteNumber(processed.meta.detection?.suppressionGain),
             adaptiveConfidence: toFiniteNumber(processed.meta.detection?.adaptiveConfidence),
             residualVisibility: processed.meta.detection?.residualVisibility ?? null,
+            qualityStatus:
+                processed.meta.qualityStatus ??
+                processed.meta.qualitySignals?.qualityStatus ??
+                null,
+            finalDamageWarning:
+                typeof processed.meta.qualitySignals?.damageWarning === 'boolean'
+                    ? processed.meta.qualitySignals.damageWarning
+                    : null,
+            qualitySignals: processed.meta.qualitySignals ?? null,
+            selectionDamageSafe: processed.meta.selectionDebug?.damage?.safe ?? null,
             decisionPath: processed.meta.decisionPath ?? null,
             changedRatio: regionDelta.changedRatio,
             avgAbsoluteDeltaPerChannel: regionDelta.avgAbsoluteDeltaPerChannel,

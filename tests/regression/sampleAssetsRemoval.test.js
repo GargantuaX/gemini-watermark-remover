@@ -1081,7 +1081,7 @@ test('21-9-preview.png should use fixed preview-anchor without edge cleanup by d
     }
 });
 
-test('caller-guaranteed Gemini input should return best effort even when synthetic evidence is weak', async (t) => {
+test('Gemini-like dimensions should not force processing when watermark evidence is absent', async (t) => {
     let browser;
     try {
         browser = await chromium.launch({ headless: true });
@@ -1101,14 +1101,11 @@ test('caller-guaranteed Gemini input should return best effort even when synthet
         const imageData = createSolidImageData(1408, 768, 48);
         const result = removeWatermarkLikeEngine(imageData, alpha48, alpha96);
 
-        assert.equal(result.meta.applied, true);
-        assert.equal(result.meta.bestEffort, true);
-        assert.equal(result.meta.retryRecommended, false);
-        assert.notEqual(result.meta.qualityStatus, null);
-        assert.ok(
-            result.regionDelta.changedRatio > 0,
-            `expected best-effort processing to change the selected region, candidateSize=${result.position.width}`
-        );
+        assert.equal(result.meta.applied, false);
+        assert.equal(result.skipped, true);
+        assert.equal(result.meta.skipReason, 'no-watermark-detected');
+        assert.notEqual(result.meta.retryRecommended, true);
+        assert.equal(result.regionDelta.changedRatio, 0);
     } finally {
         await browser.close();
     }

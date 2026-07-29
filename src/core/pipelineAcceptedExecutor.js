@@ -99,6 +99,10 @@ export function runAcceptedAlphaRepairPipeline({
                 debugTimings,
                 debugTimingsEnabled,
                 refiners: {
+                    refineLargeMargin48ProfileAlphaRescue:
+                        refiners.refineLargeMargin48ProfileAlphaRescue,
+                    fineTuneEvidenceGatedLocalAlpha:
+                        refiners.fineTuneEvidenceGatedLocalAlpha,
                     recalibrateOverSubtractedAlpha: refiners.recalibrateOverSubtractedAlpha,
                     fineTuneDarkCatalogAlpha: refiners.fineTuneDarkCatalogAlpha,
                     fineTuneWeakPositiveResidualAlpha: refiners.fineTuneWeakPositiveResidualAlpha
