@@ -1,0 +1,102 @@
+name: Publish npm package
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Validate versioned release package
+        id: release
+        shell: bash
+        env:
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          package_name="$(node --input-type=module -e "import manifest from './package.json' with { type: 'json' }; process.stdout.write(manifest.name)")"
+          version="$(node --input-type=module -e "import manifest from './package.json' with { type: 'json' }; process.stdout.write(manifest.version)")"
+          tag="v${version}"
+          tarball="release/pilio-gemini-watermark-remover-${version}.tgz"
+
+          if [[ -n "${RELEASE_EVENT_TAG}" && "${RELEASE_EVENT_TAG}" != "${tag}" ]]; then
+            echo "Release tag ${RELEASE_EVENT_TAG} does not match package version ${tag}." >&2
+            exit 1
+          fi
+
+          git rev-parse --verify "refs/tags/${tag}^{commit}" >/dev/null
+          git merge-base --is-ancestor "${tag}" HEAD
+          test -f "${tarball}"
+
+          tag_tarball_sha="$(git show "${tag}:${tarball}" | sha256sum | cut -d ' ' -f 1)"
+          checkout_tarball_sha="$(sha256sum "${tarball}" | cut -d ' ' -f 1)"
+          if [[ "${tag_tarball_sha}" != "${checkout_tarball_sha}" ]]; then
+            echo "The checked-out tarball differs from the artifact committed at ${tag}." >&2
+            exit 1
+          fi
+
+          packed_manifest="$(tar -xOf "${tarball}" package/package.json)"
+          PACKED_MANIFEST="${packed_manifest}" PACKAGE_NAME="${package_name}" PACKAGE_VERSION="${version}" node --input-type=module <<'NODE'
+          const packed = JSON.parse(process.env.PACKED_MANIFEST)
+          if (packed.name !== process.env.PACKAGE_NAME || packed.version !== process.env.PACKAGE_VERSION) {
+            throw new Error(
+              `Packed manifest mismatch: expected ${process.env.PACKAGE_NAME}@${process.env.PACKAGE_VERSION}, ` +
+                `received ${packed.name}@${packed.version}`,
+            )
+          }
+          NODE
+
+          echo "package_name=${package_name}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "tarball=${tarball}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check whether version is already published
+        id: registry
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if published_version="$(pnpm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version 2>/dev/null)" && [[ "${published_version}" == "${PACKAGE_VERSION}" ]]; then
+            echo "already_published=true" >> "${GITHUB_OUTPUT}"
+            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} is already published; nothing to do."
+          else
+            echo "already_published=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Publish with npm Trusted Publishing
+        if: steps.registry.outputs.already_published != 'true'
+        run: pnpm publish "${{ steps.release.outputs.tarball }}" --access public
