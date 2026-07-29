@@ -97,4 +97,4 @@ jobs:
 
       - name: Publish with npm Trusted Publishing
         if: steps.registry.outputs.already_published != 'true'
-        run: pnpm publish "${{ steps.release.outputs.tarball }}" --access public
+        run: pnpm publish "./${{ steps.release.outputs.tarball }}" --access public
