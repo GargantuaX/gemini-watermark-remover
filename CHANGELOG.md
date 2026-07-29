@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.33 - 2026-07-29
+
+### CLI Packaging
+
+- Expanded the optional `sharp` peer range to include tested 0.35.x releases, removing the peer warning for consumers that install the current `sharp` release alongside the CLI.
+
+### Verification
+
+- Ran the packed CLI against the same 2816x1536 Gemini sample with `sharp` 0.34.5 and 0.35.3; both versions produced byte-identical PNG output.
+- Repacked the updated package and confirmed a fresh consumer can install it with `sharp` 0.35.3 without peer dependency warnings.
+- Re-ran the SDK smoke suite and the complete automated test suite after the metadata change.
+
 ## 1.0.32 - 2026-07-29
 
 ### Watermark Removal
