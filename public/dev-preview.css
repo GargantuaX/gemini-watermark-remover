@@ -176,6 +176,7 @@ a {
 .text-gray-800 { color: #1f2937; }
 .text-gray-900 { color: #111827; }
 .text-primary { color: var(--primary); }
+.text-warning { color: #b45309; }
 .underline { text-decoration-line: underline; }
 .underline-offset-2 { text-underline-offset: 2px; }
 .antialiased { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }

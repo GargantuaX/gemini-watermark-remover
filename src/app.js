@@ -6,7 +6,8 @@ import {
 import { WatermarkWorkerClient, canUseWatermarkWorker } from './core/workerClient.js';
 import {
     isConfirmedWatermarkDecision,
-    resolveDisplayWatermarkInfo
+    resolveDisplayWatermarkInfo,
+    resolveProcessedStatusPresentation
 } from './core/watermarkDisplay.js';
 import { canvasToBlob } from './core/canvasBlob.js';
 import {
@@ -29,6 +30,9 @@ const TEXT = {
     status: '状态',
     removed: '水印已移除',
     skipped: '未检测到可移除水印，已保留原图',
+    visibleResidual: '已处理，可能仍有可见残影',
+    possibleContentDamage: '已生成最佳结果，请检查水印区域',
+    mixedQualityWarning: '已生成最佳结果，可能有残影或局部失真',
     unsupported: '浏览器不支持复制图片',
     copied: '已复制！',
     copy: '复制结果',
@@ -336,10 +340,12 @@ function renderSingleImageMeta(item) {
     `;
 }
 
-function getProcessedStatusLabel(item) {
-    return !isConfirmedWatermarkDecision(item)
-        ? TEXT.skipped
-        : TEXT.removed;
+function getProcessedStatusPresentation(item) {
+    const presentation = resolveProcessedStatusPresentation(item);
+    return {
+        label: TEXT[presentation.messageKey],
+        tone: presentation.tone
+    };
 }
 
 function renderSingleProcessedMeta(item) {
@@ -350,12 +356,13 @@ function renderSingleProcessedMeta(item) {
         getEstimatedWatermarkInfo(item)
     );
     const showWatermarkInfo = watermarkInfo && isConfirmedWatermarkDecision(item);
+    const statusPresentation = getProcessedStatusPresentation(item);
 
     processedInfo.innerHTML = `
         <p>${TEXT.size}: ${item.originalImg.width}x${item.originalImg.height}</p>
         ${showWatermarkInfo ? `<p>${TEXT.watermark}: ${watermarkInfo.size}x${watermarkInfo.size}</p>` : ''}
         ${showWatermarkInfo ? `<p>${TEXT.position}: (${watermarkInfo.position.x},${watermarkInfo.position.y})</p>` : ''}
-        <p>${TEXT.status}: ${getProcessedStatusLabel(item)}</p>
+        <p class="${statusPresentation.tone === 'warning' ? 'text-warning' : ''}">${TEXT.status}: ${statusPresentation.label}</p>
     `;
 }
 
@@ -432,12 +439,13 @@ function renderImageCardStatus(item) {
     const statusEl = document.getElementById(`status-${item.id}`);
     if (!statusEl) return;
 
+    statusEl.classList.remove('text-primary', 'text-warning');
     if (item.status === 'completed') {
-        statusEl.textContent = getProcessedStatusLabel(item);
-        statusEl.classList.add('text-primary');
+        const presentation = getProcessedStatusPresentation(item);
+        statusEl.textContent = presentation.label;
+        statusEl.classList.add(presentation.tone === 'warning' ? 'text-warning' : 'text-primary');
         return;
     }
-    statusEl.classList.remove('text-primary');
 
     const labels = {
         pending: TEXT.pending,

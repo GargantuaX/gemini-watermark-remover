@@ -29,6 +29,35 @@ export function isConfirmedWatermarkDecision(item) {
     return item?.processedMeta?.applied !== false;
 }
 
+export function resolveProcessedStatusPresentation(item) {
+    if (!isConfirmedWatermarkDecision(item)) {
+        return {
+            messageKey: 'skipped',
+            tone: 'success'
+        };
+    }
+
+    const qualityStatus = item?.processedMeta?.qualityStatus;
+    const warningMessageKeys = {
+        'visible-residual': 'visibleResidual',
+        'possible-content-damage': 'possibleContentDamage',
+        mixed: 'mixedQualityWarning'
+    };
+    const warningMessageKey = warningMessageKeys[qualityStatus];
+
+    if (warningMessageKey) {
+        return {
+            messageKey: warningMessageKey,
+            tone: 'warning'
+        };
+    }
+
+    return {
+        messageKey: 'removed',
+        tone: 'success'
+    };
+}
+
 /**
  * Resolve watermark info for UI display.
  * Prefer processed runtime metadata and fallback to static estimate.

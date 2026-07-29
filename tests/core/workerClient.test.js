@@ -29,7 +29,10 @@ class FakeWorker {
             result: {
                 mimeType: 'image/png',
                 processedBuffer: new Uint8Array([1, 2, 3]).buffer,
-                meta: { source: 'worker' }
+                meta: {
+                    source: 'worker',
+                    qualityStatus: 'visible-residual'
+                }
             }
         };
 
@@ -64,6 +67,7 @@ test('WatermarkWorkerClient should process image blob via worker protocol', asyn
     const result = await client.processBlob(input);
 
     assert.equal(result.meta.source, 'worker');
+    assert.equal(result.meta.qualityStatus, 'visible-residual');
     assert.equal(result.blob.type, 'image/png');
     assert.equal(result.blob.size, 3);
 });

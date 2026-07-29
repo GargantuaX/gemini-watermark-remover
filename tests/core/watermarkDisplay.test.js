@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
     isConfirmedWatermarkDecision,
-    resolveDisplayWatermarkInfo
+    resolveDisplayWatermarkInfo,
+    resolveProcessedStatusPresentation
 } from '../../src/core/watermarkDisplay.js';
 
 test('resolveDisplayWatermarkInfo should prefer processed meta over estimated info', () => {
@@ -68,5 +69,56 @@ test('isConfirmedWatermarkDecision should prefer decisionTier over legacy applie
             }
         }),
         true
+    );
+});
+
+test('resolveProcessedStatusPresentation should surface every non-clean quality status as a warning', () => {
+    const cases = [
+        ['visible-residual', 'visibleResidual'],
+        ['possible-content-damage', 'possibleContentDamage'],
+        ['mixed', 'mixedQualityWarning']
+    ];
+
+    for (const [qualityStatus, expectedKey] of cases) {
+        assert.deepEqual(
+            resolveProcessedStatusPresentation({
+                processedMeta: {
+                    decisionTier: 'validated-match',
+                    qualityStatus
+                }
+            }),
+            {
+                messageKey: expectedKey,
+                tone: 'warning'
+            }
+        );
+    }
+});
+
+test('resolveProcessedStatusPresentation should keep clean results successful and insufficient decisions skipped', () => {
+    assert.deepEqual(
+        resolveProcessedStatusPresentation({
+            processedMeta: {
+                decisionTier: 'validated-match',
+                qualityStatus: 'clean'
+            }
+        }),
+        {
+            messageKey: 'removed',
+            tone: 'success'
+        }
+    );
+
+    assert.deepEqual(
+        resolveProcessedStatusPresentation({
+            processedMeta: {
+                decisionTier: 'insufficient',
+                qualityStatus: 'visible-residual'
+            }
+        }),
+        {
+            messageKey: 'skipped',
+            tone: 'success'
+        }
     );
 });
