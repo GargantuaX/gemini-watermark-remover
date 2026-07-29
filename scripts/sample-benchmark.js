@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
@@ -64,6 +65,40 @@ function resolveGoldManifestPath(sampleDir) {
     return path.join(sampleDir, 'gold-manifest.json');
 }
 
+function validateIssueRegressionAdmission(fileName, admission) {
+    if (!admission || typeof admission !== 'object') {
+        throw new Error(`${fileName}: formal admission metadata is required`);
+    }
+    if (admission.status !== 'confirmed-regression-input') {
+        throw new Error(`${fileName}: admission status must be confirmed-regression-input`);
+    }
+    if (admission.source !== 'github-issue') {
+        throw new Error(`${fileName}: admission source must be github-issue`);
+    }
+    if (!Number.isInteger(admission.issue) || admission.issue <= 0) {
+        throw new Error(`${fileName}: admission issue must be a positive integer`);
+    }
+    if (typeof admission.originalFileName !== 'string' || !admission.originalFileName.trim()) {
+        throw new Error(`${fileName}: admission originalFileName is required`);
+    }
+    if (typeof admission.confirmedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(admission.confirmedAt)) {
+        throw new Error(`${fileName}: admission confirmedAt must use YYYY-MM-DD`);
+    }
+}
+
+function validateKnownIssueExpectation(fileName, knownIssue, admission) {
+    if (!knownIssue) return;
+    if (!Number.isInteger(knownIssue.issue) || knownIssue.issue !== admission.issue) {
+        throw new Error(`${fileName}: known issue must match admission issue`);
+    }
+    if (knownIssue.qualityStatus !== 'visible-residual') {
+        throw new Error(`${fileName}: known issue qualityStatus must be visible-residual`);
+    }
+    if (knownIssue.bucket !== 'residual-edge') {
+        throw new Error(`${fileName}: known issue bucket must be residual-edge`);
+    }
+}
+
 export async function loadSampleGoldManifest(sampleDir = path.resolve('src/assets/samples')) {
     try {
         const manifest = JSON.parse(await readFile(resolveGoldManifestPath(sampleDir), 'utf8'));
@@ -91,6 +126,8 @@ function resolveGoldSampleExpectation(fileName, manifest) {
             expectedAnchor: null,
             expectedAlphaGain: null,
             allowWeakResidual: false,
+            admission: null,
+            knownIssue: null,
             tags: []
         };
     }
@@ -101,6 +138,8 @@ function resolveGoldSampleExpectation(fileName, manifest) {
         expectedAnchor: entry.expectedAnchor ?? null,
         expectedAlphaGain: entry.expectedAlphaGain ?? null,
         allowWeakResidual: entry.allowWeakResidual === true,
+        admission: entry.admission ?? null,
+        knownIssue: entry.knownIssue ?? null,
         tags: Array.isArray(entry.tags) ? entry.tags : []
     };
 }
@@ -114,12 +153,36 @@ function inferMimeType(filePath) {
 
 export async function listBenchmarkSampleAssets(sampleDir = path.resolve('src/assets/samples')) {
     const manifest = await loadSampleGoldManifest(sampleDir);
-    return (await readdir(sampleDir))
+    const files = (await readdir(sampleDir))
         .filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()))
         .filter((name) => !name.includes('-fix.'))
         .filter((name) => !name.includes('-after.'))
         .filter((name) => !name.startsWith('Gemini_Generated_Image_'))
-        .sort((left, right) => left.localeCompare(right))
+        .sort((left, right) => left.localeCompare(right));
+    const fileSet = new Set(files);
+
+    for (const [fileName, entry] of Object.entries(manifest.samples ?? {})) {
+        const tags = Array.isArray(entry?.tags) ? entry.tags : [];
+        if (tags.includes('issue-regression') && !fileSet.has(fileName)) {
+            throw new Error(`${fileName}: admitted sample file is missing`);
+        }
+    }
+
+    for (const fileName of files) {
+        const entry = manifest.samples?.[fileName];
+        const tags = Array.isArray(entry?.tags) ? entry.tags : [];
+        if (tags.includes('issue-regression')) {
+            validateIssueRegressionAdmission(fileName, entry.admission);
+            validateKnownIssueExpectation(fileName, entry.knownIssue, entry.admission);
+            const sourceBuffer = await readFile(path.join(sampleDir, fileName));
+            const actualSha256 = createHash('sha256').update(sourceBuffer).digest('hex');
+            if (entry.admission.sha256 !== actualSha256) {
+                throw new Error(`${fileName}: admitted source sha256 mismatch`);
+            }
+        }
+    }
+
+    return files
         .map((fileName) => {
             const gold = resolveGoldSampleExpectation(fileName, manifest);
             return {
@@ -1024,7 +1087,22 @@ export function classifyBenchmarkCase(caseRecord) {
             allowWeakResidual: caseRecord.allowWeakResidual === true,
             allowConservativeResidual: isConservativeCanonical96Residual(caseRecord)
         });
-        if (qualityFailure) return qualityFailure;
+        if (qualityFailure) {
+            const knownIssue = caseRecord.knownIssue;
+            if (
+                Number.isInteger(knownIssue?.issue) &&
+                knownIssue.issue > 0 &&
+                knownIssue.qualityStatus === caseRecord.qualityStatus &&
+                knownIssue.bucket === qualityFailure.bucket
+            ) {
+                return {
+                    status: 'known-issue',
+                    bucket: qualityFailure.bucket,
+                    issue: knownIssue.issue
+                };
+            }
+            return qualityFailure;
+        }
 
         if (caseRecord.decisionTier === 'insufficient' || caseRecord.decisionTier == null) {
             return {
@@ -1061,6 +1139,7 @@ export function summarizeBenchmarkResults(results) {
     const summary = {
         total: results.length,
         passCount: 0,
+        knownIssueCount: 0,
         failCount: 0,
         buckets: {},
         candidateRanking: {
@@ -1099,6 +1178,8 @@ export function summarizeBenchmarkResults(results) {
 
         if (item.classification?.status === 'fail') {
             summary.failCount++;
+        } else if (item.classification?.status === 'known-issue') {
+            summary.knownIssueCount++;
         } else {
             summary.passCount++;
         }
@@ -1327,6 +1408,8 @@ async function buildBenchmarkReport({
             filePath,
             expectedGemini: item.expectedGemini,
             gold: item.gold ?? null,
+            admission: item.gold?.admission ?? null,
+            knownIssue: item.gold?.knownIssue ?? null,
             applied: processed.meta.applied === true,
             skipReason: processed.meta.skipReason || null,
             source: processed.meta.source || '',
@@ -1420,10 +1503,19 @@ async function runCli() {
                 `tier=${item.decisionTier || 'null'} source=${item.source || 'null'} ` +
                 `residual=${item.residualScore ?? 'null'} gain=${item.suppressionGain ?? 'null'}`
             );
+        } else if (item.classification.status === 'known-issue') {
+            console.log(
+                `[KNOWN #${item.classification.issue}] ${item.fileName} ` +
+                `bucket=${item.classification.bucket} quality=${item.qualityStatus || 'null'} ` +
+                `residual=${item.residualScore ?? 'null'} gradient=${item.processedGradientScore ?? 'null'}`
+            );
         }
     }
 
-    console.log(`summary: pass=${report.summary.passCount} fail=${report.summary.failCount} total=${report.summary.total}`);
+    console.log(
+        `summary: pass=${report.summary.passCount} known=${report.summary.knownIssueCount} ` +
+        `fail=${report.summary.failCount} total=${report.summary.total}`
+    );
     console.log(`report: ${options.outputPath}`);
 }
 

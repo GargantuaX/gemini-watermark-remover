@@ -118,6 +118,25 @@
       "expectedAlphaGain": { "min": 1, "max": 1 },
       "tags": ["canonical-96", "moderate-signal-standard-alpha"]
     },
+    "20260729-issue118.png": {
+      "shouldProcess": true,
+      "expectedAnchor": { "logoSize": 96, "marginRight": 192, "marginBottom": 192, "alphaVariant": "20260520" },
+      "expectedAlphaGain": { "min": 0.8, "max": 0.9 },
+      "admission": {
+        "status": "confirmed-regression-input",
+        "source": "github-issue",
+        "issue": 118,
+        "originalFileName": "Gemini_Generated_Image_f6ztv3f6ztv3f6zt.png",
+        "sha256": "12d95385172203e68e6c16a1c3ab32dae185375f3ba33a0111dc0c63097a8610",
+        "confirmedAt": "2026-07-30"
+      },
+      "knownIssue": {
+        "issue": 118,
+        "qualityStatus": "visible-residual",
+        "bucket": "residual-edge"
+      },
+      "tags": ["issue-regression", "confirmed-new-margin", "alpha-edge-mismatch"]
+    },
     "21-9.png": {
       "shouldProcess": true,
       "expectedAnchor": { "logoSize": 48, "marginRight": 96, "marginBottom": 96 },

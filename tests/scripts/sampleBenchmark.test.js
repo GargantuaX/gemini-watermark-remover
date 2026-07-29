@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import sharp from 'sharp';
 
@@ -56,9 +57,35 @@ test('runSampleBenchmark should include embedded outline alpha variants', async 
             imageData.data.set(crop.data.subarray(sourceIndex, sourceIndex + 4), targetIndex);
         }
     }
+    const admittedFixturePath = path.join(sampleDir, fixtureName);
     await sharp(Buffer.from(imageData.data.buffer), {
         raw: { width: imageData.width, height: imageData.height, channels: 4 }
-    }).png().toFile(path.join(sampleDir, fixtureName));
+    }).png().toFile(admittedFixturePath);
+    const admittedFixtureSha256 = createHash('sha256')
+        .update(await readFile(admittedFixturePath))
+        .digest('hex');
+    await writeFile(path.join(sampleDir, 'gold-manifest.json'), JSON.stringify({
+        version: 1,
+        samples: {
+            [fixtureName]: {
+                shouldProcess: true,
+                tags: ['issue-regression'],
+                admission: {
+                    status: 'confirmed-regression-input',
+                    source: 'github-issue',
+                    issue: 101,
+                    originalFileName: fixtureName,
+                    sha256: admittedFixtureSha256,
+                    confirmedAt: '2026-07-30'
+                },
+                knownIssue: {
+                    issue: 101,
+                    qualityStatus: 'visible-residual',
+                    bucket: 'residual-edge'
+                }
+            }
+        }
+    }));
 
     const report = await runSampleBenchmark({
         sampleDir,
@@ -66,6 +93,8 @@ test('runSampleBenchmark should include embedded outline alpha variants', async 
     });
 
     assert.equal(report.results.length, 1);
+    assert.equal(report.results[0].admission?.issue, 101);
+    assert.equal(report.results[0].knownIssue?.issue, 101);
     assert.equal(report.results[0].actualAnchor?.alphaVariant, 'outline-dark');
     assert.match(report.results[0].source, /outline-dark/);
     assert.equal(
@@ -620,6 +649,37 @@ test('classifyBenchmarkCase should treat changed non-Gemini region as false posi
     assert.equal(result.bucket, 'false-positive');
 });
 
+test('classifyBenchmarkCase should report an exact admitted residual debt as a known issue instead of pass', () => {
+    const result = classifyBenchmarkCase({
+        expectedGemini: true,
+        applied: true,
+        actualAnchor: { logoSize: 96, marginRight: 192, marginBottom: 192 },
+        expectedAnchor: { logoSize: 96, marginRight: 192, marginBottom: 192 },
+        alphaGain: 0.85,
+        expectedAlphaGain: { min: 0.8, max: 0.9 },
+        decisionTier: 'validated-match',
+        qualityStatus: 'visible-residual',
+        residualScore: 0.05,
+        processedGradientScore: 0.53,
+        suppressionGain: 0.8,
+        residualVisibility: {
+            visible: true,
+            visibleGradientResidual: true
+        },
+        knownIssue: {
+            issue: 118,
+            qualityStatus: 'visible-residual',
+            bucket: 'residual-edge'
+        }
+    });
+
+    assert.deepEqual(result, {
+        status: 'known-issue',
+        bucket: 'residual-edge',
+        issue: 118
+    });
+});
+
 test('listBenchmarkSampleAssets should include every primary sample image under the sample directory', async () => {
     const sampleDir = path.resolve('src/assets/samples');
     const items = await listBenchmarkSampleAssets(sampleDir);
@@ -639,6 +699,181 @@ test('listBenchmarkSampleAssets should include every primary sample image under 
         items.find((item) => item.fileName === '16-9.png')?.gold?.expectedAnchor,
         { logoSize: 48, marginRight: 96, marginBottom: 96 }
     );
+});
+
+test('listBenchmarkSampleAssets should reject issue regression samples without formal admission metadata', async () => {
+    const sampleDir = await mkdtemp(path.join(tmpdir(), 'gwr-sample-admission-missing-'));
+    await writeFile(path.join(sampleDir, 'issue-118.png'), Buffer.from([1, 2, 3]));
+    await writeFile(path.join(sampleDir, 'gold-manifest.json'), JSON.stringify({
+        version: 1,
+        samples: {
+            'issue-118.png': {
+                shouldProcess: true,
+                tags: ['issue-regression']
+            }
+        }
+    }));
+
+    await assert.rejects(
+        listBenchmarkSampleAssets(sampleDir),
+        /issue-118\.png: formal admission metadata is required/
+    );
+});
+
+test('listBenchmarkSampleAssets should reject a manifest whose admitted issue sample file disappeared', async () => {
+    const sampleDir = await mkdtemp(path.join(tmpdir(), 'gwr-sample-admission-file-missing-'));
+    await writeFile(path.join(sampleDir, 'gold-manifest.json'), JSON.stringify({
+        version: 1,
+        samples: {
+            'issue-118.png': {
+                shouldProcess: true,
+                tags: ['issue-regression'],
+                admission: {
+                    status: 'confirmed-regression-input',
+                    source: 'github-issue',
+                    issue: 118,
+                    originalFileName: 'Gemini_Generated_Image.png',
+                    sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+                    confirmedAt: '2026-07-30'
+                }
+            }
+        }
+    }));
+
+    await assert.rejects(
+        listBenchmarkSampleAssets(sampleDir),
+        /issue-118\.png: admitted sample file is missing/
+    );
+});
+
+test('listBenchmarkSampleAssets should reject issue regression samples when the admitted source hash changed', async () => {
+    const sampleDir = await mkdtemp(path.join(tmpdir(), 'gwr-sample-admission-stale-'));
+    await writeFile(path.join(sampleDir, 'issue-118.png'), Buffer.from([1, 2, 3]));
+    await writeFile(path.join(sampleDir, 'gold-manifest.json'), JSON.stringify({
+        version: 1,
+        samples: {
+            'issue-118.png': {
+                shouldProcess: true,
+                tags: ['issue-regression'],
+                admission: {
+                    status: 'confirmed-regression-input',
+                    source: 'github-issue',
+                    issue: 118,
+                    originalFileName: 'Gemini_Generated_Image.png',
+                    sha256: '0'.repeat(64),
+                    confirmedAt: '2026-07-30'
+                }
+            }
+        }
+    }));
+
+    await assert.rejects(
+        listBenchmarkSampleAssets(sampleDir),
+        /issue-118\.png: admitted source sha256 mismatch/
+    );
+});
+
+test('listBenchmarkSampleAssets should reject incomplete issue admission provenance', async () => {
+    const validAdmission = {
+        status: 'confirmed-regression-input',
+        source: 'github-issue',
+        issue: 118,
+        originalFileName: 'Gemini_Generated_Image.png',
+        sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+        confirmedAt: '2026-07-30'
+    };
+    const cases = [
+        [{ ...validAdmission, status: 'draft' }, /status must be confirmed-regression-input/],
+        [{ ...validAdmission, source: 'unknown' }, /source must be github-issue/],
+        [{ ...validAdmission, issue: 0 }, /issue must be a positive integer/],
+        [{ ...validAdmission, originalFileName: '' }, /originalFileName is required/],
+        [{ ...validAdmission, confirmedAt: 'today' }, /confirmedAt must use YYYY-MM-DD/]
+    ];
+
+    for (const [admission, expectedError] of cases) {
+        const sampleDir = await mkdtemp(path.join(tmpdir(), 'gwr-sample-admission-invalid-'));
+        await writeFile(path.join(sampleDir, 'issue-118.png'), Buffer.from([1, 2, 3]));
+        await writeFile(path.join(sampleDir, 'gold-manifest.json'), JSON.stringify({
+            version: 1,
+            samples: {
+                'issue-118.png': {
+                    shouldProcess: true,
+                    tags: ['issue-regression'],
+                    admission
+                }
+            }
+        }));
+
+        await assert.rejects(listBenchmarkSampleAssets(sampleDir), expectedError);
+    }
+});
+
+test('listBenchmarkSampleAssets should expose verified admission and known issue expectations', async () => {
+    const sampleDir = await mkdtemp(path.join(tmpdir(), 'gwr-sample-admission-valid-'));
+    const admission = {
+        status: 'confirmed-regression-input',
+        source: 'github-issue',
+        issue: 118,
+        originalFileName: 'Gemini_Generated_Image.png',
+        sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+        confirmedAt: '2026-07-30'
+    };
+    const knownIssue = {
+        issue: 118,
+        qualityStatus: 'visible-residual',
+        bucket: 'residual-edge'
+    };
+    await writeFile(path.join(sampleDir, 'issue-118.png'), Buffer.from([1, 2, 3]));
+    await writeFile(path.join(sampleDir, 'gold-manifest.json'), JSON.stringify({
+        version: 1,
+        samples: {
+            'issue-118.png': {
+                shouldProcess: true,
+                tags: ['issue-regression'],
+                admission,
+                knownIssue
+            }
+        }
+    }));
+
+    const items = await listBenchmarkSampleAssets(sampleDir);
+
+    assert.deepEqual(items[0].gold.admission, admission);
+    assert.deepEqual(items[0].gold.knownIssue, knownIssue);
+});
+
+test('listBenchmarkSampleAssets should reject broad or mismatched known issue waivers', async () => {
+    const validAdmission = {
+        status: 'confirmed-regression-input',
+        source: 'github-issue',
+        issue: 118,
+        originalFileName: 'Gemini_Generated_Image.png',
+        sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+        confirmedAt: '2026-07-30'
+    };
+    const cases = [
+        [{ issue: 119, qualityStatus: 'visible-residual', bucket: 'residual-edge' }, /issue must match admission issue/],
+        [{ issue: 118, qualityStatus: 'clean', bucket: 'residual-edge' }, /qualityStatus must be visible-residual/],
+        [{ issue: 118, qualityStatus: 'visible-residual', bucket: 'content-damage' }, /bucket must be residual-edge/]
+    ];
+
+    for (const [knownIssue, expectedError] of cases) {
+        const sampleDir = await mkdtemp(path.join(tmpdir(), 'gwr-known-issue-invalid-'));
+        await writeFile(path.join(sampleDir, 'issue-118.png'), Buffer.from([1, 2, 3]));
+        await writeFile(path.join(sampleDir, 'gold-manifest.json'), JSON.stringify({
+            version: 1,
+            samples: {
+                'issue-118.png': {
+                    shouldProcess: true,
+                    tags: ['issue-regression'],
+                    admission: validAdmission,
+                    knownIssue
+                }
+            }
+        }));
+
+        await assert.rejects(listBenchmarkSampleAssets(sampleDir), expectedError);
+    }
 });
 
 test('loadSampleGoldManifest should read human-maintained sample expectations', async () => {
@@ -787,6 +1022,20 @@ test('classifyFineAlphaSelectionReason should separate production stages from re
         }),
         'direct-discrete-alpha'
     );
+});
+
+test('summarizeBenchmarkResults should keep known issues separate from passes and failures', () => {
+    const summary = summarizeBenchmarkResults([
+        { classification: { status: 'pass', bucket: 'pass' } },
+        { classification: { status: 'known-issue', bucket: 'residual-edge', issue: 118 } },
+        { classification: { status: 'fail', bucket: 'content-damage' } }
+    ]);
+
+    assert.equal(summary.total, 3);
+    assert.equal(summary.passCount, 1);
+    assert.equal(summary.knownIssueCount, 1);
+    assert.equal(summary.failCount, 1);
+    assert.equal(summary.buckets['residual-edge'], 1);
 });
 
 test('summarizeCandidateRankingReport should expose selected and expected candidate ranks', () => {
