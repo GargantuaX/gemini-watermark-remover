@@ -422,6 +422,60 @@ test('createCandidateQualitySignals should produce finite losses from real pixel
         .includes(signals.qualityStatus));
 });
 
+test('createCandidateQualitySignals should warn when a dark region becomes both much darker and much flatter', () => {
+    const originalImageData = createImageData(16, 16, 50);
+    const candidateImageData = createImageData(16, 16, 50);
+    const position = { x: 8, y: 8, width: 4, height: 4 };
+    const alphaMap = new Float32Array(16).fill(0.2);
+
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const referenceValue = (row + col) % 2 === 0 ? 20 : 80;
+            const candidateValue = (row + col) % 2 === 0 ? 20 : 36;
+            const referenceOffset = (
+                (position.y - position.height + row) * originalImageData.width +
+                position.x +
+                col
+            ) * 4;
+            const candidateOffset = (
+                (position.y + row) * candidateImageData.width +
+                position.x +
+                col
+            ) * 4;
+
+            for (let channel = 0; channel < 3; channel++) {
+                originalImageData.data[referenceOffset + channel] = referenceValue;
+                candidateImageData.data[referenceOffset + channel] = referenceValue;
+                originalImageData.data[candidateOffset + channel] = referenceValue;
+                candidateImageData.data[candidateOffset + channel] = candidateValue;
+            }
+        }
+    }
+
+    const signals = createCandidateQualitySignals({
+        originalImageData,
+        candidateImageData,
+        hypothesis: {
+            id: 'severe-dark-flat-collapse',
+            family: 'standard',
+            trial: {
+                source: 'standard+outline-dark',
+                position,
+                alphaMap,
+                alphaGain: 1
+            }
+        }
+    });
+
+    assert.equal(signals.texture.tooDark, true);
+    assert.equal(signals.texture.tooFlat, true);
+    assert.equal(signals.texture.hardReject, false);
+    assert.ok(signals.texture.texturePenalty > 1.5);
+    assert.equal(signals.rawDamageWarning, true);
+    assert.equal(signals.damageWarning, true);
+    assert.equal(signals.qualityStatus, 'possible-content-damage');
+});
+
 test('createCandidateQualitySignals should include a dark-polarity halo in residual loss', () => {
     const originalImageData = createImageData(16, 16, 80);
     const candidateImageData = createImageData(16, 16, 80);

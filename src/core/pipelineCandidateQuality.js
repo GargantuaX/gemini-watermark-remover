@@ -28,6 +28,7 @@ const IMPERFECTION_WARNING_RATIO = 0.5;
 const DARK_SUPPORT_RESOLUTION_MAX_ABS_SPATIAL = 0.18;
 const DARK_SUPPORT_RESOLUTION_MAX_GRADIENT = 0.18;
 const DARK_SUPPORT_RESOLUTION_MAX_NEWLY_CLIPPED_RATIO = 0.25;
+const SEVERE_DARK_FLAT_TEXTURE_WARNING_THRESHOLD = 1.5;
 
 function clamp01(value) {
     if (!Number.isFinite(value)) return 0;
@@ -163,10 +164,16 @@ export function createCandidateQualitySignals({
         damageComponents.nearWhite >= 0.4 ||
         damageComponents.clipped >= 0.4
     );
+    const severeDarkFlatTextureWarning =
+        texture?.tooDark === true &&
+        texture?.tooFlat === true &&
+        Number(texture?.texturePenalty ?? 0) >=
+            SEVERE_DARK_FLAT_TEXTURE_WARNING_THRESHOLD;
     const rawDamageWarning = damageComponents.nearBlack >= 1 ||
         damageComponents.nearWhite >= 1 ||
         damageComponents.clipped >= 1 ||
-        textureWarningCorroborated;
+        textureWarningCorroborated ||
+        severeDarkFlatTextureWarning;
     const darkBackgroundSupportConvergence =
         finalCandidate?.darkBackgroundSupportConvergence?.accepted === true
             ? finalCandidate.darkBackgroundSupportConvergence
