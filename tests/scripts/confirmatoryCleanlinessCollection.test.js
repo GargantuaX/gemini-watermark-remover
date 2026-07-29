@@ -75,13 +75,13 @@ test('confirmatory collection execution rejects a non-empty output directory', (
 test('confirmatory collection command freezes the preregistered sample shape', () => {
     const command = buildConfirmatoryCollectionCommand({
         pythonExecutable: 'python3.12',
-        collectorPath: 'D:/Project/sample-files/scripts/fetch_recent_online_samples.py',
-        outputRoot: 'D:/Project/gemini-watermark-remover/.artifacts/confirmatory'
+        collectorPath: 'fixtures/fetch_recent_online_samples.py',
+        outputRoot: '.artifacts/confirmatory'
     });
 
     assert.equal(command.executable, 'python3.12');
     assert.deepEqual(command.args, [
-        'D:/Project/sample-files/scripts/fetch_recent_online_samples.py',
+        'fixtures/fetch_recent_online_samples.py',
         '--since-hours',
         '72',
         '--candidate-limit',
@@ -93,7 +93,7 @@ test('confirmatory collection command freezes the preregistered sample shape', (
         '--bad-feedback-limit-per-source',
         '0',
         '--output-root',
-        'D:/Project/gemini-watermark-remover/.artifacts/confirmatory'
+        '.artifacts/confirmatory'
     ]);
 });
 
@@ -121,9 +121,25 @@ test('collection CLI defaults to report-only without creating the output directo
     mkdirSync(testArtifactRoot, { recursive: true });
     const directory = mkdtempSync(path.join(testArtifactRoot, 'report-only-'));
     const outputRoot = path.join(directory, 'samples');
+    const preregistrationPath = path.join(directory, 'preregistration.json');
+    writeFileSync(
+        preregistrationPath,
+        JSON.stringify({
+            sampling: {
+                windowStartExclusiveUtc: '2000-01-01T00:00:00.000Z',
+                minimumWindowHours: 72
+            }
+        })
+    );
     const result = spawnSync(
         process.execPath,
-        [scriptPath, '--output-root', outputRoot],
+        [
+            scriptPath,
+            '--preregistration',
+            preregistrationPath,
+            '--output-root',
+            outputRoot
+        ],
         { encoding: 'utf8' }
     );
 
@@ -136,11 +152,28 @@ test('collection CLI blocks explicit execution when the output directory is non-
     mkdirSync(testArtifactRoot, { recursive: true });
     const directory = mkdtempSync(path.join(testArtifactRoot, 'non-empty-'));
     const outputRoot = path.join(directory, 'samples');
+    const preregistrationPath = path.join(directory, 'preregistration.json');
+    writeFileSync(
+        preregistrationPath,
+        JSON.stringify({
+            sampling: {
+                windowStartExclusiveUtc: '2000-01-01T00:00:00.000Z',
+                minimumWindowHours: 72
+            }
+        })
+    );
     mkdirSync(outputRoot);
     writeFileSync(path.join(outputRoot, 'existing.txt'), 'occupied\n');
     const result = spawnSync(
         process.execPath,
-        [scriptPath, '--execute', '--output-root', outputRoot],
+        [
+            scriptPath,
+            '--execute',
+            '--preregistration',
+            preregistrationPath,
+            '--output-root',
+            outputRoot
+        ],
         { encoding: 'utf8' }
     );
 
