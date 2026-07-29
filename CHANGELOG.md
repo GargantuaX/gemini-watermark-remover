@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.32 - 2026-07-29
+
+### Watermark Removal
+
+- Expanded evidence-gated handling for recent 48px and 96px Gemini watermark variants, including dark-polarity marks, non-standard anchors, and difficult low-texture backgrounds.
+- Added bounded local alpha-gain search and a dedicated large-margin 48px profile rescue so strong detections can reduce visible halos without changing the validated anchor.
+- Improved best-effort candidate discovery when watermark presence is plausible but no candidate reaches the strict confirmation tier, while retaining explicit uncertainty metadata.
+
+### Quality and Diagnostics
+
+- Evaluated final post-repair pixels with polarity-aware clipping, halo, texture, and residual-localization signals instead of relying only on the initially selected alpha trial.
+- Added final-state decision-path metadata and regression coverage for dark-polarity artifacts, local alpha calibration, candidate ranking, and best-effort selection.
+- Expanded the external sample benchmark and cleanliness research tools used to compare the current pipeline with prior releases on real Gemini outputs.
+- Prevented zero-sized or stale Gemini image nodes from occupying the serial preview queue, so later renderable images can still reach the processed `ready` state after page reloads.
+
 ## 1.0.31 - 2026-07-18
 
 ### Watermark Removal

@@ -1,7 +1,7 @@
 {
   "name": "@pilio/gemini-watermark-remover",
   "description": "Automatically removes watermarks from Gemini AI generated images",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "author": "GargantuaX",
   "sideEffects": false,
   "files": [
