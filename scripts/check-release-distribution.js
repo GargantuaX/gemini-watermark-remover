@@ -192,6 +192,21 @@ function extractChromeUpdateVersion(xml = '') {
   return xml.match(/<updatecheck\b[^>]*\bversion="([^"]+)"/)?.[1] || null;
 }
 
+function extractSiteRuntimeVersion(manifest) {
+  if (
+    !isObject(manifest) ||
+    manifest.schemaVersion !== 1 ||
+    manifest.packageName !== DEFAULTS.npmPackage ||
+    typeof manifest.declaredVersion !== 'string' ||
+    typeof manifest.bundledVersion !== 'string' ||
+    manifest.declaredVersion !== manifest.bundledVersion
+  ) {
+    return null;
+  }
+
+  return manifest.bundledVersion;
+}
+
 function assetNames(release) {
   return Array.isArray(release?.assets)
     ? release.assets.map((asset) => asset?.name).filter(Boolean).sort()
@@ -274,6 +289,7 @@ function renderMarkdown(report) {
   lines.push(`- GitHub release: ${report.evidence.githubRelease.url}`);
   lines.push(`- npm registry: ${report.evidence.npm.url}`);
   lines.push(`- site userscript: ${report.evidence.siteUserscript.url}`);
+  lines.push(`- site image runtime: ${report.evidence.siteRuntime.url}`);
   lines.push(`- site latest extension: ${report.evidence.siteLatestExtension.url}`);
   lines.push(`- site extension zip: ${report.evidence.siteExtensionZip.url || '-'}`);
   lines.push(`- Chrome update endpoint: ${report.evidence.chromeUpdate.url}`);
@@ -297,6 +313,7 @@ async function createReport({
   const githubReleaseUrl = `https://api.github.com/repos/${repo}/releases/tags/v${expectedVersion}`;
   const npmUrl = `https://registry.npmjs.org/${encodedNpmPackage}`;
   const siteUserscriptUrl = `${siteBaseUrl}/userscript/gemini-watermark-remover.user.js`;
+  const siteRuntimeUrl = `${siteBaseUrl}/gwr-runtime-version.json`;
   const siteLatestExtensionUrl = `${siteBaseUrl}/downloads/latest-extension.json`;
   const chromeUpdateUrl = `https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=120.0&acceptformat=crx2,crx3&x=id%3D${chromeExtensionId}%26uc`;
 
@@ -304,12 +321,14 @@ async function createReport({
     githubRelease,
     npmRegistry,
     siteUserscript,
+    siteRuntime,
     siteLatestExtension,
     chromeUpdate
   ] = await Promise.all([
     fetchJson(githubReleaseUrl),
     fetchJson(npmUrl),
     fetchText(siteUserscriptUrl),
+    fetchJson(siteRuntimeUrl),
     fetchJson(siteLatestExtensionUrl),
     fetchTextWithPowerShellFallback(chromeUpdateUrl)
   ]);
@@ -318,6 +337,7 @@ async function createReport({
   const releaseAssets = compareSets(releaseAssetNames, expectedAssetNames(expectedVersion));
   const npmLatest = npmRegistry.json?.['dist-tags']?.latest || null;
   const siteUserscriptVersion = extractUserscriptVersion(siteUserscript.text);
+  const siteRuntimeVersion = extractSiteRuntimeVersion(siteRuntime.json);
   const siteLatestExtensionVersion = siteLatestExtension.json?.version || null;
   const siteExtensionFile = siteLatestExtension.json?.file || null;
   const siteExtensionZipUrl = siteExtensionFile
@@ -348,6 +368,7 @@ async function createReport({
     },
     checkVersion('npm-latest', npmLatest, expectedVersion),
     checkVersion('site-userscript', siteUserscriptVersion, expectedVersion),
+    checkVersion('site-image-runtime', siteRuntimeVersion, expectedVersion),
     checkVersion('site-latest-extension', siteLatestExtensionVersion, expectedVersion),
     (() => {
       const ok = Boolean(
@@ -399,6 +420,12 @@ async function createReport({
         status: siteUserscript.status,
         version: siteUserscriptVersion,
         length: siteUserscript.text.length
+      },
+      siteRuntime: {
+        url: siteRuntimeUrl,
+        status: siteRuntime.status,
+        version: siteRuntimeVersion,
+        json: siteRuntime.json
       },
       siteLatestExtension: {
         url: siteLatestExtensionUrl,
@@ -504,5 +531,6 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 export {
   createReport,
   extractChromeUpdateVersion,
+  extractSiteRuntimeVersion,
   renderMarkdown
 };

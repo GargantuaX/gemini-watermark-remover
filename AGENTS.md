@@ -41,6 +41,15 @@
 - The active local/debugging build surface is the generated `dist/` directory.
 - Keep deployment assumptions aligned with the current repo contents.
 
+### Website SDK Release Sync
+
+- `https://geminiwatermarkremover.io/` is deployed from the separate local `geminiwatermarkremover.io` repository; resolve its checkout from local configuration instead of committing a machine-specific absolute path.
+- Publishing this repository to npm, GitHub Releases, or the Chrome Web Store does **not** update the website's image-processing Worker. The website pins `@pilio/gemini-watermark-remover` in both `package.json` and `pnpm-lock.yaml` and must be upgraded, rebuilt, tested, and deployed separately.
+- After every core package release, compare the website's pinned SDK version with npm `latest` before treating the website as current. A current website userscript or extension download does not prove that the website Worker uses the current SDK.
+- Verify the deployed Worker itself with a real sample and inspect its selected candidate / strategy metadata or other version-specific behavior. Do not rely only on CDN asset timestamps, package release status, userscript `@version`, or successful HTTP responses.
+- Known failure mode from issue #115: the public site still bundled SDK `1.0.31` after `1.0.33` was published. Upgrading exposed a second path mismatch: the browser engine loaded the real `36-v2` template while the sync image-data SDK interpolated size 36, allowing local validation to select `48x48` while the deployed Worker skipped. Keep runtime alpha-map catalogs and candidate orchestration aligned across SDK entry points.
+- Treat the website as a separate release surface. If its main worktree contains unrelated user changes, prepare and validate the dependency upgrade in an isolated worktree so those changes are not overwritten or accidentally deployed.
+
 ### Gemini Image Size / Watermark Catalog
 
 Use this catalog when checking watermark size and anchor regressions against Gemini image outputs.
