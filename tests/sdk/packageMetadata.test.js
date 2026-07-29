@@ -20,6 +20,10 @@ test('package metadata should be publish-friendly for third-party sdk consumers'
     assert.equal(packageJson.files.includes('tests/'), false, 'tests/ should not be published');
     assert.equal(packageJson.files.includes('public/'), false, 'public/ should not be published');
     assert.equal(packageJson.dependencies?.sharp, undefined, 'browser sdk consumers should not install sharp as a hard dependency');
-    assert.equal(packageJson.peerDependencies?.sharp, '^0.34.5', 'sharp should remain available as an optional CLI codec peer');
+    assert.equal(
+        packageJson.peerDependencies?.sharp,
+        '^0.34.5 || ^0.35.0',
+        'sharp should support the CLI codec versions verified by consumer smoke tests'
+    );
     assert.equal(packageJson.peerDependenciesMeta?.sharp?.optional, true, 'sharp peer should be optional');
 });
