@@ -420,6 +420,23 @@ function findEligiblePresenceTrial(selection, originalImageData) {
     });
 }
 
+function findConfirmedPoolPresenceTrial(selection, originalImageData) {
+    return (selection?.candidatePool ?? []).find((trial) => (
+        trial &&
+        trial !== selection?.selectedTrial &&
+        // A selected adaptive/catalog trial can hide the canonical candidate.
+        // Keep this recovery narrow so preview/content collisions in the wider
+        // diagnostic pool cannot confirm presence on their own.
+        trial.provenance?.catalogFamily === 'default-standard' &&
+        hasSelectorConfirmedTarget({
+            ...selection,
+            selectedTrial: trial,
+            source: trial.source ?? 'candidate-pool',
+            decisionTier: null
+        }, originalImageData)
+    ));
+}
+
 function isStrongLocalizedGeometryTrial(trial, originalImageData) {
     const spatialScore = Number(trial?.originalSpatialScore);
     const gradientScore = Number(trial?.originalGradientScore);
@@ -511,7 +528,8 @@ function findWatermarkPresenceWitness(selection, originalImageData) {
     if (hasSelectorConfirmedTarget(selection, originalImageData)) {
         return selection.selectedTrial;
     }
-    return findStrongLocalizedGeometryTrial(selection, originalImageData) ??
+    return findConfirmedPoolPresenceTrial(selection, originalImageData) ??
+        findStrongLocalizedGeometryTrial(selection, originalImageData) ??
         findEligiblePresenceTrial(selection, originalImageData) ??
         null;
 }
@@ -601,19 +619,43 @@ export function collectInitialWatermarkCandidates(input = {}) {
         automaticSelection?.selectedTrial,
         geometryLockWitness
     );
+    const fixedConservativeOrigin = fixedPresenceWitness ??
+        fixedSelection?.selectedTrial;
+    const automaticConservativeOrigin = automaticPresenceWitness ??
+        automaticSelection?.selectedTrial;
+    const includeFixedConservative = (
+        presenceConfirmed ||
+        bestEffortSelections.includes(fixedSelection)
+    ) && isGeometryCompatibleWithLock(
+        fixedConservativeOrigin,
+        geometryLockWitness
+    );
+    const includeAutomaticConservative = (
+        presenceConfirmed ||
+        bestEffortSelections.includes(automaticSelection)
+    ) && isGeometryCompatibleWithLock(
+        automaticConservativeOrigin,
+        geometryLockWitness
+    );
     const conservativeTrials = [
-        includeFixedSelection
+        includeFixedConservative
             ? createConservativeTopNTrial(
                 input.originalImageData,
-                fixedSelection,
+                {
+                    ...fixedSelection,
+                    selectedTrial: fixedConservativeOrigin
+                },
                 0.5,
                 'fixed'
             )
             : null,
-        includeAutomaticSelection
+        includeAutomaticConservative
             ? createConservativeTopNTrial(
                 input.originalImageData,
-                automaticSelection,
+                {
+                    ...automaticSelection,
+                    selectedTrial: automaticConservativeOrigin
+                },
                 0.25,
                 'automatic'
             )

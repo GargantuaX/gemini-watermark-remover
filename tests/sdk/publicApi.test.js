@@ -73,6 +73,34 @@ test('removeWatermarkFromImageDataSync should work without caller-provided alpha
     );
 });
 
+test('removeWatermarkFromImageDataSync should use the embedded 36-v2 profile by default', async () => {
+    const mod = await import('@pilio/gemini-watermark-remover');
+    const engine = await mod.createWatermarkEngine();
+    const alpha36V2 = await engine.getAlphaMap('36-v2');
+    const imageData = createPatternImageData(1376, 768);
+    const position = {
+        x: 1376 - 96 - 36,
+        y: 768 - 96 - 36,
+        width: 36,
+        height: 36
+    };
+
+    applySyntheticWatermark(imageData, alpha36V2, position, 1);
+    const result = mod.removeWatermarkFromImageDataSync(imageData);
+
+    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
+    assert.deepEqual(result.meta.config, {
+        logoSize: 36,
+        marginRight: 96,
+        marginBottom: 96,
+        alphaVariant: 'v2'
+    });
+    assert.ok(
+        result.meta.detection.processedSpatialScore < 0.12,
+        `score=${result.meta.detection.processedSpatialScore}`
+    );
+});
+
 test('removeWatermarkFromImageDataSync should include the gated issue101 outline variant by default', async () => {
     const mod = await import('@pilio/gemini-watermark-remover');
     const imageData = createPatternImageData(1728, 2464);

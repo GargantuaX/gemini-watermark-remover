@@ -890,3 +890,90 @@ test('collectInitialWatermarkCandidates should not geometry-lock a localized con
         hypothesis.trial === contentStar
     )), false);
 });
+
+test('collectInitialWatermarkCandidates should retain a localized direct-match pool witness when an unsafe small candidate is selected', () => {
+    const width = 224;
+    const height = 224;
+    const data = new Uint8ClampedArray(width * height * 4);
+    const alpha48 = new Float32Array(48 * 48);
+    for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 48; x++) {
+            const alpha = ((x * 17 + y * 31) % 97) / 160;
+            alpha48[y * 48 + x] = alpha;
+            const value = Math.round(30 + alpha * 180);
+            const offset = ((160 + y) * width + 160 + x) * 4;
+            data[offset] = value;
+            data[offset + 1] = value;
+            data[offset + 2] = value;
+            data[offset + 3] = 255;
+        }
+    }
+    const directPoolWitness = {
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 16, marginBottom: 16 },
+        position: { x: 160, y: 160, width: 48, height: 48 },
+        alphaMap: alpha48,
+        alphaGain: 1,
+        accepted: false,
+        evaluation: { eligible: false, blockedGate: 'baseValidationAccepted' },
+        originalSpatialScore: 0.536,
+        originalGradientScore: 0.284,
+        processedSpatialScore: -0.36,
+        processedGradientScore: 0.114,
+        damage: { safe: false },
+        rankingKey: [0, -3, 1, 0.43, 1, 2.08],
+        provenance: { catalogFamily: 'default-standard' }
+    };
+    const unsafeSmallSelection = {
+        source: 'standard+catalog+local+validated+warp',
+        config: {
+            logoSize: 36,
+            marginRight: 28,
+            marginBottom: 28,
+            alphaVariant: 'v2'
+        },
+        position: { x: 160, y: 160, width: 36, height: 36 },
+        alphaMap: new Float32Array(36 * 36).fill(0.2),
+        alphaGain: 1,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0.496,
+        originalGradientScore: 0.04,
+        processedSpatialScore: 0.015,
+        processedGradientScore: 0.184,
+        damage: { safe: false },
+        rankingKey: [2, -2, 1, 0.125, 1, 1],
+        provenance: {
+            alphaVariant: 'v2',
+            catalogFamily: 'gemini-v2-small',
+            localShift: true
+        }
+    };
+
+    const result = collectInitialWatermarkCandidates({
+        ...createBaseInput((args) => args.allowAutomaticSearch
+            ? {
+                selectedTrial: unsafeSmallSelection,
+                candidatePool: [directPoolWitness, unsafeSmallSelection],
+                source: unsafeSmallSelection.source,
+                decisionTier: 'validated-match'
+            }
+            : {
+                selectedTrial: null,
+                candidatePool: [directPoolWitness],
+                source: 'skipped',
+                decisionTier: 'insufficient'
+            }),
+        originalImageData: { width, height, data }
+    });
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some((hypothesis) => (
+        hypothesis.trial === directPoolWitness
+    )));
+    assert.ok(result.hypotheses.some((hypothesis) => (
+        hypothesis.trial?.provenance?.topNConservative === true &&
+        hypothesis.trial?.position?.width === 48 &&
+        hypothesis.trial?.alphaGain <= 0.25
+    )));
+});
