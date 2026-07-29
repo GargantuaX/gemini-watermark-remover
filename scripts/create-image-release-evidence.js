@@ -29,6 +29,19 @@ async function readJson(filePath) {
     return JSON.parse(await readFile(filePath, 'utf8'));
 }
 
+function portableEvidencePath(filePath) {
+    const absolutePath = path.resolve(filePath);
+    const relativePath = path.relative(process.cwd(), absolutePath);
+    const portablePath = (
+        path.isAbsolute(relativePath) ||
+        relativePath === '..' ||
+        relativePath.startsWith(`..${path.sep}`)
+    )
+        ? path.join('external', path.basename(absolutePath))
+        : relativePath;
+    return portablePath.split(path.sep).join('/');
+}
+
 async function readCurrentReleasePackage(latestExtensionPath) {
     const latest = await readJson(latestExtensionPath);
     const zipPath = path.resolve(path.dirname(latestExtensionPath), latest.file);
@@ -60,11 +73,11 @@ export async function createImageReleaseEvidence({
     ));
     const inputArtifacts = await Promise.all(inputEntries.map(async ([id, filePath]) => ({
         id,
-        path: filePath,
+        path: portableEvidencePath(filePath),
         sha256: await sha256File(filePath)
     })));
     const sourceFiles = await Promise.all(sourcePaths.map(async (sourcePath) => ({
-        path: sourcePath,
+        path: portableEvidencePath(sourcePath),
         sha256: await sha256File(path.resolve(sourcePath))
     })));
     const manualReview = summarizeExact96Review(values.manualReport, values.manualDecisions);

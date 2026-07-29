@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "releaseScope": "image-defaults",
   "version": "1.0.32",
-  "generatedAt": "2026-07-29T05:13:20.004Z",
+  "generatedAt": "2026-07-29T06:10:02.093Z",
   "provenance": {
     "sourceFiles": [
       {
@@ -121,32 +121,32 @@
     "inputArtifacts": [
       {
         "id": "contrast",
-        "path": "D:\\Project\\gemini-watermark-remover\\.artifacts\\top-n-candidate-selection\\contrast-report.json",
+        "path": ".artifacts/top-n-candidate-selection/contrast-report.json",
         "sha256": "488a0ddda52fe41a2f1df9dafe78ddeb4d72cabddfb3d7a58c7741e16116cbbb"
       },
       {
         "id": "curatedBefore",
-        "path": "D:\\Project\\gemini-watermark-remover\\.artifacts\\same-anchor-96-imperfection-preference\\before-424-report.json",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-424-report.json",
         "sha256": "f2431739a8423e94e9c4431eac7c988499c10aa8147aaf5482f9b8ab8e0ba6e5"
       },
       {
         "id": "curatedAfter",
-        "path": "D:\\Project\\gemini-watermark-remover\\.artifacts\\expanded-sample-validation\\curated-top-n\\combined-report.json",
+        "path": ".artifacts/expanded-sample-validation/curated-top-n/combined-report.json",
         "sha256": "bf9ae14cc7b62108515a60fb0a5b9d9f12584095ebef355d9d342ae73b977260"
       },
       {
         "id": "manualReport",
-        "path": "D:\\Project\\gemini-watermark-remover\\.artifacts\\same-anchor-96-imperfection-preference\\before-review\\report.json",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-review/report.json",
         "sha256": "6b485e01a998f0f097f0dfe657ceeeee9cbb15147dd4abb7d36997c45a9d8e46"
       },
       {
         "id": "manualDecisions",
-        "path": "D:\\Project\\gemini-watermark-remover\\.artifacts\\same-anchor-96-imperfection-preference\\before-review\\review.json",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-review/review.json",
         "sha256": "c3e150e386dc35df1b7318839c76d42f8d2f02275bb049954f29d30a6a647810"
       },
       {
         "id": "automated",
-        "path": "D:\\Project\\gemini-watermark-remover\\.artifacts\\release-image-quality\\automated-results.json",
+        "path": ".artifacts/release-image-quality/automated-results.json",
         "sha256": "6deb9823c66a9619640e791af5d3fb224e3d7ecfe6cf77b9a399dc22a59a4e91"
       }
     ]

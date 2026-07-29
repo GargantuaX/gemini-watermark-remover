@@ -321,5 +321,15 @@ test('createImageReleaseEvidence reads reports, hashes sources, and writes pinne
 
     assert.equal(evidence.provenance.sourceFiles.length, 1);
     assert.match(evidence.provenance.sourceFiles[0].sha256, /^[a-f0-9]{64}$/);
+    for (const artifact of [
+        ...evidence.provenance.sourceFiles,
+        ...evidence.provenance.inputArtifacts
+    ]) {
+        assert.equal(
+            path.isAbsolute(artifact.path),
+            false,
+            `release evidence path must be portable: ${artifact.path}`
+        );
+    }
     assert.deepEqual(written, evidence);
 });
