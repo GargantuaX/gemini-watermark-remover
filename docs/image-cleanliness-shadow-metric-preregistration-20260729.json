@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "mode": "future-time-slice-shadow-metric-addendum",
+  "createdAtUtc": "2026-07-29T09:53:52.583Z",
+  "productionDecisionChanges": 0,
+  "basePreregistration": {
+    "path": ".artifacts/prospective-online-samples-20260728-evaluation/next-time-slice-preregistration.json",
+    "sha256": "181dc6da783f62b186138069e4875cea91240f164bb3a0d6092b74b33a8643f0",
+    "earliestEligibleWindowEndUtc": "2026-07-31T01:50:50.982Z"
+  },
+  "developmentEvidence": {
+    "programCommit": "31b008d5c09c6f1d96f41d456cf1d011f57be0f8",
+    "pixelFeatureReport": {
+      "path": ".artifacts/demo-real-effect-pack-20260728-evaluation/visual-review/pixel-features/latest-report.json",
+      "sha256": "aca42e7bf4b424ac8f3d93f2c6d2efa16bd614be26c0b68e1137ab1b2f99ed34"
+    },
+    "shadowMetricReport": {
+      "path": ".artifacts/demo-real-effect-pack-20260728-evaluation/visual-review/shadow-metric/latest-report.json",
+      "sha256": "fc727ad80e62ec8f8c14711b4c10a81478be57afc1219927b722017896ffbd37"
+    },
+    "role": "development evidence only; its inspected holdout must not be reused as promotion evidence"
+  },
+  "frozenSignals": {
+    "primaryContourRisk": {
+      "name": "afterRgbAlphaContourRatio",
+      "direction": "higher-is-riskier",
+      "threshold": 1.360026407864624,
+      "role": "non-blocking shadow cleanliness risk",
+      "mustNotBeRetunedAfterCollection": true
+    },
+    "textureDamageDiagnostic": {
+      "name": "absoluteLog2TextureRetention",
+      "formula": "abs(log2(afterSupportHighPassEnergy / beforeSupportHighPassEnergy))",
+      "direction": "higher-is-riskier",
+      "threshold": 3.075210964974624,
+      "role": "diagnostic complement only",
+      "mustNotBeRetunedAfterCollection": true
+    },
+    "subtleInteriorShapeCandidate": {
+      "name": "lowAmplitudeLumaInteriorProjection",
+      "formula": "lumaInteriorProjectionRatio >= 1.5 && lumaInteriorProjectionTarget <= 0.12",
+      "role": "prospective exploratory diagnostic for the B081 failure mode",
+      "derivedAfterPilotUnblind": true,
+      "mayNotAffectPrimaryAcceptance": true,
+      "mustNotBeRetunedAfterCollection": true
+    }
+  },
+  "prospectiveEvaluation": {
+    "minimumUniqueImages": 80,
+    "minimumDirtyLabels": 10,
+    "minimumDamageLabels": 8,
+    "minimumIndependentReviewers": 2,
+    "contentDedupe": "sha256 against all development and prior-evaluation inputs",
+    "primaryContourAcceptance": {
+      "minimumAuc": 0.85,
+      "minimumRelativeFalseCleanReductionVersusCurrent": 0.4,
+      "maximumAbsoluteFalseDirtyRateIncreaseVersusCurrent": 0.1,
+      "minimumAccuracyDeltaVersusCurrent": 0,
+      "minimumDamageRecallDeltaVersusCurrent": 0.25
+    },
+    "textureDiagnosticAcceptance": {
+      "maximumNonDamageFalsePositiveRate": 0.1,
+      "minimumComplementaryDamageCasesNotFlaggedByPrimaryContour": 1
+    },
+    "subtleInteriorShapeReporting": {
+      "reportConfusionMatrix": true,
+      "promotionAllowedFromThisBatch": false
+    }
+  },
+  "decisionPolicy": {
+    "passingPrimaryContour": "permits only a non-blocking shadow quality field",
+    "passingTextureDiagnostic": "permits only a diagnostic review-queue reason",
+    "hardGateOrOutputBlocking": "forbidden from this batch",
+    "failure": "retain current production behavior and collect more labeled damage cases"
+  }
+}
