@@ -8,6 +8,7 @@ test('package.json should expose the expected local script entrypoints', () => {
   const expectedScripts = {
     clean: 'node scripts/clean.js',
     'clean:all': 'node scripts/clean.js --include-profile',
+    'test:serial': 'node --test --test-concurrency=1 tests/**/*.test.js',
     'convert:samples:webp': 'node scripts/convert-samples-to-webp.js',
     'diagnose:same-anchor-imperfection': 'node scripts/run-same-anchor-imperfection-review.js',
     'report:same-anchor-imperfection': 'node scripts/summarize-same-anchor-imperfection-review.js',

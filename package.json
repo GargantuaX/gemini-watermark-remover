@@ -77,6 +77,7 @@
     "diagnose:same-anchor-imperfection": "node scripts/run-same-anchor-imperfection-review.js",
     "report:same-anchor-imperfection": "node scripts/summarize-same-anchor-imperfection-review.js",
     "test": "node --test tests/**/*.test.js",
+    "test:serial": "node --test --test-concurrency=1 tests/**/*.test.js",
     "test:sdk-smoke": "node --test tests/sdk/packageMetadata.test.js tests/sdk/packagePack.test.js tests/sdk/typeDeclarations.test.js tests/sdk/consumerRuntime.test.js tests/sdk/typescriptConsumer.test.js tests/sdk/smokeAutomation.test.js",
     "probe:tm": "node scripts/tampermonkey-smoke.js run",
     "probe:tm:freshness": "node scripts/tampermonkey-freshness.js",

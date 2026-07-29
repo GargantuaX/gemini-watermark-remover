@@ -11,7 +11,11 @@ import {
     summarizeExact96Review,
     verifyImageReleaseEvidence
 } from '../../scripts/image-release-evidence.js';
-import { parseNodeTestSummary, resolvePnpmInvocation } from '../../scripts/run-image-release-validation.js';
+import {
+    IMAGE_RELEASE_VALIDATION_COMMANDS,
+    parseNodeTestSummary,
+    resolvePnpmInvocation
+} from '../../scripts/run-image-release-validation.js';
 import { checkImageReleaseEvidence } from '../../scripts/check-image-release-evidence.js';
 import {
     DEFAULT_PATHS,
@@ -86,6 +90,14 @@ function validEvidence() {
         }
     };
 }
+
+test('image release validation should serialize the full suite around shared dist builds', () => {
+    assert.deepEqual(IMAGE_RELEASE_VALIDATION_COMMANDS[0], {
+        id: 'fullTest',
+        args: ['test:serial'],
+        parseNodeTests: true
+    });
+});
 
 function validCurrent() {
     return {

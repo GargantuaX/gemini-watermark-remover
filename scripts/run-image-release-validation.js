@@ -4,6 +4,12 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_OUTPUT = path.resolve('.artifacts/release-image-quality/automated-results.json');
+export const IMAGE_RELEASE_VALIDATION_COMMANDS = Object.freeze([
+    { id: 'fullTest', args: ['test:serial'], parseNodeTests: true },
+    { id: 'sdkSmoke', args: ['test:sdk-smoke'], parseNodeTests: true },
+    { id: 'build', args: ['build'] },
+    { id: 'extensionPackage', args: ['package:extension'] }
+]);
 
 function readCount(text, label) {
     const match = String(text).match(new RegExp(`(?:#|ℹ)\\s*${label}\\s+(\\d+)`, 'i'));
@@ -34,15 +40,9 @@ export function resolvePnpmInvocation(platform = process.platform, comSpec = pro
 }
 
 export async function runImageReleaseValidation({ outputPath = DEFAULT_OUTPUT } = {}) {
-    const commands = [
-        { id: 'fullTest', args: ['test'], parseNodeTests: true },
-        { id: 'sdkSmoke', args: ['test:sdk-smoke'], parseNodeTests: true },
-        { id: 'build', args: ['build'] },
-        { id: 'extensionPackage', args: ['package:extension'] }
-    ];
     const report = { generatedAt: new Date().toISOString() };
 
-    for (const entry of commands) {
+    for (const entry of IMAGE_RELEASE_VALIDATION_COMMANDS) {
         const invocation = resolvePnpmInvocation();
         const result = spawnSync(invocation.command, [...invocation.prefixArgs, ...entry.args], {
             cwd: process.cwd(),
