@@ -16,6 +16,18 @@ function normalizeExternalBenchmarkLabel(label) {
     return label;
 }
 
+function normalizeTrustedExternalBenchmarkRecord(record) {
+    const label = normalizeExternalBenchmarkLabel(record.label);
+    if (label === 'ambiguous' || label === 'unlabeled') {
+        return {
+            ...record,
+            label,
+            classification: { status: 'excluded', bucket: label, includedInMetrics: false }
+        };
+    }
+    return { ...record, label };
+}
+
 function toFiniteNumber(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -214,10 +226,7 @@ function summarizeDiagnostics(results, successRate) {
 
 export function summarizeTrustedExternalBenchmarkResults(results) {
     const labels = { watermarked: 0, clean: 0, ambiguous: 0, unlabeled: 0 };
-    const normalizedResults = results.map((record) => ({
-        ...record,
-        label: normalizeExternalBenchmarkLabel(record.label)
-    }));
+    const normalizedResults = results.map(normalizeTrustedExternalBenchmarkRecord);
     for (const record of normalizedResults) labels[record.label]++;
     const watermarked = normalizedResults.filter((record) => record.label === 'watermarked');
     const clean = normalizedResults.filter((record) => record.label === 'clean');

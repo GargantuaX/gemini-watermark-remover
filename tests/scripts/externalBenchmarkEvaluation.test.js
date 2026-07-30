@@ -35,6 +35,45 @@ test('label-aware classification normalizes a missing label and rejects unknown 
     );
 });
 
+test('trusted summary force-excludes a missing label with an inconsistent included classification', () => {
+    const result = summarizeTrustedExternalBenchmarkResults([{
+        group: 'task-source',
+        source: 'pipeline',
+        classification: { status: 'pass', bucket: 'pass', includedInMetrics: true }
+    }]);
+
+    assert.equal(result.labels.unlabeled, 1);
+    assert.equal(result.summary.excludedCount, 1);
+    assert.equal(result.summary.passCount, 0);
+    assert.equal(result.summary.failCount, 0);
+    assert.equal(result.summary.byGroup['task-source'].qualifiedTotal, 0);
+    assert.equal(result.summary.byGroup['task-source'].rate, null);
+    assert.equal(result.summary.sourceOnly.qualifiedTotal, 0);
+    assert.equal(result.summary.sourceOnly.successRate, null);
+    assert.equal(result.reviewQueue.unlabeled.length, 1);
+    assert.equal(result.reviewQueue.unlabeled[0].label, 'unlabeled');
+    assert.deepEqual(result.reviewQueue.unlabeled[0].classification, {
+        status: 'excluded', bucket: 'unlabeled', includedInMetrics: false
+    });
+});
+
+test('trusted summary force-excludes ambiguous and unlabeled records with inconsistent classifications', () => {
+    const result = summarizeTrustedExternalBenchmarkResults([
+        { label: 'ambiguous', classification: { status: 'pass', bucket: 'pass', includedInMetrics: true } },
+        { label: 'unlabeled', classification: { status: 'fail', bucket: 'missed-detection', includedInMetrics: true } }
+    ]);
+
+    assert.equal(result.summary.excludedCount, 2);
+    assert.equal(result.summary.passCount, 0);
+    assert.equal(result.summary.failCount, 0);
+    assert.deepEqual(result.reviewQueue.ambiguous[0].classification, {
+        status: 'excluded', bucket: 'ambiguous', includedInMetrics: false
+    });
+    assert.deepEqual(result.reviewQueue.unlabeled[0].classification, {
+        status: 'excluded', bucket: 'unlabeled', includedInMetrics: false
+    });
+});
+
 test('trusted metrics use only watermarked and clean denominators', () => {
     const result = summarizeTrustedExternalBenchmarkResults([
         { label: 'watermarked', applied: true, classification: { status: 'pass', bucket: 'pass', includedInMetrics: true } },
