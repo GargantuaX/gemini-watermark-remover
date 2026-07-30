@@ -130,11 +130,6 @@
         "sha256": "12d95385172203e68e6c16a1c3ab32dae185375f3ba33a0111dc0c63097a8610",
         "confirmedAt": "2026-07-30"
       },
-      "knownIssue": {
-        "issue": 118,
-        "qualityStatus": "visible-residual",
-        "bucket": "residual-edge"
-      },
       "tags": ["issue-regression", "confirmed-new-margin", "alpha-edge-mismatch"]
     },
     "21-9.png": {

@@ -229,7 +229,8 @@ export function runAcceptedAlphaRepairPipeline({
                 acceptCurrentRepairTrialResult,
                 refiners: {
                     refineCanonical96PositiveHaloResidual: refiners.refineCanonical96PositiveHaloResidual,
-                    refineSmoothLocatedResidualWithEstimatedPrior: refiners.refineSmoothLocatedResidualWithEstimatedPrior
+                    refineSmoothLocatedResidualWithEstimatedPrior: refiners.refineSmoothLocatedResidualWithEstimatedPrior,
+                    refineNewMargin96SmoothEdgeResidual: refiners.refineNewMargin96SmoothEdgeResidual
                 }
             });
         }

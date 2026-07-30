@@ -7,6 +7,7 @@ import { calculateAlphaMap } from '../../src/core/alphaMap.js';
 import { removeWatermark } from '../../src/core/blendModes.js';
 import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
 import { processWatermarkImageData } from '../../src/core/watermarkProcessor.js';
+import { removeWatermarkFromImageDataSync } from '../../src/sdk/image-data.js';
 import { interpolateAlphaMap, warpAlphaMap, computeRegionSpatialCorrelation } from '../../src/core/adaptiveDetector.js';
 import { assessRemovalDiffArtifacts } from '../../src/core/restorationMetrics.js';
 import { loadLocalEnv } from '../../scripts/local-env.js';
@@ -20,6 +21,35 @@ import {
 loadLocalEnv();
 
 const EXTERNAL_SAMPLE_ROOT = path.resolve(process.env.GWR_SAMPLE_ROOT || 'sample-files/gemini-watermark');
+
+test('processWatermarkImageData should clear issue118 dotted edge residual on a smooth new-margin background', async () => {
+    const originalImageData = await decodeImageDataInNode(path.resolve(
+        'src/assets/samples/20260729-issue118.png'
+    ));
+    const result = removeWatermarkFromImageDataSync(originalImageData);
+
+    assert.deepEqual(result.meta.position, {
+        x: 2464,
+        y: 1248,
+        width: 96,
+        height: 96
+    });
+    assert.ok(
+        Math.abs(result.meta.detection.processedSpatialScore) <= 0.18,
+        `spatial=${result.meta.detection.processedSpatialScore}, source=${result.meta.source}`
+    );
+    assert.ok(
+        result.meta.detection.processedGradientScore <= 0.22,
+        `gradient=${result.meta.detection.processedGradientScore}, source=${result.meta.source}`
+    );
+    assert.equal(result.meta.qualityStatus, 'clean');
+    assert.ok(
+        result.meta.alphaAdjustmentStages?.some((stage) =>
+            stage.stage === 'new-margin-96-smooth-edge-repair'
+        ),
+        JSON.stringify(result.meta.alphaAdjustmentStages)
+    );
+});
 
 function externalSamplePath(...segments) {
     return path.resolve(EXTERNAL_SAMPLE_ROOT, ...segments);

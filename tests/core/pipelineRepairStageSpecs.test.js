@@ -475,6 +475,18 @@ test('createPostLocatedRepairStageSequenceSpecs should build dynamic post-locate
                     spatialScore: 0.3,
                     gradientScore: 0.2
                 };
+            },
+            refineNewMargin96SmoothEdgeResidual: (payload) => {
+                calls.push({
+                    name: 'smooth-edge',
+                    imageId: payload.currentImageData?.id,
+                    source: payload.currentSource
+                });
+                return {
+                    imageData: { id: 'smooth-edge-image' },
+                    spatialScore: 0.2,
+                    gradientScore: 0.1
+                };
             }
         }
     });
@@ -483,9 +495,10 @@ test('createPostLocatedRepairStageSequenceSpecs should build dynamic post-locate
 
     assert.deepEqual(stages.map((stage) => stage.stage), [
         'canonical-96-positive-halo-rescue',
-        'smooth-located-estimated-prior'
+        'smooth-located-estimated-prior',
+        'new-margin-96-smooth-edge-repair'
     ]);
-    assert.equal(results.length, 2);
+    assert.equal(results.length, 3);
     assert.deepEqual(timingAnchors, {
         smoothPriorStartedAt: 200
     });
@@ -499,14 +512,21 @@ test('createPostLocatedRepairStageSequenceSpecs should build dynamic post-locate
             name: 'smooth',
             imageId: 'canonical-image',
             source: 'standard+canonical-96-positive-halo-rescue'
+        },
+        {
+            name: 'smooth-edge',
+            imageId: 'smooth-image',
+            source: 'standard+canonical-96-positive-halo-rescue+smooth-prior'
         }
     ]);
     assert.deepEqual(accepted.map((stage) => stage.source), [
         'standard+canonical-96-positive-halo-rescue',
-        'standard+canonical-96-positive-halo-rescue+smooth-prior'
+        'standard+canonical-96-positive-halo-rescue+smooth-prior',
+        'standard+canonical-96-positive-halo-rescue+smooth-prior+smooth-edge'
     ]);
     assert.equal(accepted[0].suppressionGain, 0.5);
     assert.equal(accepted[1].deriveSuppressionGainFromOriginalSpatial, true);
+    assert.equal(accepted[2].deriveSuppressionGainFromOriginalSpatial, true);
 });
 
 test('small located prior repair should propagate its convergence marker through stage extras', () => {

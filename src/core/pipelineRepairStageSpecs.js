@@ -241,7 +241,8 @@ export function createPostLocatedRepairStageSequenceSpecs({
 } = {}) {
     const {
         refineCanonical96PositiveHaloResidual,
-        refineSmoothLocatedResidualWithEstimatedPrior
+        refineSmoothLocatedResidualWithEstimatedPrior,
+        refineNewMargin96SmoothEdgeResidual
     } = refiners;
 
     return [
@@ -294,6 +295,29 @@ export function createPostLocatedRepairStageSequenceSpecs({
             },
             acceptCurrentRepairTrialResult,
             source: () => `${readPipelineRepairState(readState).source}+smooth-prior`,
+            deriveSuppressionGainFromOriginalSpatial: true,
+        },
+        {
+            stage: 'new-margin-96-smooth-edge-repair',
+            strategy: 'new-margin-96-smooth-edge',
+            createStage: () => {
+                const state = readPipelineRepairState(readState);
+                return typeof refineNewMargin96SmoothEdgeResidual === 'function'
+                    ? refineNewMargin96SmoothEdgeResidual({
+                        originalImageData,
+                        currentImageData: state.finalImageData,
+                        currentAlphaMap: state.alphaMap,
+                        currentPosition: state.position,
+                        currentConfig: state.config,
+                        currentSource: state.source,
+                        currentAlphaGain: state.alphaGain,
+                        currentSpatialScore: state.finalProcessedSpatialScore,
+                        currentGradientScore: state.finalProcessedGradientScore
+                    })
+                    : null;
+            },
+            acceptCurrentRepairTrialResult,
+            source: () => `${readPipelineRepairState(readState).source}+smooth-edge`,
             deriveSuppressionGainFromOriginalSpatial: true,
         }
     ];

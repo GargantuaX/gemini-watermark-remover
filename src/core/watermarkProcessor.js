@@ -106,6 +106,25 @@ const NEW_MARGIN_96_FLAT_FILL_MAX_ACCEPTED_ABS_SPATIAL = 0.22;
 const NEW_MARGIN_96_FLAT_FILL_PRESETS = Object.freeze([
     { name: 'edge', minAlpha: 0.006, maxAlpha: 0.45, strength: 0.75 }
 ]);
+const NEW_MARGIN_96_SMOOTH_EDGE_MIN_ALPHA_GAIN = 0.8;
+const NEW_MARGIN_96_SMOOTH_EDGE_MAX_ALPHA_GAIN = 0.9;
+const NEW_MARGIN_96_SMOOTH_EDGE_MAX_BACKGROUND_STD = 6;
+const NEW_MARGIN_96_SMOOTH_EDGE_MAX_BASELINE_ABS_SPATIAL = 0.12;
+const NEW_MARGIN_96_SMOOTH_EDGE_MIN_BASELINE_GRADIENT = 0.45;
+const NEW_MARGIN_96_SMOOTH_EDGE_MIN_GRADIENT_IMPROVEMENT = 0.25;
+const NEW_MARGIN_96_SMOOTH_EDGE_MAX_FINAL_ABS_SPATIAL = 0.18;
+const NEW_MARGIN_96_SMOOTH_EDGE_MAX_FINAL_ABS_GRADIENT = 0.18;
+const NEW_MARGIN_96_SMOOTH_EDGE_MAX_BOUNDARY_RAW_SCORE = 1.75;
+const NEW_MARGIN_96_SMOOTH_EDGE_MAX_ARTIFACT_COST = 0.05;
+const NEW_MARGIN_96_SMOOTH_EDGE_SCRATCH_PAD = 12;
+const NEW_MARGIN_96_SMOOTH_EDGE_PRESETS = Object.freeze([
+    { maxAlpha: 0.3, strength: 0.6 },
+    { maxAlpha: 0.3, strength: 0.85 },
+    { maxAlpha: 0.3, strength: 1 },
+    { maxAlpha: 0.5, strength: 0.6 },
+    { maxAlpha: 0.5, strength: 0.85 },
+    { maxAlpha: 0.5, strength: 1 }
+]);
 const NEW_MARGIN_96_VARIANT_RESCUE_PROFILES = Object.freeze([
     { exponent: 1.06, alphaGain: 1.05 },
     { exponent: 0.82, alphaGain: 0.9 }
@@ -2190,6 +2209,189 @@ function refineNewMargin96FlatBackgroundResidual({
     }
 
     return best;
+}
+
+function refineNewMargin96SmoothEdgeResidual({
+    originalImageData,
+    currentImageData,
+    currentAlphaMap,
+    currentPosition,
+    currentConfig,
+    currentSource,
+    currentAlphaGain,
+    currentSpatialScore,
+    currentGradientScore
+}) {
+    if (
+        !isNewMargin96AlphaVariantConfig(currentConfig) ||
+        typeof currentSource !== 'string' ||
+        !currentSource.includes('located-aggressive') ||
+        currentPosition?.width !== 96 ||
+        currentPosition?.height !== 96 ||
+        currentAlphaGain < NEW_MARGIN_96_SMOOTH_EDGE_MIN_ALPHA_GAIN ||
+        currentAlphaGain > NEW_MARGIN_96_SMOOTH_EDGE_MAX_ALPHA_GAIN ||
+        Math.abs(currentSpatialScore) >
+            NEW_MARGIN_96_SMOOTH_EDGE_MAX_BASELINE_ABS_SPATIAL ||
+        currentGradientScore < NEW_MARGIN_96_SMOOTH_EDGE_MIN_BASELINE_GRADIENT
+    ) {
+        return null;
+    }
+
+    const samples = sampleFlatBackgroundPixels(
+        currentImageData,
+        currentAlphaMap,
+        currentPosition,
+        { pad: 10, outsideAlphaMax: 0.012 }
+    );
+    const backgroundStats = calculateBackgroundSampleStats(samples);
+    if (
+        backgroundStats.count < 24 ||
+        backgroundStats.std > NEW_MARGIN_96_SMOOTH_EDGE_MAX_BACKGROUND_STD
+    ) {
+        return null;
+    }
+
+    const searchContext = createLocalAlphaSearchContext(
+        currentImageData,
+        currentPosition,
+        NEW_MARGIN_96_SMOOTH_EDGE_SCRATCH_PAD
+    );
+    const originalScratch = extractLocalAlphaSearchScratch(
+        originalImageData,
+        searchContext.window
+    );
+    const priorImageData = buildPreviewNeighborhoodPrior({
+        previewImageData: searchContext.originalScratch,
+        position: searchContext.position,
+        radius: 4,
+        relaxationPasses: 0
+    });
+    const edgeMask = createAlphaGradientMask({
+        alphaMap: currentAlphaMap,
+        width: currentPosition.width,
+        height: currentPosition.height,
+        gamma: 0.4,
+        dilateRadius: 2,
+        blurSigma: 1
+    });
+    let best = null;
+    for (const preset of NEW_MARGIN_96_SMOOTH_EDGE_PRESETS) {
+        const candidateScratch = cloneImageData(searchContext.originalScratch);
+        for (let row = 0; row < searchContext.position.height; row++) {
+            for (let col = 0; col < searchContext.position.width; col++) {
+                const localIndex = row * searchContext.position.width + col;
+                const alpha = Math.abs(currentAlphaMap[localIndex]);
+                if (alpha < 0.003 || alpha > preset.maxAlpha) continue;
+                const blend = Math.min(1, preset.strength * edgeMask[localIndex]);
+                if (blend <= 0) continue;
+                const pixelIndex = (
+                    (searchContext.position.y + row) * candidateScratch.width +
+                    searchContext.position.x +
+                    col
+                ) * 4;
+                for (let channel = 0; channel < 3; channel++) {
+                    candidateScratch.data[pixelIndex + channel] = clampChannel(
+                        candidateScratch.data[pixelIndex + channel] * (1 - blend) +
+                        priorImageData.data[pixelIndex + channel] * blend
+                    );
+                }
+            }
+        }
+
+        const region = {
+            x: searchContext.position.x,
+            y: searchContext.position.y,
+            size: searchContext.position.width
+        };
+        const spatialScore = computeRegionSpatialCorrelation({
+            imageData: candidateScratch,
+            alphaMap: currentAlphaMap,
+            region
+        });
+        const gradientScore = computeRegionGradientCorrelation({
+            imageData: candidateScratch,
+            alphaMap: currentAlphaMap,
+            region
+        });
+        const visibility = assessCalibratedWatermarkResidualVisibility({
+            imageData: candidateScratch,
+            originalImageData: originalScratch,
+            position: searchContext.position,
+            alphaMap: currentAlphaMap,
+            alphaGain: currentAlphaGain
+        });
+        const boundary = measurePreviewBoundaryMetrics(
+            candidateScratch,
+            searchContext.originalScratch,
+            searchContext.position
+        );
+        const artifacts = assessRemovalDiffArtifacts({
+            originalImageData: originalScratch,
+            candidateImageData: candidateScratch,
+            alphaMap: currentAlphaMap,
+            position: searchContext.position,
+            alphaGain: currentAlphaGain
+        });
+        if (
+            visibility?.visible !== false ||
+            currentGradientScore - gradientScore <
+                NEW_MARGIN_96_SMOOTH_EDGE_MIN_GRADIENT_IMPROVEMENT ||
+            Math.abs(spatialScore) >
+                NEW_MARGIN_96_SMOOTH_EDGE_MAX_FINAL_ABS_SPATIAL ||
+            Math.abs(gradientScore) >
+                NEW_MARGIN_96_SMOOTH_EDGE_MAX_FINAL_ABS_GRADIENT ||
+            boundary.rawScore > NEW_MARGIN_96_SMOOTH_EDGE_MAX_BOUNDARY_RAW_SCORE ||
+            Number(artifacts?.visualArtifactCost ?? Infinity) >
+                NEW_MARGIN_96_SMOOTH_EDGE_MAX_ARTIFACT_COST
+        ) {
+            continue;
+        }
+
+        const cost = Math.abs(spatialScore) * 0.45 +
+            Math.abs(gradientScore) * 0.55 +
+            Number(artifacts?.visualArtifactCost ?? 0) * 0.25;
+        if (!best || cost < best.cost) {
+            best = {
+                candidateScratch,
+                spatialScore,
+                gradientScore,
+                boundary,
+                artifacts,
+                preset,
+                cost
+            };
+        }
+    }
+    if (!best) return null;
+
+    const imageData = cloneImageData(currentImageData);
+    for (let row = 0; row < currentPosition.height; row++) {
+        const sourceStart = (
+            (searchContext.position.y + row) * best.candidateScratch.width +
+            searchContext.position.x
+        ) * 4;
+        const targetStart = (
+            (currentPosition.y + row) * imageData.width +
+            currentPosition.x
+        ) * 4;
+        imageData.data.set(
+            best.candidateScratch.data.subarray(
+                sourceStart,
+                sourceStart + currentPosition.width * 4
+            ),
+            targetStart
+        );
+    }
+    return {
+        imageData,
+        spatialScore: best.spatialScore,
+        gradientScore: best.gradientScore,
+        backgroundStats,
+        boundary: best.boundary,
+        artifacts: best.artifacts,
+        preset: best.preset,
+        cost: best.cost
+    };
 }
 
 function refineNewMargin96VariantResidual({
@@ -5923,6 +6125,7 @@ function createAcceptedPipelineRefiners({
         refineLocatedAggressiveRemoval,
         refineCanonical96PositiveHaloResidual,
         refineSmoothLocatedResidualWithEstimatedPrior,
+        refineNewMargin96SmoothEdgeResidual,
         refineNewMargin96VariantResidual,
         refineKnown48AntiTemplateResidual,
         refineKnown48PowerProfileResidual,
