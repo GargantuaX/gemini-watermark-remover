@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { interpolateAlphaMap } from '../src/core/adaptiveDetector.js';
@@ -9,7 +9,17 @@ import { loadLocalEnv } from './local-env.js';
 import {
     decodeImageDataInNode
 } from './sample-benchmark.js';
-import { classifyExternalBenchmarkCase } from './external-benchmark-evaluation.js';
+import {
+    classifyExternalBenchmarkCase,
+    classifyLabeledExternalBenchmarkCase,
+    compareTrustedExternalBenchmarkResults,
+    summarizeTrustedExternalBenchmarkResults
+} from './external-benchmark-evaluation.js';
+import {
+    createAssumedWatermarkedDataset,
+    listExternalBenchmarkImages,
+    loadTrustedExternalBenchmarkDataset
+} from './external-benchmark-dataset.js';
 import {
     classifyHighPrecisionContourResidual,
     measureMultichannelContourResidual
@@ -27,9 +37,8 @@ const DEFAULT_SAMPLE_ROOT = path.resolve(process.env.GWR_SAMPLE_ROOT || 'sample-
 const DEFAULT_OUTPUT_DIR = path.resolve('.artifacts/sample-files-gemini-watermark');
 const DEFAULT_OUTPUT_PATH = path.join(DEFAULT_OUTPUT_DIR, 'latest-strong-located-report.json');
 const DEFAULT_MARKDOWN_PATH = path.join(DEFAULT_OUTPUT_DIR, 'latest-strong-located-report.md');
+const DEFAULT_RESULTS_CSV_PATH = path.join(DEFAULT_OUTPUT_DIR, 'latest-strong-located-results.csv');
 const DEFAULT_FAILURES_CSV_PATH = path.join(DEFAULT_OUTPUT_DIR, 'latest-strong-located-failures.csv');
-const DEFAULT_BASELINE_PATH = path.join(DEFAULT_OUTPUT_DIR, 'latest-report.json');
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const RESIDUAL_FAIL_THRESHOLD = 0.22;
 const GRADIENT_FAIL_THRESHOLD = 0.22;
 const MIN_EXPECTED_SUPPRESSION_GAIN = 0.3;
@@ -39,13 +48,16 @@ const CONSERVATIVE_CANONICAL_96_MIN_SUPPRESSION_GAIN = 0.38;
 const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_SPATIAL = 0.55;
 const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_GRADIENT = 0.2;
 
-function parseArgs(argv) {
+export function parseExternalBenchmarkArgs(argv) {
     const parsed = {
         sampleRoot: DEFAULT_SAMPLE_ROOT,
         outputPath: DEFAULT_OUTPUT_PATH,
         markdownPath: DEFAULT_MARKDOWN_PATH,
+        resultsCsvPath: DEFAULT_RESULTS_CSV_PATH,
         failuresCsvPath: DEFAULT_FAILURES_CSV_PATH,
-        baselinePath: DEFAULT_BASELINE_PATH
+        baselinePath: null,
+        labelManifestPath: null,
+        assumeWatermarked: false
     };
 
     const args = [...argv];
@@ -57,27 +69,30 @@ function parseArgs(argv) {
             parsed.outputPath = path.resolve(args.shift() || parsed.outputPath);
         } else if (arg === '--markdown') {
             parsed.markdownPath = path.resolve(args.shift() || parsed.markdownPath);
+        } else if (arg === '--results-csv') {
+            parsed.resultsCsvPath = path.resolve(args.shift() || parsed.resultsCsvPath);
         } else if (arg === '--failures-csv') {
             parsed.failuresCsvPath = path.resolve(args.shift() || parsed.failuresCsvPath);
         } else if (arg === '--baseline') {
-            parsed.baselinePath = path.resolve(args.shift() || parsed.baselinePath);
+            parsed.baselinePath = path.resolve(args.shift());
+        } else if (arg === '--labels') {
+            parsed.labelManifestPath = path.resolve(args.shift());
+        } else if (arg === '--assume-watermarked') {
+            parsed.assumeWatermarked = true;
+        } else {
+            throw new Error(`unknown argument: ${arg}`);
         }
     }
 
+    const selected = Number(Boolean(parsed.labelManifestPath)) + Number(parsed.assumeWatermarked);
+    if (selected !== 1) {
+        throw new Error('exactly one of --labels or --assume-watermarked is required');
+    }
     return parsed;
 }
 
 function stripBom(text) {
     return text.replace(/^\uFEFF/, '');
-}
-
-function normalizePathForReport(filePath) {
-    return filePath.replace(/\\/g, '/');
-}
-
-function inferSampleGroup(relativePath) {
-    const firstSegment = relativePath.split('/')[0] || 'root';
-    return /^\d{4}-\d{2}-\d{2}$/.test(firstSegment) ? 'task-source' : firstSegment;
 }
 
 function formatRate(pass, total) {
@@ -91,6 +106,20 @@ function toFiniteNumber(value) {
 function roundNumber(value, digits = 6) {
     if (!Number.isFinite(value)) return null;
     return Number(value.toFixed(digits));
+}
+
+export function imageDataPixelsChanged(before, after) {
+    if (
+        before.width !== after.width ||
+        before.height !== after.height ||
+        before.data.length !== after.data.length
+    ) {
+        return true;
+    }
+    for (let index = 0; index < before.data.length; index++) {
+        if (before.data[index] !== after.data[index]) return true;
+    }
+    return false;
 }
 
 export function resolveExternalBenchmarkAlphaMaps() {
@@ -239,144 +268,14 @@ export function evaluateExternalBenchmarkInteriorResidual({ imageData, alphaMaps
     };
 }
 
-async function listImages(root) {
-    const images = [];
-
-    async function visit(dir) {
-        const entries = await readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-                await visit(fullPath);
-                continue;
-            }
-            if (!entry.isFile()) continue;
-            if (!IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
-
-            const relativePath = normalizePathForReport(path.relative(root, fullPath));
-            images.push({
-                fileName: relativePath,
-                filePath: fullPath,
-                group: inferSampleGroup(relativePath)
-            });
-        }
-    }
-
-    await visit(root);
-    return images.sort((left, right) => left.fileName.localeCompare(right.fileName));
-}
-
 function anchorKey(anchor) {
     if (!anchor) return 'none';
     const suffix = anchor.alphaVariant ? `/${anchor.alphaVariant}` : '';
     return `${anchor.logoSize}/${anchor.marginRight}/${anchor.marginBottom}${suffix}`;
 }
 
-function incrementBucket(map, key, status) {
-    if (!map[key]) {
-        map[key] = {
-            total: 0,
-            pass: 0,
-            fail: 0,
-            rate: 0,
-            buckets: {}
-        };
-    }
-    map[key].total++;
-    if (status.status === 'pass') map[key].pass++;
-    else map[key].fail++;
-    map[key].buckets[status.bucket] = (map[key].buckets[status.bucket] ?? 0) + 1;
-}
-
-function finalizeBucketMap(map) {
-    for (const value of Object.values(map)) {
-        value.rate = value.total > 0 ? Number((value.pass / value.total).toFixed(4)) : 0;
-    }
-}
-
-function summarize(results) {
-    const summary = {
-        total: results.length,
-        passCount: 0,
-        failCount: 0,
-        successRate: 0,
-        buckets: {},
-        byGroup: {},
-        byDecisionTier: {},
-        bySource: {},
-        byAnchor: {},
-        contourResidualShadow: {
-            measuredCount: 0,
-            unavailableCount: 0,
-            flaggedCount: 0,
-            fallbackGeometryCount: 0
-        },
-        interiorResidualShadow: {
-            evidenceStatus: 'provisional',
-            measuredCount: 0,
-            unavailableCount: 0,
-            flaggedCount: 0,
-            fallbackGeometryCount: 0
-        },
-        sourceOnly: null
-    };
-
-    for (const record of results) {
-        const status = record.classification;
-        if (status.status === 'pass') summary.passCount++;
-        else summary.failCount++;
-        summary.buckets[status.bucket] = (summary.buckets[status.bucket] ?? 0) + 1;
-        incrementBucket(summary.byGroup, record.group, status);
-        incrementBucket(summary.byDecisionTier, record.decisionTier ?? 'null', status);
-        incrementBucket(summary.bySource, record.source || 'null', status);
-        incrementBucket(summary.byAnchor, anchorKey(record.actualAnchor), status);
-        if (record.contourResidualShadow?.status === 'measured') {
-            summary.contourResidualShadow.measuredCount++;
-            if (record.contourResidualShadow.geometrySource === 'review-fallback') {
-                summary.contourResidualShadow.fallbackGeometryCount++;
-            }
-            if (record.contourResidualShadow.flagged === true) {
-                summary.contourResidualShadow.flaggedCount++;
-            }
-        } else {
-            summary.contourResidualShadow.unavailableCount++;
-        }
-        if (record.interiorResidualShadow?.status === 'measured') {
-            summary.interiorResidualShadow.measuredCount++;
-            if (record.interiorResidualShadow.geometrySource === 'review-fallback') {
-                summary.interiorResidualShadow.fallbackGeometryCount++;
-            }
-            if (record.interiorResidualShadow.flagged === true) {
-                summary.interiorResidualShadow.flaggedCount++;
-            }
-        } else {
-            summary.interiorResidualShadow.unavailableCount++;
-        }
-    }
-
-    summary.successRate = summary.total > 0
-        ? Number((summary.passCount / summary.total).toFixed(4))
-        : 0;
-    finalizeBucketMap(summary.byGroup);
-    finalizeBucketMap(summary.byDecisionTier);
-    finalizeBucketMap(summary.bySource);
-    finalizeBucketMap(summary.byAnchor);
-
-    const sourceOnly = summary.byGroup['task-source'] ?? null;
-    summary.sourceOnly = sourceOnly
-        ? {
-            total: sourceOnly.total,
-            passCount: sourceOnly.pass,
-            failCount: sourceOnly.fail,
-            successRate: sourceOnly.rate,
-            buckets: sourceOnly.buckets
-        }
-        : null;
-
-    return summary;
-}
-
 async function loadBaseline(baselinePath) {
+    if (!baselinePath) return null;
     try {
         return JSON.parse(stripBom(await readFile(baselinePath, 'utf8')));
     } catch (error) {
@@ -385,48 +284,48 @@ async function loadBaseline(baselinePath) {
     }
 }
 
-function compareToBaseline(results, baseline) {
-    if (!baseline?.results) {
-        return {
-            newlyPassing: [],
-            newlyFailing: []
-        };
-    }
-
-    const previousByName = new Map(baseline.results.map((record) => [
-        record.fileName,
-        record.classification?.status ?? 'unknown'
-    ]));
-    const newlyPassing = [];
-    const newlyFailing = [];
-    for (const record of results) {
-        const previousStatus = previousByName.get(record.fileName);
-        if (previousStatus === 'fail' && record.classification.status === 'pass') {
-            newlyPassing.push(record.fileName);
-        } else if (previousStatus === 'pass' && record.classification.status === 'fail') {
-            newlyFailing.push(record.fileName);
-        }
-    }
-    return {
-        newlyPassing,
-        newlyFailing
-    };
-}
-
-async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
+export async function benchmarkExternalSamples({
+    sampleRoot = DEFAULT_SAMPLE_ROOT,
+    labelManifestPath = null,
+    assumeWatermarked = false,
+    baselinePath = null,
+    outputPath = DEFAULT_OUTPUT_PATH
+} = {}) {
     const alphaMaps = resolveExternalBenchmarkAlphaMaps();
-    const images = await listImages(sampleRoot);
+    const images = await listExternalBenchmarkImages(sampleRoot);
+    const selected = Number(Boolean(labelManifestPath)) + Number(assumeWatermarked);
+    if (selected !== 1) {
+        throw new Error('exactly one of --labels or --assume-watermarked is required');
+    }
+    const loaded = labelManifestPath
+        ? await loadTrustedExternalBenchmarkDataset({ sampleRoot, labelManifestPath, images })
+        : await createAssumedWatermarkedDataset({ sampleRoot, images });
     const results = [];
 
-    for (const item of images) {
+    for (const item of loaded.cases) {
         const imageData = await decodeImageDataInNode(item.filePath);
+        const originalImageData = {
+            width: imageData.width,
+            height: imageData.height,
+            data: new Uint8ClampedArray(imageData.data)
+        };
         const processed = processWatermarkImageData(imageData, alphaMaps);
         const meta = processed.meta;
         const shadowGeometry = resolveExternalBenchmarkShadowGeometry({
             imageData: processed.imageData,
             meta
         });
-        const shadowMeta = shadowGeometry
+        const shadowPosition = shadowGeometry?.position;
+        const shadowGeometryFits = Boolean(
+            shadowPosition &&
+            shadowPosition.x >= 0 &&
+            shadowPosition.y >= 0 &&
+            shadowPosition.width > 0 &&
+            shadowPosition.height > 0 &&
+            shadowPosition.x + shadowPosition.width <= processed.imageData.width &&
+            shadowPosition.y + shadowPosition.height <= processed.imageData.height
+        );
+        const shadowMeta = shadowGeometryFits
             ? {
                 ...meta,
                 position: shadowGeometry.position,
@@ -440,7 +339,7 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
         });
         const contourResidualShadow = {
             ...contourResidualEvaluation,
-            geometrySource: shadowGeometry?.source ?? null
+            geometrySource: shadowGeometryFits ? shadowGeometry.source : null
         };
         const interiorResidualEvaluation = evaluateExternalBenchmarkInteriorResidual({
             imageData: processed.imageData,
@@ -449,15 +348,23 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
         });
         const interiorResidualShadow = {
             ...interiorResidualEvaluation,
-            geometrySource: shadowGeometry?.source ?? null
+            geometrySource: shadowGeometryFits ? shadowGeometry.source : null
         };
         const record = {
             fileName: item.fileName,
             filePath: item.filePath,
+            paths: item.paths,
+            contentSha256: item.contentSha256,
+            label: item.label,
+            reviewConfidence: item.reviewConfidence,
+            watermarkFamily: item.watermarkFamily,
+            expectedAnchor: item.expectedAnchor,
+            note: item.note,
             group: item.group,
             expectedGemini: true,
             width: imageData.width,
             height: imageData.height,
+            pixelsChanged: imageDataPixelsChanged(originalImageData, processed.imageData),
             applied: meta.applied === true,
             skipReason: meta.skipReason || null,
             source: meta.source || '',
@@ -497,43 +404,25 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
             contourResidualShadow,
             interiorResidualShadow
         };
-        record.classification = classifyExternalBenchmarkCase(record);
+        record.classification = classifyLabeledExternalBenchmarkCase(record);
         results.push(record);
     }
 
     const baseline = await loadBaseline(baselinePath);
-    const comparison = compareToBaseline(results, baseline);
+    const aggregate = summarizeTrustedExternalBenchmarkResults(results);
+    const comparison = compareTrustedExternalBenchmarkResults({
+        dataset: loaded.dataset,
+        results,
+        baseline
+    });
     const failures = results
-        .filter((record) => record.classification.status === 'fail')
-        .map((record) => ({
-            fileName: record.fileName,
-            group: record.group,
-            bucket: record.classification.bucket,
-            width: record.width,
-            height: record.height,
-            applied: record.applied,
-            skipReason: record.skipReason,
-            decisionTier: record.decisionTier,
-            source: record.source,
-            anchor: record.actualAnchor,
-            alphaGain: record.alphaGain,
-            residualScore: record.residualScore,
-            processedGradientScore: record.processedGradientScore,
-            originalSpatialScore: record.originalSpatialScore,
-            originalGradientScore: record.originalGradientScore,
-            suppressionGain: record.suppressionGain,
-            residualVisibility: record.residualVisibility,
-            qualityStatus: record.qualityStatus,
-            finalDamageWarning: record.finalDamageWarning,
-            selectionDamageSafe: record.selectionDamageSafe,
-            decisionPath: record.decisionPath,
-            filePath: record.filePath
-        }));
+        .filter((record) => record.classification.status === 'fail');
 
     return {
         generatedAt: new Date().toISOString(),
         sampleRoot,
         outputDir: path.dirname(outputPath ?? DEFAULT_OUTPUT_PATH),
+        dataset: loaded.dataset,
         policy: {
             residualFailThreshold: RESIDUAL_FAIL_THRESHOLD,
             negativeResidualOvershootThreshold: -RESIDUAL_FAIL_THRESHOLD,
@@ -551,7 +440,11 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
             }
         },
         previousSummary: baseline?.summary ?? null,
-        summary: summarize(results),
+        labels: aggregate.labels,
+        metrics: aggregate.metrics,
+        summary: aggregate.summary,
+        reviewQueue: aggregate.reviewQueue,
+        comparison,
         newlyPassing: comparison.newlyPassing,
         newlyFailing: comparison.newlyFailing,
         failures,
@@ -559,38 +452,77 @@ async function benchmarkSample({ sampleRoot, baselinePath, outputPath }) {
     };
 }
 
-function renderMarkdown(report) {
+export function renderExternalBenchmarkMarkdown(report) {
+    const metricNames = [
+        'watermarkDetectionRecall',
+        'watermarkEndToEndPassRate',
+        'restorationPassRateAmongApplied',
+        'cleanSkipRate',
+        'falsePositiveRate',
+        'qualifiedOverallPassRate'
+    ];
+    const dataset = report.dataset ?? {};
+    const summary = report.summary ?? {};
+    const contour = summary.contourResidualShadow ?? {};
+    const interior = summary.interiorResidualShadow ?? {};
+    const comparison = report.comparison ?? { status: 'not-requested' };
     const lines = [
         '# External Gemini Watermark Sample Benchmark',
         '',
         `- Generated: ${report.generatedAt}`,
         `- Sample root: \`${report.sampleRoot}\``,
-        `- Total: ${report.summary.total}`,
-        `- Pass: ${report.summary.passCount}/${report.summary.total} (${formatRate(report.summary.passCount, report.summary.total)})`,
-        `- Fail: ${report.summary.failCount}`,
-        `- Buckets: ${Object.entries(report.summary.buckets).map(([key, value]) => `${key}=${value}`).join(', ')}`,
-        `- Contour residual shadow flags: ${report.summary.contourResidualShadow.flaggedCount}/` +
-            `${report.summary.contourResidualShadow.measuredCount} measured ` +
-            `(${report.summary.contourResidualShadow.unavailableCount} unavailable; ` +
-            `${report.summary.contourResidualShadow.fallbackGeometryCount} review fallback; non-blocking)`,
-        `- Provisional interior residual shadow flags: ${report.summary.interiorResidualShadow.flaggedCount}/` +
-            `${report.summary.interiorResidualShadow.measuredCount} measured ` +
-            `(${report.summary.interiorResidualShadow.unavailableCount} unavailable; ` +
-            `${report.summary.interiorResidualShadow.fallbackGeometryCount} review fallback; non-blocking)`,
+        `- Dataset mode: ${dataset.mode ?? 'unknown'}`,
+        `- Trusted release evidence: ${dataset.trusted === true}`,
+        `- Dataset ID: ${dataset.datasetId ?? 'null'}`,
+        `- Label manifest SHA-256: ${dataset.labelManifestSha256 ?? 'null'}`,
+        `- Content set SHA-256: ${dataset.contentSetSha256 ?? 'null'}`,
+        `- Paths: ${dataset.pathCount ?? 0}`,
+        `- Unique content: ${dataset.uniqueContentCount ?? 0}`,
+        `- Duplicate paths: ${dataset.duplicatePathCount ?? 0}`,
+        `- Pass: ${summary.passCount ?? 0}`,
+        `- Fail: ${summary.failCount ?? 0}`,
+        `- Excluded: ${summary.excludedCount ?? 0}`,
+        `- Buckets: ${Object.entries(summary.buckets ?? {}).map(([key, value]) => `${key}=${value}`).join(', ')}`,
+        `- Contour residual shadow flags: ${contour.flaggedCount ?? 0}/` +
+            `${contour.measuredCount ?? 0} measured ` +
+            `(${contour.unavailableCount ?? 0} unavailable; ` +
+            `${contour.fallbackGeometryCount ?? 0} review fallback; non-blocking)`,
+        `- Provisional interior residual shadow flags: ${interior.flaggedCount ?? 0}/` +
+            `${interior.measuredCount ?? 0} measured ` +
+            `(${interior.unavailableCount ?? 0} unavailable; ` +
+            `${interior.fallbackGeometryCount ?? 0} review fallback; non-blocking)`,
+        `- Baseline comparison: ${comparison.status}`,
         `- Newly passing vs baseline: ${report.newlyPassing.length}`,
         `- Newly failing vs baseline: ${report.newlyFailing.length}`,
         ''
     ];
 
-    if (report.summary.sourceOnly) {
+    lines.push('## Labels');
+    lines.push('');
+    for (const label of ['watermarked', 'clean', 'ambiguous', 'unlabeled']) {
+        lines.push(`- ${label}: ${report.labels?.[label] ?? 0}`);
+    }
+    lines.push('');
+
+    lines.push('## Metrics');
+    lines.push('');
+    for (const name of metricNames) {
+        const metric = report.metrics?.[name] ?? {};
+        const rate = Number.isFinite(metric.rate) ? `${(metric.rate * 100).toFixed(2)}%` : 'null';
+        lines.push(`- ${name}: ${metric.numerator ?? 0}/${metric.denominator ?? 0} (${rate})`);
+    }
+    lines.push('');
+
+    if (summary.sourceOnly) {
         lines.push('## Task Source');
         lines.push('');
         lines.push(
-            `- Pass: ${report.summary.sourceOnly.passCount}/${report.summary.sourceOnly.total} ` +
-            `(${formatRate(report.summary.sourceOnly.passCount, report.summary.sourceOnly.total)})`
+            `- Pass: ${summary.sourceOnly.passCount}/${summary.sourceOnly.qualifiedTotal ?? summary.sourceOnly.total} ` +
+            `(${formatRate(summary.sourceOnly.passCount, summary.sourceOnly.qualifiedTotal ?? summary.sourceOnly.total)})`
         );
-        lines.push(`- Fail: ${report.summary.sourceOnly.failCount}`);
-        lines.push(`- Buckets: ${Object.entries(report.summary.sourceOnly.buckets).map(([key, value]) => `${key}=${value}`).join(', ')}`);
+        lines.push(`- Fail: ${summary.sourceOnly.failCount}`);
+        lines.push(`- Excluded: ${summary.sourceOnly.excludedCount ?? 0}`);
+        lines.push(`- Buckets: ${Object.entries(summary.sourceOnly.buckets).map(([key, value]) => `${key}=${value}`).join(', ')}`);
         lines.push('');
     }
 
@@ -598,14 +530,28 @@ function renderMarkdown(report) {
     lines.push('');
     for (const failure of report.failures) {
         lines.push(
-            `- ${failure.fileName} | ${failure.bucket} | applied=${failure.applied} | ` +
-            `source=${failure.source || 'null'} | anchor=${anchorKey(failure.anchor)} | ` +
+            `- ${failure.fileName} | ${failure.classification.bucket} | applied=${failure.applied} | ` +
+            `label=${failure.label} | sha256=${failure.contentSha256} | ` +
+            `source=${failure.source || 'null'} | anchor=${anchorKey(failure.actualAnchor)} | ` +
             `residual=${failure.residualScore ?? 'null'} | gradient=${failure.processedGradientScore ?? 'null'} | ` +
             `finalDamageWarning=${failure.finalDamageWarning ?? 'null'} | ` +
             `selectionDamageSafe=${failure.selectionDamageSafe ?? 'null'}`
         );
     }
     lines.push('');
+
+    for (const label of ['ambiguous', 'unlabeled']) {
+        lines.push(`## ${label[0].toUpperCase()}${label.slice(1)} Review Queue`);
+        lines.push('');
+        for (const record of report.reviewQueue?.[label] ?? []) {
+            lines.push(
+                `- ${record.fileName} | paths=${record.paths?.join(' | ') ?? record.fileName} | ` +
+                `sha256=${record.contentSha256} | confidence=${record.reviewConfidence ?? 'null'} | ` +
+                `note=${record.note ?? 'null'}`
+            );
+        }
+        lines.push('');
+    }
 
     return `${lines.join('\n')}\n`;
 }
@@ -616,14 +562,25 @@ function csvCell(value) {
     return `"${text.replace(/"/g, '""')}"`;
 }
 
-function renderFailuresCsv(failures) {
+export function renderExternalBenchmarkResultsCsv(results) {
     const header = [
         'fileName',
-        'group',
+        'paths',
+        'contentSha256',
+        'label',
+        'includedInMetrics',
+        'status',
         'bucket',
+        'reviewConfidence',
+        'watermarkFamily',
+        'expectedAnchor',
+        'note',
+        'group',
         'width',
         'height',
         'applied',
+        'pixelsChanged',
+        'skipReason',
         'source',
         'decisionTier',
         'anchor',
@@ -633,45 +590,76 @@ function renderFailuresCsv(failures) {
         'originalSpatialScore',
         'originalGradientScore',
         'suppressionGain',
+        'adaptiveConfidence',
+        'residualVisibility',
         'qualityStatus',
         'finalDamageWarning',
-        'selectionDamageSafe'
+        'selectionDamageSafe',
+        'qualitySignals',
+        'decisionPath'
     ];
-    const rows = failures.map((failure) => [
-        failure.fileName,
-        failure.group,
-        failure.bucket,
-        failure.width,
-        failure.height,
-        failure.applied,
-        failure.source,
-        failure.decisionTier,
-        anchorKey(failure.anchor),
-        failure.alphaGain,
-        failure.residualScore,
-        failure.processedGradientScore,
-        failure.originalSpatialScore,
-        failure.originalGradientScore,
-        failure.suppressionGain,
-        failure.qualityStatus,
-        failure.finalDamageWarning,
-        failure.selectionDamageSafe
+    const rows = results.map((record) => [
+        record.fileName,
+        record.paths?.join(' | ') ?? record.fileName,
+        record.contentSha256,
+        record.label,
+        record.classification?.includedInMetrics,
+        record.classification?.status,
+        record.classification?.bucket,
+        record.reviewConfidence,
+        record.watermarkFamily,
+        record.expectedAnchor == null ? null : JSON.stringify(record.expectedAnchor),
+        record.note,
+        record.group,
+        record.width,
+        record.height,
+        record.applied,
+        record.pixelsChanged,
+        record.skipReason,
+        record.source,
+        record.decisionTier,
+        anchorKey(record.actualAnchor),
+        record.alphaGain,
+        record.residualScore,
+        record.processedGradientScore,
+        record.originalSpatialScore,
+        record.originalGradientScore,
+        record.suppressionGain,
+        record.adaptiveConfidence,
+        record.residualVisibility,
+        record.qualityStatus,
+        record.finalDamageWarning,
+        record.selectionDamageSafe,
+        record.qualitySignals == null ? null : JSON.stringify(record.qualitySignals),
+        record.decisionPath == null ? null : JSON.stringify(record.decisionPath)
     ]);
 
     return `${[header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n')}\n`;
 }
 
+function renderFailuresCsv(failures) {
+    return renderExternalBenchmarkResultsCsv(failures);
+}
+
 async function main() {
-    const args = parseArgs(process.argv.slice(2));
-    const report = await benchmarkSample(args);
+    const args = parseExternalBenchmarkArgs(process.argv.slice(2));
+    if (args.assumeWatermarked) {
+        console.warn('diagnostic-only: assumed-watermarked labels are not release evidence');
+    }
+    const report = await benchmarkExternalSamples(args);
     await mkdir(path.dirname(args.outputPath), { recursive: true });
     await mkdir(path.dirname(args.markdownPath), { recursive: true });
+    await mkdir(path.dirname(args.resultsCsvPath), { recursive: true });
     await mkdir(path.dirname(args.failuresCsvPath), { recursive: true });
     await writeFile(args.outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-    await writeFile(args.markdownPath, renderMarkdown(report), 'utf8');
+    await writeFile(args.markdownPath, renderExternalBenchmarkMarkdown(report), 'utf8');
+    await writeFile(args.resultsCsvPath, renderExternalBenchmarkResultsCsv(report.results), 'utf8');
     await writeFile(args.failuresCsvPath, renderFailuresCsv(report.failures), 'utf8');
 
-    console.log(`summary: pass=${report.summary.passCount} fail=${report.summary.failCount} total=${report.summary.total}`);
+    console.log(
+        `summary: pass=${report.summary.passCount} fail=${report.summary.failCount} ` +
+        `excluded=${report.summary.excludedCount} total=${report.summary.total}`
+    );
     console.log(`newlyPassing=${report.newlyPassing.length} newlyFailing=${report.newlyFailing.length}`);
     console.log(`report: ${args.outputPath}`);
 }
