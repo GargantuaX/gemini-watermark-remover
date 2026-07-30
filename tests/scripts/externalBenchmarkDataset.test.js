@@ -113,3 +113,20 @@ test('a file absent from the manifest remains unlabeled', async () => {
     });
     assert.equal(loaded.cases.find((record) => record.fileName === 'b.png').label, 'unlabeled');
 });
+
+test('duplicate content with an unlisted path remains unlabeled', async () => {
+    const fixture = await createManifestFixture();
+    await writeFile(path.join(fixture.root, 'b.png'), fixture.bytes);
+    const manifestPath = path.join(fixture.root, 'labels.json');
+    await writeFile(manifestPath, JSON.stringify(fixture.valid));
+    const loaded = await loadTrustedExternalBenchmarkDataset({
+        sampleRoot: fixture.root,
+        labelManifestPath: manifestPath,
+        images: await listExternalBenchmarkImages(fixture.root)
+    });
+
+    assert.equal(loaded.cases.length, 1);
+    assert.deepEqual(loaded.cases[0].paths, ['a.png', 'b.png']);
+    assert.equal(loaded.cases[0].label, 'unlabeled');
+    assert.equal(loaded.cases[0].reviewConfidence, null);
+});

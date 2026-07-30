@@ -128,7 +128,7 @@ export async function loadTrustedExternalBenchmarkDataset({ sampleRoot, labelMan
         const entries = content.images.map((image) => labels.get(reportPath(image.fileName))).filter(Boolean);
         const distinctLabels = [...new Set(entries.map((entry) => entry.label))];
         if (distinctLabels.length > 1) throw new Error(`conflicting labels for sha256: ${content.sha256}`);
-        const representative = entries[0] ?? null;
+        const representative = entries.length === content.images.length ? entries[0] : null;
         const firstImage = content.images[0];
         return {
             fileName: firstImage.fileName,
