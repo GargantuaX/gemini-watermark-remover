@@ -35,6 +35,7 @@
 - Safety gates are a final fallback. If a visible watermark is skipped, first ask whether the selected position/size/alpha candidate is wrong or incomplete.
 - Do not generalize from a single image when the user supplied a sample set. Cluster samples by size, anchor, background, and residual behavior, then make the smallest algorithm change supported by that cluster.
 - When residual artifacts remain after mathematically valid inverse alpha removal, do not assume stronger inpaint, preview-only priors, or subpixel sweeps are safe production fixes. First verify whether the real alpha edge profile / antialiasing model differs from the current template, and keep any visual cleanup evidence-gated.
+- Do not treat a restoration score measured only with the candidate's own selected alpha map and geometry as independent cleanliness or damage evidence. A wrong candidate can erase the pattern it scores against while leaving an obvious hole, shifted star, or larger residual outside that ROI. Use those self-consistent scores for candidate ranking only; promotion evidence should come from frozen cross-profile/decoy signals and blind visual review.
 
 ## Deployment Note
 

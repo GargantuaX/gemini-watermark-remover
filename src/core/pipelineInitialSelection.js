@@ -6,7 +6,10 @@ import {
     createCandidateHypothesis,
     selectDiverseCandidateHypotheses
 } from './pipelineCandidatePool.js';
-import { computeRegionSpatialCorrelation } from './adaptiveDetector.js';
+import {
+    computeRegionSpatialCorrelation,
+    interpolateAlphaMap
+} from './adaptiveDetector.js';
 import { calculateNearBlackRatio } from './restorationMetrics.js';
 import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
 
@@ -41,6 +44,115 @@ const REPEATED_TEMPLATE_CONTROL_SQUARES = [
     [[-1, 0], [0, -1], [-1, -1]],
     [[-2, 0], [0, -2], [-2, -2]]
 ];
+const CONFIRMED_V2_MEDIUM_IMAGE_WIDTH = 768;
+const CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT = 1376;
+const CONFIRMED_V2_MEDIUM_LOGO_SIZE = 48;
+const CONFIRMED_V2_MEDIUM_MARGIN = 73;
+const CONFIRMED_V2_MEDIUM_MIN_RESCUE_SPATIAL = 0.4;
+const CONFIRMED_V2_MEDIUM_MIN_RESCUE_GRADIENT = 0.5;
+const CONFIRMED_V2_SMALL_PRIOR_MIN_SPATIAL = 0.3;
+
+// The Allenk V2 renderer and the trusted 768x1376 sample cluster agree on
+// 48px / 73px geometry. Keep it out of the generic catalog because structured
+// clean content at this size can still correlate with the V2 template.
+function isConfirmedV2SmallSelection(trial) {
+    return trial?.config?.logoSize === 36 &&
+        trial.config.marginRight === 96 &&
+        trial.config.marginBottom === 96 &&
+        Number(trial.originalSpatialScore) >=
+            CONFIRMED_V2_SMALL_PRIOR_MIN_SPATIAL &&
+        (
+            trial.config.alphaVariant === 'v2' ||
+            trial.provenance?.alphaVariant === 'v2'
+        );
+}
+
+function createConfirmedV2MediumRescueTrial({
+    originalImageData,
+    getAlphaMap,
+    fixedSelection,
+    automaticSelection
+}) {
+    if (
+        originalImageData?.width !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH ||
+        originalImageData?.height !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT ||
+        typeof getAlphaMap !== 'function'
+    ) {
+        return null;
+    }
+
+    const fixedTrial = fixedSelection?.selectedTrial;
+    const automaticTrial = automaticSelection?.selectedTrial;
+    const hasV2SmallPrior =
+        isConfirmedV2SmallSelection(fixedTrial) ||
+        isConfirmedV2SmallSelection(automaticTrial);
+
+    const alpha36V2 = getAlphaMap('36-v2');
+    if (!alpha36V2 || alpha36V2.length !== 36 * 36) return null;
+
+    const alphaMap = interpolateAlphaMap(
+        alpha36V2,
+        36,
+        CONFIRMED_V2_MEDIUM_LOGO_SIZE
+    );
+    const config = {
+        logoSize: CONFIRMED_V2_MEDIUM_LOGO_SIZE,
+        marginRight: CONFIRMED_V2_MEDIUM_MARGIN,
+        marginBottom: CONFIRMED_V2_MEDIUM_MARGIN,
+        alphaVariant: 'v2'
+    };
+    const position = {
+        x: originalImageData.width - config.marginRight - config.logoSize,
+        y: originalImageData.height - config.marginBottom - config.logoSize,
+        width: config.logoSize,
+        height: config.logoSize
+    };
+    const trial = evaluateRestorationCandidate({
+        originalImageData,
+        alphaMap,
+        position,
+        source: 'standard+confirmed-v2-medium-rescue',
+        config,
+        baselineNearBlackRatio: calculateNearBlackRatio(
+            originalImageData,
+            position
+        ),
+        alphaGain: 1,
+        provenance: {
+            catalogVariant: true,
+            fixedVariant: true,
+            alphaVariant: 'v2',
+            catalogFamily: 'confirmed-v2-medium-rescue',
+            catalogEvidenceGate: 'medium',
+            confirmedV2MediumRescue: true,
+            rescueReason: hasV2SmallPrior
+                ? 'replace-confirmed-v2-small-geometry'
+                : 'recover-strong-unconfirmed-v2-medium'
+        },
+        includeImageData: false
+    });
+    if (!trial?.accepted) return null;
+
+    // A strong 36px V2 prior is independent geometry evidence. Do not require
+    // its 48px replacement to pass the initial texture-damage heuristic here:
+    // the top-N executor still repairs, scores, and ranks the completed output.
+    // The confirmed bottle case begins with a false texture hard-reject but
+    // finishes without a damage warning after the normal repair pipeline.
+    if (
+        !hasV2SmallPrior &&
+        (
+            Number(trial.originalSpatialScore) <
+                CONFIRMED_V2_MEDIUM_MIN_RESCUE_SPATIAL ||
+            Number(trial.originalGradientScore) <
+                CONFIRMED_V2_MEDIUM_MIN_RESCUE_GRADIENT ||
+            trial.damage?.safe !== true
+        )
+    ) {
+        return null;
+    }
+
+    return trial;
+}
 
 function isSafeAggressiveFallbackSelection(selection) {
     const trial = selection?.selectedTrial;
@@ -548,6 +660,13 @@ export function collectInitialWatermarkCandidates(input = {}) {
             allowAutomaticSearch: true,
             allowAggressiveStrongLocated: true
         });
+    const potentialV2MediumRescueTrial =
+        createConfirmedV2MediumRescueTrial({
+            originalImageData: input.originalImageData,
+            getAlphaMap: input.getAlphaMap,
+            fixedSelection,
+            automaticSelection
+        });
     const fixedPresenceWitness = findWatermarkPresenceWitness(
         fixedSelection,
         input.originalImageData
@@ -556,6 +675,17 @@ export function collectInitialWatermarkCandidates(input = {}) {
         automaticSelection,
         input.originalImageData
     );
+    const normalPresenceConfirmed = Boolean(
+        fixedPresenceWitness || automaticPresenceWitness
+    );
+    const confirmedV2MediumRescueTrial =
+        (
+            potentialV2MediumRescueTrial?.provenance?.rescueReason ===
+                'replace-confirmed-v2-small-geometry' ||
+            !normalPresenceConfirmed
+        )
+            ? potentialV2MediumRescueTrial
+            : null;
     const geometryLockWitness =
         findStrongLocalizedGeometryTrial(
             fixedSelection,
@@ -566,7 +696,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
             input.originalImageData
         );
     const presenceConfirmed = Boolean(
-        fixedPresenceWitness || automaticPresenceWitness
+        normalPresenceConfirmed || confirmedV2MediumRescueTrial
     );
     const bestEffortSelections = presenceConfirmed
         ? []
@@ -686,6 +816,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 fixedSelection?.selectedTrial,
                 ...(automaticSelection?.candidatePool ?? []),
                 automaticSelection?.selectedTrial,
+                confirmedV2MediumRescueTrial,
                 ...conservativeTrials
             ]
     ).filter((trial) => (
@@ -728,11 +859,22 @@ export function collectInitialWatermarkCandidates(input = {}) {
             : null,
         1003
     );
+    const confirmedV2MediumRescueHypothesis = createCandidateHypothesis(
+        keepNonRepeatedTrial(confirmedV2MediumRescueTrial) &&
+            isGeometryCompatibleWithLock(
+                confirmedV2MediumRescueTrial,
+                geometryLockWitness
+            )
+            ? confirmedV2MediumRescueTrial
+            : null,
+        1004
+    );
     const preferredHypotheses = [
         fixedSelectedHypothesis,
         automaticSelectedHypothesis,
         fixedPresenceHypothesis,
-        automaticPresenceHypothesis
+        automaticPresenceHypothesis,
+        confirmedV2MediumRescueHypothesis
     ].filter((hypothesis, index, values) => (
         hypothesis &&
         values.findIndex((candidate) => sameTrialIdentity(
@@ -756,6 +898,8 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 ? 'discovered-alternative'
                 : hypothesis.trial?.provenance?.topNConservative === true
                 ? 'conservative-derived'
+                : hypothesis.trial?.provenance?.confirmedV2MediumRescue === true
+                    ? 'confirmed-rescue'
                 : sameTrialIdentity(hypothesis.trial, fixedSelection?.selectedTrial)
                     ? 'fixed-selected'
                     : sameTrialIdentity(hypothesis.trial, automaticSelection?.selectedTrial)
