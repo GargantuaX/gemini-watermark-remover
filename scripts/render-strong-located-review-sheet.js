@@ -7,6 +7,10 @@ import sharp from 'sharp';
 import { interpolateAlphaMap } from '../src/core/adaptiveDetector.js';
 import { getEmbeddedAlphaMap } from '../src/core/embeddedAlphaMaps.js';
 import { processWatermarkImageData } from '../src/core/watermarkProcessor.js';
+import {
+    indexExternalBenchmarkImages,
+    listExternalBenchmarkImages
+} from './external-benchmark-dataset.js';
 import { decodeImageDataInNode } from './sample-benchmark.js';
 
 const DEFAULT_REPORT_PATH = path.resolve('.artifacts/sample-files-gemini-watermark/latest-strong-located-report.json');
@@ -17,12 +21,18 @@ const HEADER_HEIGHT = 56;
 const PANEL_GAP = 10;
 const ROW_GAP = 14;
 const BACKGROUND = '#111111';
+const REVIEW_PANEL_SIZE = 420;
+const REVIEW_LABEL_HEIGHT = 72;
+const REVIEW_COLUMNS = 4;
+const REVIEW_ROWS_PER_SHEET = 5;
 
 function parseArgs(argv) {
     const parsed = {
         reportPath: DEFAULT_REPORT_PATH,
         outputDir: DEFAULT_OUTPUT_DIR,
-        sampleRoot: null
+        sampleRoot: null,
+        allUniqueContent: false,
+        labelTemplatePath: null
     };
 
     const args = [...argv];
@@ -34,10 +44,48 @@ function parseArgs(argv) {
             parsed.outputDir = path.resolve(args.shift() || parsed.outputDir);
         } else if (arg === '--sample-root') {
             parsed.sampleRoot = path.resolve(args.shift() || '.');
+        } else if (arg === '--all-unique-content') {
+            parsed.allUniqueContent = true;
+        } else if (arg === '--label-template') {
+            const value = args.shift();
+            if (!value) throw new Error('--label-template requires a path');
+            parsed.labelTemplatePath = path.resolve(value);
         }
     }
 
     return parsed;
+}
+
+export function buildExternalBenchmarkLabelTemplate(indexedCases, datasetId) {
+    const samples = {};
+    const sortedCases = [...indexedCases]
+        .sort((left, right) => left.paths[0].localeCompare(right.paths[0]));
+    for (const record of sortedCases) {
+        for (const fileName of [...record.paths].sort((left, right) => left.localeCompare(right))) {
+            samples[fileName] = {
+                sha256: record.sha256,
+                label: null,
+                reviewConfidence: null,
+                watermarkFamily: null,
+                expectedAnchor: null,
+                note: ''
+            };
+        }
+    }
+    return { version: 1, datasetId, samples };
+}
+
+export function selectExternalBenchmarkReviewRecords(report, { allUniqueContent = false } = {}) {
+    if (!allUniqueContent) {
+        return (report.failures ?? []).filter((record) => record.bucket === 'missed-detection');
+    }
+    const byHash = new Map();
+    for (const record of report.results ?? []) {
+        const key = record.contentSha256 || record.fileName;
+        if (!byHash.has(key)) byHash.set(key, record);
+    }
+    return [...byHash.values()]
+        .sort((left, right) => left.fileName.localeCompare(right.fileName));
 }
 
 function escapeSvgText(text) {
@@ -249,6 +297,47 @@ async function encodePanel(imageData, labelLines) {
         .toBuffer();
 }
 
+async function encodeReviewPanel(imageData, labelLines) {
+    const imageBuffer = await sharp(Buffer.from(imageData.data), {
+        raw: {
+            width: imageData.width,
+            height: imageData.height,
+            channels: 4
+        }
+    })
+        .resize(REVIEW_PANEL_SIZE, REVIEW_PANEL_SIZE, {
+            fit: 'contain',
+            position: 'southeast',
+            background: BACKGROUND
+        })
+        .png()
+        .toBuffer();
+    const labelSvg = Buffer.from(`
+        <svg width="${REVIEW_PANEL_SIZE}" height="${REVIEW_LABEL_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100%" height="100%" fill="#171717"/>
+          ${labelLines.slice(0, 3).map((line, index) => `
+            <text x="8" y="${18 + index * 21}" fill="${index === 0 ? '#f2f2f2' : '#b8b8b8'}"
+              font-family="Arial, sans-serif" font-size="${index === 0 ? 12 : 11}">${escapeSvgText(line)}</text>
+          `).join('')}
+        </svg>
+    `);
+
+    return sharp({
+        create: {
+            width: REVIEW_PANEL_SIZE,
+            height: REVIEW_PANEL_SIZE + REVIEW_LABEL_HEIGHT,
+            channels: 4,
+            background: BACKGROUND
+        }
+    })
+        .composite([
+            { input: imageBuffer, left: 0, top: 0 },
+            { input: labelSvg, left: 0, top: REVIEW_PANEL_SIZE }
+        ])
+        .png()
+        .toBuffer();
+}
+
 async function createHeader(width, title, subtitle) {
     return Buffer.from(`
         <svg width="${width}" height="${HEADER_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
@@ -307,6 +396,35 @@ async function writeSheet({ rows, outputPath, title, subtitle, columnsPerRow }) 
             channels: 4,
             background: BACKGROUND
         }
+    })
+        .composite(composites)
+        .png()
+        .toFile(outputPath);
+    return outputPath;
+}
+
+async function writeReviewSheet({ panels, outputPath, title, subtitle }) {
+    const panelHeight = REVIEW_PANEL_SIZE + REVIEW_LABEL_HEIGHT;
+    const rowCount = Math.ceil(panels.length / REVIEW_COLUMNS);
+    const width = REVIEW_COLUMNS * REVIEW_PANEL_SIZE + (REVIEW_COLUMNS - 1) * PANEL_GAP;
+    const height = HEADER_HEIGHT + rowCount * panelHeight + Math.max(0, rowCount - 1) * ROW_GAP;
+    const composites = [{
+        input: await createHeader(width, title, subtitle),
+        left: 0,
+        top: 0
+    }];
+    for (let index = 0; index < panels.length; index++) {
+        const row = Math.floor(index / REVIEW_COLUMNS);
+        const column = index % REVIEW_COLUMNS;
+        composites.push({
+            input: panels[index],
+            left: column * (REVIEW_PANEL_SIZE + PANEL_GAP),
+            top: HEADER_HEIGHT + row * (panelHeight + ROW_GAP)
+        });
+    }
+
+    await sharp({
+        create: { width, height, channels: 4, background: BACKGROUND }
     })
         .composite(composites)
         .png()
@@ -374,6 +492,92 @@ async function renderRemainingMissedRows(report, sampleRoot) {
     return rows;
 }
 
+async function renderAllUniqueContentReview({ report, indexedCases, outputDir, reportPath }) {
+    const selected = selectExternalBenchmarkReviewRecords(report, { allUniqueContent: true });
+    const groupsByHash = new Map(indexedCases.map((record) => [record.sha256, record]));
+    if (selected.length !== indexedCases.length) {
+        throw new Error(`review report covers ${selected.length} unique contents, expected ${indexedCases.length}`);
+    }
+
+    const cropsDir = path.join(outputDir, 'crops');
+    const panelsDir = path.join(outputDir, 'panels');
+    await mkdir(cropsDir, { recursive: true });
+    await mkdir(panelsDir, { recursive: true });
+    const panels = [];
+    const records = [];
+
+    for (let index = 0; index < selected.length; index++) {
+        const selectedRecord = selected[index];
+        const group = groupsByHash.get(selectedRecord.contentSha256);
+        if (!group) throw new Error(`review report hash is absent from sample index: ${selectedRecord.contentSha256}`);
+        const canonical = group.images[0];
+        const original = await decodeImageDataInNode(canonical.filePath);
+        const crop = cropImageData(original, calculateBottomRightCropBox(original));
+        const sequence = String(index + 1).padStart(3, '0');
+        const stem = `${sequence}-${group.sha256.slice(0, 12)}`;
+        const cropPath = path.join(cropsDir, `${stem}.png`);
+        const panelPath = path.join(panelsDir, `${stem}.png`);
+        await sharp(Buffer.from(crop.data), {
+            raw: { width: crop.width, height: crop.height, channels: 4 }
+        }).png().toFile(cropPath);
+        const panel = await encodeReviewPanel(crop, [
+            canonical.fileName,
+            `${original.width}x${original.height} · sha ${group.sha256.slice(0, 12)}`,
+            `paths ${group.paths.length} · duplicate paths ${group.paths.length - 1}`
+        ]);
+        await writeFile(panelPath, panel);
+        panels.push(panel);
+        records.push({
+            index: index + 1,
+            fileName: canonical.fileName,
+            sourcePath: canonical.filePath,
+            paths: group.paths,
+            width: original.width,
+            height: original.height,
+            contentSha256: group.sha256,
+            duplicatePathCount: group.paths.length - 1,
+            cropPath,
+            panelPath,
+            sheetPath: null
+        });
+    }
+
+    const sheetPaths = [];
+    const panelsPerSheet = REVIEW_COLUMNS * REVIEW_ROWS_PER_SHEET;
+    for (let offset = 0; offset < panels.length; offset += panelsPerSheet) {
+        const sheetNumber = sheetPaths.length + 1;
+        const sheetPath = path.join(
+            outputDir,
+            `all-unique-content-review-${String(sheetNumber).padStart(2, '0')}.png`
+        );
+        const sheetPanels = panels.slice(offset, offset + panelsPerSheet);
+        await writeReviewSheet({
+            panels: sheetPanels,
+            outputPath: sheetPath,
+            title: `External Benchmark Human Review ${sheetNumber}`,
+            subtitle: `Items ${offset + 1}-${offset + sheetPanels.length} of ${panels.length}; full-resolution bottom-right crops`
+        });
+        sheetPaths.push(sheetPath);
+        for (let index = offset; index < offset + sheetPanels.length; index++) {
+            records[index].sheetPath = sheetPath;
+        }
+    }
+
+    const pathCount = indexedCases.reduce((sum, record) => sum + record.paths.length, 0);
+    const reviewIndex = {
+        reportPath,
+        outputDir,
+        pathCount,
+        uniqueContentCount: indexedCases.length,
+        duplicatePathCount: pathCount - indexedCases.length,
+        sheetPaths,
+        records
+    };
+    const reviewIndexPath = path.join(outputDir, 'review-index.json');
+    await writeFile(reviewIndexPath, `${JSON.stringify(reviewIndex, null, 2)}\n`, 'utf8');
+    return { ...reviewIndex, reviewIndexPath };
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     const report = JSON.parse(stripBom(await readFile(args.reportPath, 'utf8')));
@@ -381,6 +585,17 @@ async function main() {
     if (!sampleRoot) throw new Error('sampleRoot is required');
 
     await mkdir(args.outputDir, { recursive: true });
+    let indexedCases = null;
+    if (args.allUniqueContent || args.labelTemplatePath) {
+        const images = await listExternalBenchmarkImages(sampleRoot);
+        indexedCases = [...(await indexExternalBenchmarkImages(images)).values()];
+    }
+    const datasetId = report.dataset?.datasetId || path.basename(path.dirname(sampleRoot));
+    if (args.labelTemplatePath) {
+        const template = buildExternalBenchmarkLabelTemplate(indexedCases, datasetId);
+        await mkdir(path.dirname(args.labelTemplatePath), { recursive: true });
+        await writeFile(args.labelTemplatePath, `${JSON.stringify(template, null, 2)}\n`, 'utf8');
+    }
     const alphaMaps = resolveAlphaMaps();
     const newlyPassingRows = await renderNewlyPassingRows(report, alphaMaps, sampleRoot);
     const missedRows = await renderRemainingMissedRows(report, sampleRoot);
@@ -402,13 +617,30 @@ async function main() {
         columnsPerRow: 5
     });
 
+    const allUniqueReview = args.allUniqueContent
+        ? await renderAllUniqueContentReview({
+            report,
+            indexedCases,
+            outputDir: args.outputDir,
+            reportPath: args.reportPath
+        })
+        : null;
+
     const summary = {
         reportPath: args.reportPath,
         outputDir: args.outputDir,
         newlyPassingCount: newlyPassingRows.length,
         remainingMissedCount: (report.failures ?? []).filter((failure) => failure.bucket === 'missed-detection').length,
         newlyPassingSheetPath,
-        missedSheetPath
+        missedSheetPath,
+        ...(allUniqueReview ? {
+            pathCount: allUniqueReview.pathCount,
+            uniqueContentCount: allUniqueReview.uniqueContentCount,
+            duplicatePathCount: allUniqueReview.duplicatePathCount,
+            allUniqueReviewIndexPath: allUniqueReview.reviewIndexPath,
+            allUniqueReviewSheetPaths: allUniqueReview.sheetPaths
+        } : {}),
+        ...(args.labelTemplatePath ? { labelTemplatePath: args.labelTemplatePath } : {})
     };
     await writeFile(path.join(args.outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
     await writeFile(path.join(args.outputDir, 'index.md'), [
@@ -419,6 +651,13 @@ async function main() {
         `- Remaining missed sheet: \`${missedSheetPath}\``,
         `- Newly passing count: ${summary.newlyPassingCount}`,
         `- Remaining missed count: ${summary.remainingMissedCount}`,
+        ...(allUniqueReview ? [
+            `- All unique content review index: \`${allUniqueReview.reviewIndexPath}\``,
+            `- Path count: ${allUniqueReview.pathCount}`,
+            `- Unique content count: ${allUniqueReview.uniqueContentCount}`,
+            `- Duplicate path count: ${allUniqueReview.duplicatePathCount}`
+        ] : []),
+        ...(args.labelTemplatePath ? [`- Label template: \`${args.labelTemplatePath}\``] : []),
         ''
     ].join('\n'), 'utf8');
 
