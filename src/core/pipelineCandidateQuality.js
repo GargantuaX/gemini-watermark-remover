@@ -6,6 +6,7 @@ import {
     calculateNearWhiteRatio,
     scoreRegion
 } from './restorationMetrics.js';
+import { getEmbeddedAlphaMap } from './embeddedAlphaMaps.js';
 import { compareRankingKey } from './watermarkScoring.js';
 
 export const FINAL_EVIDENCE_WEIGHT = 0.35;
@@ -33,6 +34,36 @@ const SEVERE_DARK_FLAT_TEXTURE_WARNING_THRESHOLD = 1.5;
 function clamp01(value) {
     if (!Number.isFinite(value)) return 0;
     return Math.max(0, Math.min(1, value));
+}
+
+function haveEqualAlphaValues(left, right) {
+    if (!left || !right || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return false;
+    }
+    return true;
+}
+
+function resolveReferenceAlphaMap(
+    hypothesis,
+    explicitReferenceAlphaMap,
+    selectedAlphaMap
+) {
+    const config = hypothesis?.config ?? hypothesis?.trial?.config;
+    const logoSize = config?.logoSize;
+    const alphaVariant = config?.alphaVariant;
+    const catalogKey = Number.isFinite(logoSize)
+        ? typeof alphaVariant === 'string' && alphaVariant.length > 0
+            ? `${logoSize}-${alphaVariant}`
+            : logoSize
+        : null;
+    // Keep one catalog-derived observer independent from any alpha profile
+    // mutated or injected by the candidate being evaluated.
+    const referenceAlphaMap = explicitReferenceAlphaMap ??
+        (catalogKey === null ? null : getEmbeddedAlphaMap(catalogKey));
+    return haveEqualAlphaValues(referenceAlphaMap, selectedAlphaMap)
+        ? null
+        : referenceAlphaMap;
 }
 
 export function classifyCandidateQuality({
@@ -88,7 +119,8 @@ export function createCandidateQualitySignals({
     originalImageData,
     candidateImageData,
     hypothesis,
-    finalCandidate = null
+    finalCandidate = null,
+    referenceAlphaMap = null
 } = {}) {
     const trial = hypothesis?.trial;
     const position = finalCandidate?.position ?? trial?.position ?? hypothesis?.position;
@@ -107,6 +139,20 @@ export function createCandidateQualitySignals({
         alphaMap,
         alphaGain
     });
+    const resolvedReferenceAlphaMap = resolveReferenceAlphaMap(
+        hypothesis,
+        referenceAlphaMap,
+        alphaMap
+    );
+    const referenceVisibility = resolvedReferenceAlphaMap
+        ? assessCalibratedWatermarkResidualVisibility({
+            imageData: candidateImageData,
+            originalImageData,
+            position,
+            alphaMap: resolvedReferenceAlphaMap,
+            alphaGain
+        })
+        : null;
     const imperfections = createCandidateImperfectionSignals(visibility);
     const artifacts = assessRemovalDiffArtifacts({
         originalImageData,
@@ -155,7 +201,8 @@ export function createCandidateQualitySignals({
         damageComponents.nearWhite * 0.25 +
         damageComponents.texture * 0.25 +
         damageComponents.clipped * 0.25;
-    const residualVisible = visibility?.visible === true;
+    const residualVisible = visibility?.visible === true ||
+        referenceVisibility?.visible === true;
     const textureWarningCorroborated = (
         texture?.visibleDarkHole === true ||
         texture?.hardReject === true
@@ -218,6 +265,7 @@ export function createCandidateQualitySignals({
         original,
         final,
         visibility,
+        referenceVisibility,
         artifacts,
         texture,
         originalNearBlackRatio,
