@@ -42,6 +42,7 @@ export function parseExternalBenchmarkReviewArgs(argv) {
     };
 
     const args = [...argv];
+    if (args[0] === '--') args.shift();
     while (args.length > 0) {
         const arg = args.shift();
         if (arg === '--report') {

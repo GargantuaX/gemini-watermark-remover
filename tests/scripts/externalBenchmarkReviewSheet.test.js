@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import {
     buildExternalBenchmarkLabelTemplate,
+    parseExternalBenchmarkReviewArgs,
     selectExternalBenchmarkReviewRecords
 } from '../../scripts/render-strong-located-review-sheet.js';
 
@@ -53,4 +56,32 @@ test('review-sheet CLI rejects unknown arguments and every missing option value 
         assert.notEqual(missing.status, 0, option);
         assert.match(missing.stderr, new RegExp(`${option} requires a value`), option);
     }
+});
+
+test('review-sheet parser accepts only one leading argument separator', () => {
+    const parsed = parseExternalBenchmarkReviewArgs(['--', '--report', 'fixture-report.json']);
+    assert.equal(parsed.reportPath, path.resolve('fixture-report.json'));
+    assert.throws(
+        () => parseExternalBenchmarkReviewArgs(['--report', 'fixture-report.json', '--']),
+        /unknown argument: --/
+    );
+    assert.throws(
+        () => parseExternalBenchmarkReviewArgs(['--', '--', '--report', 'fixture-report.json']),
+        /unknown argument: --/
+    );
+});
+
+test('review-sheet CLI accepts a leading argument separator and reaches the requested report', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'gwr-review-separator-'));
+    const reportPath = path.join(dir, 'missing-report.json');
+    const result = spawnSync(process.execPath, [
+        'scripts/render-strong-located-review-sheet.js',
+        '--',
+        '--report', reportPath
+    ], { cwd: path.resolve('.'), encoding: 'utf8' });
+
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stderr, /unknown argument: --/);
+    assert.match(result.stderr, /ENOENT/);
+    assert.match(result.stderr, new RegExp(reportPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
