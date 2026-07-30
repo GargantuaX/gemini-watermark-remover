@@ -25,6 +25,16 @@ test('label-aware classification separates misses, clean skips, false positives,
     });
 });
 
+test('label-aware classification normalizes a missing label and rejects unknown labels', () => {
+    assert.deepEqual(classifyLabeledExternalBenchmarkCase({ applied: false }), {
+        status: 'excluded', bucket: 'unlabeled', includedInMetrics: false
+    });
+    assert.throws(
+        () => classifyLabeledExternalBenchmarkCase({ label: 'not-a-runtime-label' }),
+        /unknown external benchmark label/i
+    );
+});
+
 test('trusted metrics use only watermarked and clean denominators', () => {
     const result = summarizeTrustedExternalBenchmarkResults([
         { label: 'watermarked', applied: true, classification: { status: 'pass', bucket: 'pass', includedInMetrics: true } },
@@ -42,6 +52,58 @@ test('trusted metrics use only watermarked and clean denominators', () => {
     assert.deepEqual(result.metrics.cleanSkipRate, { numerator: 1, denominator: 2, rate: 0.5 });
     assert.deepEqual(result.metrics.falsePositiveRate, { numerator: 1, denominator: 2, rate: 0.5 });
     assert.deepEqual(result.metrics.qualifiedOverallPassRate, { numerator: 2, denominator: 4, rate: 0.5 });
+});
+
+test('diagnostic rates and source-only rate exclude ambiguous and unlabeled records from denominators', () => {
+    const result = summarizeTrustedExternalBenchmarkResults([
+        {
+            label: 'watermarked',
+            group: 'task-source',
+            decisionTier: 'direct-match',
+            source: 'pipeline',
+            actualAnchor: { logoSize: 96, marginRight: 64, marginBottom: 64 },
+            classification: { status: 'pass', bucket: 'pass', includedInMetrics: true }
+        },
+        {
+            label: 'ambiguous',
+            group: 'task-source',
+            decisionTier: 'direct-match',
+            source: 'pipeline',
+            actualAnchor: { logoSize: 96, marginRight: 64, marginBottom: 64 },
+            classification: { status: 'excluded', bucket: 'ambiguous', includedInMetrics: false }
+        },
+        {
+            label: 'unlabeled',
+            group: 'other',
+            decisionTier: 'insufficient',
+            source: 'fallback',
+            actualAnchor: null,
+            classification: { status: 'excluded', bucket: 'unlabeled', includedInMetrics: false }
+        }
+    ]);
+
+    for (const bucket of [
+        result.summary.byGroup['task-source'],
+        result.summary.byDecisionTier['direct-match'],
+        result.summary.bySource.pipeline,
+        result.summary.byAnchor['96/64/64']
+    ]) {
+        assert.equal(bucket.total, 2);
+        assert.equal(bucket.pass, 1);
+        assert.equal(bucket.fail, 0);
+        assert.equal(bucket.excludedCount, 1);
+        assert.equal(bucket.qualifiedTotal, 1);
+        assert.equal(bucket.rate, 1);
+    }
+    assert.deepEqual(result.summary.sourceOnly, {
+        total: 2,
+        passCount: 1,
+        failCount: 0,
+        excludedCount: 1,
+        qualifiedTotal: 1,
+        successRate: 1,
+        buckets: { pass: 1, ambiguous: 1 }
+    });
 });
 
 test('baseline comparison uses trusted dataset identity and content hashes', () => {

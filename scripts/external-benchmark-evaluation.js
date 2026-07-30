@@ -6,6 +6,15 @@ const CONSERVATIVE_CANONICAL_96_MIN_SUPPRESSION_GAIN = 0.38;
 const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_SPATIAL = 0.55;
 const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_GRADIENT = 0.2;
 const DATASET_IDENTITY_FIELDS = ['datasetId', 'labelManifestSha256', 'contentSetSha256'];
+const RUNTIME_LABELS = new Set(['watermarked', 'clean', 'ambiguous', 'unlabeled']);
+
+function normalizeExternalBenchmarkLabel(label) {
+    if (label == null) return 'unlabeled';
+    if (!RUNTIME_LABELS.has(label)) {
+        throw new Error(`unknown external benchmark label: ${label}`);
+    }
+    return label;
+}
 
 function toFiniteNumber(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -64,10 +73,11 @@ export function classifyExternalBenchmarkCase(record) {
 }
 
 export function classifyLabeledExternalBenchmarkCase(record) {
-    if (record.label === 'ambiguous' || record.label === 'unlabeled') {
-        return { status: 'excluded', bucket: record.label, includedInMetrics: false };
+    const label = normalizeExternalBenchmarkLabel(record.label);
+    if (label === 'ambiguous' || label === 'unlabeled') {
+        return { status: 'excluded', bucket: label, includedInMetrics: false };
     }
-    if (record.label === 'clean') {
+    if (label === 'clean') {
         return record.pixelsChanged === true
             ? { status: 'fail', bucket: 'false-positive', includedInMetrics: true }
             : { status: 'pass', bucket: 'clean-skip', includedInMetrics: true };
@@ -94,21 +104,28 @@ function incrementBucket(map, key, status) {
             total: 0,
             pass: 0,
             fail: 0,
-            excluded: 0,
+            excludedCount: 0,
+            qualifiedTotal: 0,
             rate: 0,
             buckets: {}
         };
     }
     map[key].total++;
-    if (status.status === 'pass') map[key].pass++;
-    else if (status.status === 'fail') map[key].fail++;
-    else map[key].excluded++;
+    if (status.includedInMetrics === true) {
+        map[key].qualifiedTotal++;
+        if (status.status === 'pass') map[key].pass++;
+        else if (status.status === 'fail') map[key].fail++;
+    } else {
+        map[key].excludedCount++;
+    }
     map[key].buckets[status.bucket] = (map[key].buckets[status.bucket] ?? 0) + 1;
 }
 
 function finalizeBucketMap(map) {
     for (const value of Object.values(map)) {
-        value.rate = value.total > 0 ? Number((value.pass / value.total).toFixed(4)) : 0;
+        value.rate = value.qualifiedTotal > 0
+            ? Number((value.pass / value.qualifiedTotal).toFixed(4))
+            : null;
     }
 }
 
@@ -185,7 +202,8 @@ function summarizeDiagnostics(results, successRate) {
             total: sourceOnly.total,
             passCount: sourceOnly.pass,
             failCount: sourceOnly.fail,
-            excludedCount: sourceOnly.excluded,
+            excludedCount: sourceOnly.excludedCount,
+            qualifiedTotal: sourceOnly.qualifiedTotal,
             successRate: sourceOnly.rate,
             buckets: sourceOnly.buckets
         }
@@ -196,9 +214,13 @@ function summarizeDiagnostics(results, successRate) {
 
 export function summarizeTrustedExternalBenchmarkResults(results) {
     const labels = { watermarked: 0, clean: 0, ambiguous: 0, unlabeled: 0 };
-    for (const record of results) labels[record.label]++;
-    const watermarked = results.filter((record) => record.label === 'watermarked');
-    const clean = results.filter((record) => record.label === 'clean');
+    const normalizedResults = results.map((record) => ({
+        ...record,
+        label: normalizeExternalBenchmarkLabel(record.label)
+    }));
+    for (const record of normalizedResults) labels[record.label]++;
+    const watermarked = normalizedResults.filter((record) => record.label === 'watermarked');
+    const clean = normalizedResults.filter((record) => record.label === 'clean');
     const appliedWatermarked = watermarked.filter((record) => record.applied === true);
     const passedWatermarked = watermarked.filter((record) => record.classification.status === 'pass');
     const cleanSkips = clean.filter((record) => record.classification.bucket === 'clean-skip');
@@ -215,10 +237,10 @@ export function summarizeTrustedExternalBenchmarkResults(results) {
     return {
         labels,
         metrics,
-        summary: summarizeDiagnostics(results, metrics.qualifiedOverallPassRate.rate),
+        summary: summarizeDiagnostics(normalizedResults, metrics.qualifiedOverallPassRate.rate),
         reviewQueue: {
-            ambiguous: results.filter((record) => record.label === 'ambiguous'),
-            unlabeled: results.filter((record) => record.label === 'unlabeled')
+            ambiguous: normalizedResults.filter((record) => record.label === 'ambiguous'),
+            unlabeled: normalizedResults.filter((record) => record.label === 'unlabeled')
         }
     };
 }
