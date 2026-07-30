@@ -17,7 +17,8 @@ function parseNumber(value, fallback) {
 function parseArgs(argv) {
     const parsed = {
         reportPath: DEFAULT_REPORT_PATH,
-        expectedTotal: 1000,
+        expectedTotal: 105,
+        expectedPaths: 119,
         minSuccessRate: 0.97,
         maxNewlyFailing: 0,
         minNewlyPassing: 21,
@@ -31,6 +32,8 @@ function parseArgs(argv) {
             parsed.reportPath = path.resolve(args.shift() || parsed.reportPath);
         } else if (arg === '--expected-total') {
             parsed.expectedTotal = parseNumber(args.shift(), parsed.expectedTotal);
+        } else if (arg === '--expected-paths') {
+            parsed.expectedPaths = parseNumber(args.shift(), parsed.expectedPaths);
         } else if (arg === '--min-success-rate') {
             parsed.minSuccessRate = parseNumber(args.shift(), parsed.minSuccessRate);
         } else if (arg === '--max-newly-failing') {
@@ -59,27 +62,42 @@ function readAnchor(summary, key) {
     return summary?.byAnchor?.[key] ?? null;
 }
 
-async function main() {
-    const args = parseArgs(process.argv.slice(2));
-    const report = JSON.parse(await readFile(args.reportPath, 'utf8'));
-    const summary = report.summary ?? {};
-    const total = Number(summary.total ?? 0);
-    const passCount = Number(summary.passCount ?? 0);
-    const successRate = total > 0 ? passCount / total : 0;
+export function evaluateOnlineSampleBenchmarkGate(report, args) {
     const newlyPassing = Array.isArray(report.newlyPassing) ? report.newlyPassing.length : 0;
     const newlyFailing = Array.isArray(report.newlyFailing) ? report.newlyFailing.length : 0;
     const failures = [];
+    const dataset = report.dataset ?? {};
+    const qualified = report.metrics?.qualifiedOverallPassRate ?? {};
+    const summary = report.summary ?? {};
 
     assertCondition(
         failures,
-        total === args.expectedTotal,
-        `expected total ${args.expectedTotal}, got ${total}`
+        dataset.trusted === true && dataset.mode === 'trusted-labels',
+        'report must use trusted-labels'
     );
     assertCondition(
         failures,
-        successRate >= args.minSuccessRate,
-        `expected successRate >= ${args.minSuccessRate}, got ${successRate.toFixed(4)}`
+        Number(report.labels?.unlabeled ?? 0) === 0,
+        'report must not contain unlabeled content'
     );
+    assertCondition(
+        failures,
+        dataset.uniqueContentCount === args.expectedTotal,
+        `expected unique total ${args.expectedTotal}, got ${dataset.uniqueContentCount}`
+    );
+    assertCondition(
+        failures,
+        dataset.pathCount === args.expectedPaths,
+        `expected path total ${args.expectedPaths}, got ${dataset.pathCount}`
+    );
+    assertCondition(
+        failures,
+        Number(qualified.rate ?? -1) >= args.minSuccessRate,
+        `expected qualifiedOverallPassRate >= ${args.minSuccessRate}, got ${qualified.rate}`
+    );
+    if (args.minNewlyPassing > 0 || args.maxNewlyFailing < Number.POSITIVE_INFINITY) {
+        assertCondition(failures, report.comparison?.status === 'comparable', 'comparable trusted baseline is required');
+    }
     assertCondition(
         failures,
         newlyFailing <= args.maxNewlyFailing,
@@ -102,13 +120,15 @@ async function main() {
         );
     }
 
-    const output = {
+    return {
         ok: failures.length === 0,
-        reportPath: args.reportPath,
-        total,
-        passCount,
+        dataset,
+        total: Number(dataset.uniqueContentCount ?? 0),
+        pathCount: Number(dataset.pathCount ?? 0),
+        passCount: Number(summary.passCount ?? 0),
         failCount: Number(summary.failCount ?? 0),
-        successRate: Number(successRate.toFixed(4)),
+        unlabeledCount: Number(report.labels?.unlabeled ?? 0),
+        successRate: Number(qualified.rate ?? 0),
         newlyPassing,
         newlyFailing,
         requiredAnchors: Object.fromEntries(args.requiredAnchors.map(([key]) => [
@@ -117,9 +137,18 @@ async function main() {
         ])),
         failures
     };
+}
+
+async function main() {
+    const args = parseArgs(process.argv.slice(2));
+    const report = JSON.parse(await readFile(args.reportPath, 'utf8'));
+    const output = {
+        ...evaluateOnlineSampleBenchmarkGate(report, args),
+        reportPath: args.reportPath
+    };
 
     console.log(JSON.stringify(output, null, 2));
-    if (failures.length > 0) process.exitCode = 1;
+    if (!output.ok) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
