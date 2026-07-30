@@ -7,6 +7,22 @@ import {
     summarizeTrustedExternalBenchmarkResults
 } from '../../scripts/external-benchmark-evaluation.js';
 
+const SHA_A = 'a'.repeat(64);
+const SHA_B = 'b'.repeat(64);
+const LABEL_MANIFEST_SHA256 = 'c'.repeat(64);
+const TWO_CONTENT_SET_SHA256 = '5e9ae866add9a85d69c3481d059bb9f158a39e5670ba11f95112fc409630894e';
+
+function createTrustedDataset(overrides = {}) {
+    return {
+        mode: 'trusted-labels',
+        trusted: true,
+        datasetId: 'fixture',
+        labelManifestSha256: LABEL_MANIFEST_SHA256,
+        contentSetSha256: TWO_CONTENT_SET_SHA256,
+        ...overrides
+    };
+}
+
 test('label-aware classification separates misses, clean skips, false positives, and exclusions', () => {
     assert.deepEqual(classifyLabeledExternalBenchmarkCase({ label: 'watermarked', applied: false }), {
         status: 'fail', bucket: 'missed-detection', includedInMetrics: true
@@ -93,7 +109,7 @@ test('trusted metrics use only watermarked and clean denominators', () => {
     assert.deepEqual(result.metrics.qualifiedOverallPassRate, { numerator: 2, denominator: 4, rate: 0.5 });
 });
 
-test('diagnostic rates and source-only rate exclude ambiguous and unlabeled records from denominators', () => {
+test('diagnostic rates exclude ambiguous records while anchor summaries include only qualified watermarked records', () => {
     const result = summarizeTrustedExternalBenchmarkResults([
         {
             label: 'watermarked',
@@ -124,8 +140,7 @@ test('diagnostic rates and source-only rate exclude ambiguous and unlabeled reco
     for (const bucket of [
         result.summary.byGroup['task-source'],
         result.summary.byDecisionTier['direct-match'],
-        result.summary.bySource.pipeline,
-        result.summary.byAnchor['96/64/64']
+        result.summary.bySource.pipeline
     ]) {
         assert.equal(bucket.total, 2);
         assert.equal(bucket.pass, 1);
@@ -134,6 +149,15 @@ test('diagnostic rates and source-only rate exclude ambiguous and unlabeled reco
         assert.equal(bucket.qualifiedTotal, 1);
         assert.equal(bucket.rate, 1);
     }
+    assert.deepEqual(result.summary.byAnchor['96/64/64'], {
+        total: 1,
+        pass: 1,
+        fail: 0,
+        excludedCount: 0,
+        qualifiedTotal: 1,
+        rate: 1,
+        buckets: { pass: 1 }
+    });
     assert.deepEqual(result.summary.sourceOnly, {
         total: 2,
         passCount: 1,
@@ -145,46 +169,136 @@ test('diagnostic rates and source-only rate exclude ambiguous and unlabeled reco
     });
 });
 
+test('clean and excluded records do not create anchor evidence', () => {
+    const result = summarizeTrustedExternalBenchmarkResults([
+        {
+            label: 'clean',
+            actualAnchor: { logoSize: 96, marginRight: 192, marginBottom: 192, alphaVariant: '20260520' },
+            classification: { status: 'pass', bucket: 'clean-skip', includedInMetrics: true }
+        },
+        {
+            label: 'ambiguous',
+            actualAnchor: { logoSize: 96, marginRight: 192, marginBottom: 192, alphaVariant: '20260520' },
+            classification: { status: 'excluded', bucket: 'ambiguous', includedInMetrics: false }
+        }
+    ]);
+
+    assert.deepEqual(result.summary.byAnchor, {});
+});
+
 test('baseline comparison uses trusted dataset identity and content hashes', () => {
-    const dataset = {
-        trusted: true,
-        datasetId: 'fixture',
-        labelManifestSha256: 'labels-hash',
-        contentSetSha256: 'contents-hash'
-    };
+    const dataset = createTrustedDataset();
     const baseline = {
         dataset,
         results: [
-            { contentSha256: 'a', classification: { status: 'fail', includedInMetrics: true } },
-            { contentSha256: 'b', classification: { status: 'pass', includedInMetrics: true } }
+            { contentSha256: SHA_A, classification: { status: 'fail', includedInMetrics: true } },
+            { contentSha256: SHA_B, classification: { status: 'pass', includedInMetrics: true } }
         ]
     };
     const comparison = compareTrustedExternalBenchmarkResults({
         dataset,
         baseline,
         results: [
-            { fileName: 'a.png', contentSha256: 'a', classification: { status: 'pass', includedInMetrics: true } },
-            { fileName: 'b.png', contentSha256: 'b', classification: { status: 'fail', includedInMetrics: true } }
+            { fileName: 'a.png', contentSha256: SHA_A, classification: { status: 'pass', includedInMetrics: true } },
+            { fileName: 'b.png', contentSha256: SHA_B, classification: { status: 'fail', includedInMetrics: true } }
         ]
     });
     assert.deepEqual(comparison, { status: 'comparable', newlyPassing: ['a.png'], newlyFailing: ['b.png'] });
 });
 
 test('baseline comparison rejects every dataset identity mismatch and legacy reports', () => {
-    const dataset = { trusted: true, datasetId: 'fixture', labelManifestSha256: 'labels', contentSetSha256: 'contents' };
-    const baseline = { dataset, results: [] };
+    const dataset = createTrustedDataset();
+    const baseline = {
+        dataset,
+        results: [
+            { contentSha256: SHA_A, classification: { status: 'pass', includedInMetrics: true } },
+            { contentSha256: SHA_B, classification: { status: 'pass', includedInMetrics: true } }
+        ]
+    };
+    const results = [
+        { fileName: 'a.png', contentSha256: SHA_A, classification: { status: 'pass', includedInMetrics: true } },
+        { fileName: 'b.png', contentSha256: SHA_B, classification: { status: 'pass', includedInMetrics: true } }
+    ];
     for (const field of ['datasetId', 'labelManifestSha256', 'contentSetSha256']) {
         assert.throws(
             () => compareTrustedExternalBenchmarkResults({
                 dataset,
-                results: [],
+                results,
                 baseline: { ...baseline, dataset: { ...dataset, [field]: 'different' } }
             }),
             new RegExp(field)
         );
     }
     assert.throws(
-        () => compareTrustedExternalBenchmarkResults({ dataset, results: [], baseline: { results: [] } }),
+        () => compareTrustedExternalBenchmarkResults({ dataset, results, baseline: { results: baseline.results } }),
         /requires trusted-labels reports/
+    );
+});
+
+test('baseline comparison rejects empty, missing, duplicate, and incomplete result identities', () => {
+    const dataset = createTrustedDataset();
+    const complete = [
+        { fileName: 'a.png', contentSha256: SHA_A, classification: { status: 'pass', includedInMetrics: true } },
+        { fileName: 'b.png', contentSha256: SHA_B, classification: { status: 'pass', includedInMetrics: true } }
+    ];
+
+    assert.throws(
+        () => compareTrustedExternalBenchmarkResults({ dataset, results: complete, baseline: { dataset, results: [] } }),
+        /baseline results must be a non-empty array/
+    );
+    assert.throws(
+        () => compareTrustedExternalBenchmarkResults({
+            dataset,
+            results: complete,
+            baseline: { dataset, results: [{ ...complete[0], contentSha256: null }, complete[1]] }
+        }),
+        /baseline result contentSha256/
+    );
+    assert.throws(
+        () => compareTrustedExternalBenchmarkResults({
+            dataset,
+            results: complete,
+            baseline: { dataset, results: [complete[0], { ...complete[1], contentSha256: SHA_A }] }
+        }),
+        /duplicate contentSha256/
+    );
+    assert.throws(
+        () => compareTrustedExternalBenchmarkResults({
+            dataset,
+            results: complete,
+            baseline: { dataset, results: [complete[0]] }
+        }),
+        /content SHA set mismatch/
+    );
+});
+
+test('baseline comparison rejects missing trusted identity and forged content-set identity', () => {
+    const dataset = createTrustedDataset();
+    const results = [
+        { fileName: 'a.png', contentSha256: SHA_A, classification: { status: 'pass', includedInMetrics: true } },
+        { fileName: 'b.png', contentSha256: SHA_B, classification: { status: 'pass', includedInMetrics: true } }
+    ];
+    const baseline = { dataset, results };
+
+    for (const field of ['datasetId', 'labelManifestSha256', 'contentSetSha256']) {
+        assert.throws(
+            () => compareTrustedExternalBenchmarkResults({
+                dataset: createTrustedDataset({ [field]: '' }),
+                results,
+                baseline
+            }),
+            new RegExp(field)
+        );
+    }
+    assert.throws(
+        () => compareTrustedExternalBenchmarkResults({
+            dataset: createTrustedDataset({ contentSetSha256: 'd'.repeat(64) }),
+            results,
+            baseline: {
+                dataset: createTrustedDataset({ contentSetSha256: 'd'.repeat(64) }),
+                results
+            }
+        }),
+        /contentSetSha256 does not match results/
     );
 });

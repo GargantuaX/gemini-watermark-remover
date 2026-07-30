@@ -26,7 +26,13 @@ const REVIEW_LABEL_HEIGHT = 72;
 const REVIEW_COLUMNS = 4;
 const REVIEW_ROWS_PER_SHEET = 5;
 
-function parseArgs(argv) {
+function takeRequiredValue(args, option) {
+    const value = args.shift();
+    if (value == null || value.startsWith('--')) throw new Error(`${option} requires a value`);
+    return value;
+}
+
+export function parseExternalBenchmarkReviewArgs(argv) {
     const parsed = {
         reportPath: DEFAULT_REPORT_PATH,
         outputDir: DEFAULT_OUTPUT_DIR,
@@ -39,17 +45,17 @@ function parseArgs(argv) {
     while (args.length > 0) {
         const arg = args.shift();
         if (arg === '--report') {
-            parsed.reportPath = path.resolve(args.shift() || parsed.reportPath);
+            parsed.reportPath = path.resolve(takeRequiredValue(args, arg));
         } else if (arg === '--out-dir') {
-            parsed.outputDir = path.resolve(args.shift() || parsed.outputDir);
+            parsed.outputDir = path.resolve(takeRequiredValue(args, arg));
         } else if (arg === '--sample-root') {
-            parsed.sampleRoot = path.resolve(args.shift() || '.');
+            parsed.sampleRoot = path.resolve(takeRequiredValue(args, arg));
         } else if (arg === '--all-unique-content') {
             parsed.allUniqueContent = true;
         } else if (arg === '--label-template') {
-            const value = args.shift();
-            if (!value) throw new Error('--label-template requires a path');
-            parsed.labelTemplatePath = path.resolve(value);
+            parsed.labelTemplatePath = path.resolve(takeRequiredValue(args, arg));
+        } else {
+            throw new Error(`unknown argument: ${arg}`);
         }
     }
 
@@ -579,7 +585,7 @@ async function renderAllUniqueContentReview({ report, indexedCases, outputDir, r
 }
 
 async function main() {
-    const args = parseArgs(process.argv.slice(2));
+    const args = parseExternalBenchmarkReviewArgs(process.argv.slice(2));
     const report = JSON.parse(stripBom(await readFile(args.reportPath, 'utf8')));
     const sampleRoot = args.sampleRoot ?? report.sampleRoot;
     if (!sampleRoot) throw new Error('sampleRoot is required');

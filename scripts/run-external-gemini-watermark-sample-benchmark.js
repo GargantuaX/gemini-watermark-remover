@@ -276,12 +276,7 @@ function anchorKey(anchor) {
 
 async function loadBaseline(baselinePath) {
     if (!baselinePath) return null;
-    try {
-        return JSON.parse(stripBom(await readFile(baselinePath, 'utf8')));
-    } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
-        return null;
-    }
+    return JSON.parse(stripBom(await readFile(baselinePath, 'utf8')));
 }
 
 export async function benchmarkExternalSamples({
@@ -361,7 +356,11 @@ export async function benchmarkExternalSamples({
             expectedAnchor: item.expectedAnchor,
             note: item.note,
             group: item.group,
-            expectedGemini: true,
+            expectedGemini: item.label === 'watermarked'
+                ? true
+                : item.label === 'clean'
+                    ? false
+                    : null,
             width: imageData.width,
             height: imageData.height,
             pixelsChanged: imageDataPixelsChanged(originalImageData, processed.imageData),
@@ -416,7 +415,12 @@ export async function benchmarkExternalSamples({
         baseline
     });
     const failures = results
-        .filter((record) => record.classification.status === 'fail');
+        .filter((record) => record.classification.status === 'fail')
+        .map((record) => ({
+            ...record,
+            bucket: record.classification.bucket,
+            anchor: record.actualAnchor
+        }));
 
     return {
         generatedAt: new Date().toISOString(),

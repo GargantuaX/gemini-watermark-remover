@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import sharp from 'sharp';
@@ -13,6 +14,9 @@ import {
     renderExternalBenchmarkMarkdown,
     renderExternalBenchmarkResultsCsv
 } from '../../scripts/run-external-gemini-watermark-sample-benchmark.js';
+import { selectExternalBenchmarkReviewRecords } from '../../scripts/render-strong-located-review-sheet.js';
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 test('runner requires exactly one label source', () => {
     assert.throws(() => parseExternalBenchmarkArgs([]), /exactly one of --labels or --assume-watermarked/);
@@ -110,5 +114,85 @@ test('CLI marks assumed-watermarked output as diagnostic-only', async () => {
         '--failures-csv', path.join(dir, 'failures.csv')
     ], { cwd: path.resolve('.'), encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(await readFile(output, 'utf8')).dataset.trusted, false);
+    const report = JSON.parse(await readFile(output, 'utf8'));
+    assert.equal(report.dataset.trusted, false);
+    assert.equal(report.comparison.status, 'not-requested');
+    assert.equal(report.summary.buckets['missed-detection'], 1);
+    assert.equal(report.failures[0].bucket, report.failures[0].classification.bucket);
+    assert.deepEqual(report.failures[0].anchor, report.failures[0].actualAnchor);
+    assert.equal(
+        selectExternalBenchmarkReviewRecords(report).length,
+        report.summary.buckets['missed-detection']
+    );
+});
+
+test('an explicitly requested missing baseline fails instead of becoming not-requested', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'gwr-runner-missing-baseline-'));
+    await sharp({
+        create: {
+            width: 1,
+            height: 1,
+            channels: 4,
+            background: '#ffffff'
+        }
+    }).png().toFile(path.join(dir, 'one.png'));
+    const output = path.join(dir, 'report.json');
+    const result = spawnSync(process.execPath, [
+        'scripts/run-external-gemini-watermark-sample-benchmark.js',
+        '--sample-root', dir,
+        '--assume-watermarked',
+        '--baseline', path.join(dir, 'missing-baseline.json'),
+        '--output', output,
+        '--markdown', path.join(dir, 'report.md'),
+        '--results-csv', path.join(dir, 'results.csv'),
+        '--failures-csv', path.join(dir, 'failures.csv')
+    ], { cwd: path.resolve('.'), encoding: 'utf8' });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /ENOENT|no such file/i);
+    assert.equal(existsSync(output), false);
+});
+
+test('trusted runner derives expectedGemini from each human label', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'gwr-runner-label-expectations-'));
+    const fixtures = [
+        ['watermarked.png', '#ff0000', 'watermarked'],
+        ['clean.png', '#00ff00', 'clean'],
+        ['ambiguous.png', '#0000ff', 'ambiguous'],
+        ['unlabeled.png', '#ffff00', null]
+    ];
+    const samples = {};
+    for (const [fileName, background, label] of fixtures) {
+        const filePath = path.join(dir, fileName);
+        await sharp({
+            create: { width: 1, height: 1, channels: 4, background }
+        }).png().toFile(filePath);
+        if (label) {
+            samples[fileName] = {
+                sha256: sha256(await readFile(filePath)),
+                label,
+                reviewConfidence: 'high'
+            };
+        }
+    }
+    const manifestPath = path.join(dir, 'labels.json');
+    await writeFile(manifestPath, JSON.stringify({ version: 1, datasetId: 'fixture-labels', samples }));
+    const output = path.join(dir, 'report.json');
+    const result = spawnSync(process.execPath, [
+        'scripts/run-external-gemini-watermark-sample-benchmark.js',
+        '--sample-root', dir,
+        '--labels', manifestPath,
+        '--output', output,
+        '--markdown', path.join(dir, 'report.md'),
+        '--results-csv', path.join(dir, 'results.csv'),
+        '--failures-csv', path.join(dir, 'failures.csv')
+    ], { cwd: path.resolve('.'), encoding: 'utf8' });
+
+    assert.equal(result.status, 0, result.stderr);
+    const byName = new Map(JSON.parse(await readFile(output, 'utf8')).results
+        .map((record) => [record.fileName, record.expectedGemini]));
+    assert.equal(byName.get('watermarked.png'), true);
+    assert.equal(byName.get('clean.png'), false);
+    assert.equal(byName.get('ambiguous.png'), null);
+    assert.equal(byName.get('unlabeled.png'), null);
 });

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { classifyBenchmarkQualityFailure } from './sample-benchmark.js';
 
 const CONSERVATIVE_CANONICAL_96_MAX_RESIDUAL = 0.35;
@@ -7,6 +9,9 @@ const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_SPATIAL = 0.55;
 const CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_GRADIENT = 0.2;
 const DATASET_IDENTITY_FIELDS = ['datasetId', 'labelManifestSha256', 'contentSetSha256'];
 const RUNTIME_LABELS = new Set(['watermarked', 'clean', 'ambiguous', 'unlabeled']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 function normalizeExternalBenchmarkLabel(label) {
     if (label == null) return 'unlabeled';
@@ -178,7 +183,9 @@ function summarizeDiagnostics(results, successRate) {
         incrementBucket(summary.byGroup, record.group ?? 'null', status);
         incrementBucket(summary.byDecisionTier, record.decisionTier ?? 'null', status);
         incrementBucket(summary.bySource, record.source || 'null', status);
-        incrementBucket(summary.byAnchor, anchorKey(record.actualAnchor), status);
+        if (record.label === 'watermarked' && status.includedInMetrics === true) {
+            incrementBucket(summary.byAnchor, anchorKey(record.actualAnchor), status);
+        }
         if (record.contourResidualShadow?.status === 'measured') {
             summary.contourResidualShadow.measuredCount++;
             if (record.contourResidualShadow.geometrySource === 'review-fallback') {
@@ -256,21 +263,67 @@ export function summarizeTrustedExternalBenchmarkResults(results) {
 
 export function compareTrustedExternalBenchmarkResults({ dataset, results, baseline }) {
     if (!baseline) return { status: 'not-requested', newlyPassing: [], newlyFailing: [] };
-    if (dataset.trusted !== true || baseline.dataset?.trusted !== true) {
+    if (
+        dataset?.trusted !== true ||
+        dataset?.mode !== 'trusted-labels' ||
+        baseline.dataset?.trusted !== true ||
+        baseline.dataset?.mode !== 'trusted-labels'
+    ) {
         throw new Error('baseline comparison requires trusted-labels reports');
+    }
+    for (const [name, identity] of [['current', dataset], ['baseline', baseline.dataset]]) {
+        if (typeof identity.datasetId !== 'string' || !identity.datasetId.trim()) {
+            throw new Error(`${name} dataset datasetId is required`);
+        }
+        for (const field of ['labelManifestSha256', 'contentSetSha256']) {
+            if (!SHA256_PATTERN.test(identity[field] ?? '')) {
+                throw new Error(`${name} dataset ${field} must be a SHA-256`);
+            }
+        }
     }
     for (const field of DATASET_IDENTITY_FIELDS) {
         if (dataset[field] !== baseline.dataset[field]) {
             throw new Error(`baseline dataset ${field} mismatch`);
         }
     }
-    const previous = new Map(baseline.results
-        .filter((record) => record.classification?.includedInMetrics === true)
-        .map((record) => [record.contentSha256, record.classification.status]));
+
+    const indexResults = (records, name) => {
+        if (!Array.isArray(records) || records.length === 0) {
+            throw new Error(`${name} results must be a non-empty array`);
+        }
+        const indexed = new Map();
+        for (const record of records) {
+            if (!SHA256_PATTERN.test(record?.contentSha256 ?? '')) {
+                throw new Error(`${name} result contentSha256 must be a SHA-256`);
+            }
+            const key = record.contentSha256.toLowerCase();
+            if (indexed.has(key)) throw new Error(`${name} results contain duplicate contentSha256: ${key}`);
+            indexed.set(key, record);
+        }
+        return indexed;
+    };
+    const currentBySha = indexResults(results, 'current');
+    const baselineBySha = indexResults(baseline.results, 'baseline');
+    if (
+        currentBySha.size !== baselineBySha.size ||
+        [...currentBySha.keys()].some((key) => !baselineBySha.has(key))
+    ) {
+        throw new Error('baseline/current content SHA set mismatch');
+    }
+    for (const [name, identity, indexed] of [
+        ['current', dataset, currentBySha],
+        ['baseline', baseline.dataset, baselineBySha]
+    ]) {
+        const recomputed = sha256([...indexed.keys()].sort().join('\n'));
+        if (identity.contentSetSha256.toLowerCase() !== recomputed) {
+            throw new Error(`${name} dataset contentSetSha256 does not match results`);
+        }
+    }
+
     const newlyPassing = [];
     const newlyFailing = [];
     for (const record of results.filter((item) => item.classification.includedInMetrics === true)) {
-        const before = previous.get(record.contentSha256);
+        const before = baselineBySha.get(record.contentSha256.toLowerCase())?.classification?.status;
         if (before === 'fail' && record.classification.status === 'pass') newlyPassing.push(record.fileName);
         if (before === 'pass' && record.classification.status === 'fail') newlyFailing.push(record.fileName);
     }
