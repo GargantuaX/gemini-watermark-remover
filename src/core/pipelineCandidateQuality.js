@@ -7,6 +7,10 @@ import {
     scoreRegion
 } from './restorationMetrics.js';
 import { getEmbeddedAlphaMap } from './embeddedAlphaMaps.js';
+import {
+    buildPreviewNeighborhoodPrior,
+    measurePreviewBoundaryMetrics
+} from './previewAlphaCalibration.js';
 import { compareRankingKey } from './watermarkScoring.js';
 
 export const FINAL_EVIDENCE_WEIGHT = 0.35;
@@ -30,6 +34,25 @@ const DARK_SUPPORT_RESOLUTION_MAX_ABS_SPATIAL = 0.18;
 const DARK_SUPPORT_RESOLUTION_MAX_GRADIENT = 0.18;
 const DARK_SUPPORT_RESOLUTION_MAX_NEWLY_CLIPPED_RATIO = 0.25;
 const SEVERE_DARK_FLAT_TEXTURE_WARNING_THRESHOLD = 1.5;
+const INDEPENDENT_DARK_SUPPORT_SIZE = 96;
+const INDEPENDENT_DARK_SUPPORT_SCRATCH_PAD = 12;
+const INDEPENDENT_DARK_SUPPORT_MIN_ORIGINAL_SPATIAL = 0.95;
+const INDEPENDENT_DARK_SUPPORT_MIN_ORIGINAL_GRADIENT = 0.9;
+const INDEPENDENT_DARK_SUPPORT_MIN_ORIGINAL_NEAR_BLACK = 0.1;
+const INDEPENDENT_DARK_SUPPORT_MIN_CANDIDATE_NEAR_BLACK = 0.25;
+const INDEPENDENT_DARK_SUPPORT_MAX_OPPOSITE_HALO_LUMINANCE = 1;
+const INDEPENDENT_DARK_SUPPORT_MAX_OUTSIDE_ALPHA_CLIP_RATIO = 0.03;
+const INDEPENDENT_DARK_SUPPORT_MIN_STRONG_ALPHA_CLIP_RATIO = 0.8;
+const INDEPENDENT_DARK_SUPPORT_ALPHA_MIN = 0.05;
+const INDEPENDENT_DARK_SUPPORT_ALPHA_STRONG_MIN = 0.2;
+const INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_MEAN_LUMINANCE = 8;
+const INDEPENDENT_DARK_SUPPORT_MAX_CANDIDATE_MEAN_LUMINANCE = 8;
+const INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_MEAN_DELTA = 1.5;
+const INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_MAE = 2.25;
+const INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_WEIGHTED_MAE = 3.5;
+const INDEPENDENT_DARK_SUPPORT_MAX_BOUNDARY_SCORE = 0.35;
+const INDEPENDENT_DARK_SUPPORT_PRIOR_RADII = Object.freeze([4, 12]);
+const INDEPENDENT_DARK_SUPPORT_RELAXATION_PASSES = 0;
 
 function clamp01(value) {
     if (!Number.isFinite(value)) return 0;
@@ -64,6 +87,260 @@ function resolveReferenceAlphaMap(
     return haveEqualAlphaValues(referenceAlphaMap, selectedAlphaMap)
         ? null
         : referenceAlphaMap;
+}
+
+function extractCandidateQualityScratch(imageData, position) {
+    const x = Math.max(0, position.x - INDEPENDENT_DARK_SUPPORT_SCRATCH_PAD);
+    const y = Math.max(0, position.y - INDEPENDENT_DARK_SUPPORT_SCRATCH_PAD);
+    const right = Math.min(
+        imageData.width,
+        position.x + position.width + INDEPENDENT_DARK_SUPPORT_SCRATCH_PAD
+    );
+    const bottom = Math.min(
+        imageData.height,
+        position.y + position.height + INDEPENDENT_DARK_SUPPORT_SCRATCH_PAD
+    );
+    const scratch = {
+        width: right - x,
+        height: bottom - y,
+        data: new Uint8ClampedArray((right - x) * (bottom - y) * 4)
+    };
+    for (let row = 0; row < scratch.height; row++) {
+        const sourceStart = ((y + row) * imageData.width + x) * 4;
+        const sourceEnd = sourceStart + scratch.width * 4;
+        scratch.data.set(
+            imageData.data.subarray(sourceStart, sourceEnd),
+            row * scratch.width * 4
+        );
+    }
+    return {
+        imageData: scratch,
+        position: {
+            x: position.x - x,
+            y: position.y - y,
+            width: position.width,
+            height: position.height
+        }
+    };
+}
+
+function measureIndependentDarkSupportClipping({
+    originalImageData,
+    candidateImageData,
+    alphaMap,
+    position
+}) {
+    let newlyClippedCount = 0;
+    let outsideAlphaSupportCount = 0;
+    let strongAlphaSupportCount = 0;
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const localIndex = row * position.width + col;
+            const pixelIndex = (
+                (position.y + row) * originalImageData.width +
+                position.x +
+                col
+            ) * 4;
+            const newlyClipped = [0, 1, 2].some((channel) => (
+                candidateImageData.data[pixelIndex + channel] === 0 &&
+                originalImageData.data[pixelIndex + channel] > 5
+            ));
+            if (!newlyClipped) continue;
+
+            newlyClippedCount++;
+            const alpha = Math.abs(alphaMap[localIndex]);
+            if (alpha < INDEPENDENT_DARK_SUPPORT_ALPHA_MIN) {
+                outsideAlphaSupportCount++;
+            }
+            if (alpha >= INDEPENDENT_DARK_SUPPORT_ALPHA_STRONG_MIN) {
+                strongAlphaSupportCount++;
+            }
+        }
+    }
+    return {
+        outsideAlphaSupportRatio: newlyClippedCount > 0
+            ? outsideAlphaSupportCount / newlyClippedCount
+            : 0,
+        strongAlphaSupportRatio: newlyClippedCount > 0
+            ? strongAlphaSupportCount / newlyClippedCount
+            : 1
+    };
+}
+
+function measureIndependentDarkSupportPrior({
+    candidateImageData,
+    priorImageData,
+    alphaMap,
+    position
+}) {
+    let absoluteDelta = 0;
+    let weightedAbsoluteDelta = 0;
+    let alphaWeight = 0;
+    let candidateLuminance = 0;
+    let priorLuminance = 0;
+    let channelCount = 0;
+    let pixelCount = 0;
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const localIndex = row * position.width + col;
+            const alpha = Math.abs(alphaMap[localIndex]);
+            const pixelIndex = (
+                (position.y + row) * candidateImageData.width +
+                position.x +
+                col
+            ) * 4;
+            for (let channel = 0; channel < 3; channel++) {
+                const delta = Math.abs(
+                    candidateImageData.data[pixelIndex + channel] -
+                    priorImageData.data[pixelIndex + channel]
+                );
+                absoluteDelta += delta;
+                weightedAbsoluteDelta += delta * alpha;
+                channelCount++;
+            }
+            candidateLuminance +=
+                0.2126 * candidateImageData.data[pixelIndex] +
+                0.7152 * candidateImageData.data[pixelIndex + 1] +
+                0.0722 * candidateImageData.data[pixelIndex + 2];
+            priorLuminance +=
+                0.2126 * priorImageData.data[pixelIndex] +
+                0.7152 * priorImageData.data[pixelIndex + 1] +
+                0.0722 * priorImageData.data[pixelIndex + 2];
+            alphaWeight += alpha;
+            pixelCount++;
+        }
+    }
+    const candidateMeanLuminance = candidateLuminance / Math.max(1, pixelCount);
+    const priorMeanLuminance = priorLuminance / Math.max(1, pixelCount);
+    return {
+        meanAbsoluteDelta: absoluteDelta / Math.max(1, channelCount),
+        weightedMeanAbsoluteDelta:
+            weightedAbsoluteDelta / Math.max(1e-8, alphaWeight * 3),
+        candidateMeanLuminance,
+        priorMeanLuminance,
+        meanLuminanceDelta: Math.abs(candidateMeanLuminance - priorMeanLuminance)
+    };
+}
+
+function assessIndependentDarkBackgroundSupportConvergence({
+    originalImageData,
+    candidateImageData,
+    hypothesis,
+    position,
+    alphaMap,
+    alphaGain,
+    original,
+    final,
+    visibility,
+    artifacts,
+    originalNearBlackRatio,
+    candidateNearBlackRatio,
+    rawDamageWarning
+}) {
+    const trial = hypothesis?.trial;
+    const source = trial?.source;
+    const catalogAlphaMap = getEmbeddedAlphaMap('96-20260520');
+    if (
+        rawDamageWarning !== true ||
+        source !== 'standard' ||
+        position.width !== INDEPENDENT_DARK_SUPPORT_SIZE ||
+        position.height !== INDEPENDENT_DARK_SUPPORT_SIZE ||
+        alphaGain !== 1 ||
+        !haveEqualAlphaValues(alphaMap, catalogAlphaMap) ||
+        original.spatialScore < INDEPENDENT_DARK_SUPPORT_MIN_ORIGINAL_SPATIAL ||
+        original.gradientScore < INDEPENDENT_DARK_SUPPORT_MIN_ORIGINAL_GRADIENT ||
+        visibility?.visible !== false ||
+        Math.abs(final.spatialScore) > DARK_SUPPORT_RESOLUTION_MAX_ABS_SPATIAL ||
+        final.gradientScore > DARK_SUPPORT_RESOLUTION_MAX_GRADIENT ||
+        originalNearBlackRatio < INDEPENDENT_DARK_SUPPORT_MIN_ORIGINAL_NEAR_BLACK ||
+        candidateNearBlackRatio < INDEPENDENT_DARK_SUPPORT_MIN_CANDIDATE_NEAR_BLACK ||
+        Number(artifacts?.newlyClippedRatio ?? Infinity) >
+            DARK_SUPPORT_RESOLUTION_MAX_NEWLY_CLIPPED_RATIO ||
+        Number(artifacts?.oppositeDirectionHaloLum ?? Infinity) >
+            INDEPENDENT_DARK_SUPPORT_MAX_OPPOSITE_HALO_LUMINANCE
+    ) {
+        return null;
+    }
+
+    const originalScratch = extractCandidateQualityScratch(
+        originalImageData,
+        position
+    );
+    const candidateScratch = extractCandidateQualityScratch(
+        candidateImageData,
+        position
+    );
+    const priorMetrics = INDEPENDENT_DARK_SUPPORT_PRIOR_RADII.map((radius) => {
+        const priorImageData = buildPreviewNeighborhoodPrior({
+            previewImageData: originalScratch.imageData,
+            position: originalScratch.position,
+            radius,
+            relaxationPasses: INDEPENDENT_DARK_SUPPORT_RELAXATION_PASSES
+        });
+        return {
+            radius,
+            ...measureIndependentDarkSupportPrior({
+                candidateImageData: candidateScratch.imageData,
+                priorImageData,
+                alphaMap,
+                position: candidateScratch.position
+            })
+        };
+    });
+    const clipping = measureIndependentDarkSupportClipping({
+        originalImageData: originalScratch.imageData,
+        candidateImageData: candidateScratch.imageData,
+        alphaMap,
+        position: originalScratch.position
+    });
+    const boundary = measurePreviewBoundaryMetrics(
+        candidateScratch.imageData,
+        originalScratch.imageData,
+        originalScratch.position
+    );
+    const maximumPriorMeanLuminance = Math.max(
+        ...priorMetrics.map((item) => item.priorMeanLuminance)
+    );
+    const maximumCandidateMeanLuminance = Math.max(
+        ...priorMetrics.map((item) => item.candidateMeanLuminance)
+    );
+    const maximumPriorMeanDelta = Math.max(
+        ...priorMetrics.map((item) => item.meanLuminanceDelta)
+    );
+    const maximumPriorMae = Math.max(
+        ...priorMetrics.map((item) => item.meanAbsoluteDelta)
+    );
+    const maximumPriorWeightedMae = Math.max(
+        ...priorMetrics.map((item) => item.weightedMeanAbsoluteDelta)
+    );
+    const accepted = Boolean(
+        clipping.outsideAlphaSupportRatio <=
+            INDEPENDENT_DARK_SUPPORT_MAX_OUTSIDE_ALPHA_CLIP_RATIO &&
+        clipping.strongAlphaSupportRatio >=
+            INDEPENDENT_DARK_SUPPORT_MIN_STRONG_ALPHA_CLIP_RATIO &&
+        maximumPriorMeanLuminance <=
+            INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_MEAN_LUMINANCE &&
+        maximumCandidateMeanLuminance <=
+            INDEPENDENT_DARK_SUPPORT_MAX_CANDIDATE_MEAN_LUMINANCE &&
+        maximumPriorMeanDelta <= INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_MEAN_DELTA &&
+        maximumPriorMae <= INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_MAE &&
+        maximumPriorWeightedMae <=
+            INDEPENDENT_DARK_SUPPORT_MAX_PRIOR_WEIGHTED_MAE &&
+        boundary.normalizedScore <= INDEPENDENT_DARK_SUPPORT_MAX_BOUNDARY_SCORE
+    );
+    return {
+        accepted,
+        source: 'independent-standard-96-neighborhood-prior',
+        textureHardRejectResolved: accepted,
+        priorRadii: [...INDEPENDENT_DARK_SUPPORT_PRIOR_RADII],
+        maximumPriorMeanLuminance,
+        maximumCandidateMeanLuminance,
+        maximumPriorMeanDelta,
+        maximumPriorMae,
+        maximumPriorWeightedMae,
+        boundaryScore: boundary.normalizedScore,
+        clipping
+    };
 }
 
 export function classifyCandidateQuality({
@@ -196,7 +473,7 @@ export function createCandidateQualitySignals({
         texture: clamp01((texture?.texturePenalty ?? 0) / 1),
         clipped: clamp01((artifacts?.newlyClippedRatio ?? 0) / 0.02)
     };
-    const damageLoss =
+    const rawDamageLoss =
         damageComponents.nearBlack * 0.25 +
         damageComponents.nearWhite * 0.25 +
         damageComponents.texture * 0.25 +
@@ -221,10 +498,31 @@ export function createCandidateQualitySignals({
         damageComponents.clipped >= 1 ||
         textureWarningCorroborated ||
         severeDarkFlatTextureWarning;
-    const darkBackgroundSupportConvergence =
+    const explicitDarkBackgroundSupportConvergence =
         finalCandidate?.darkBackgroundSupportConvergence?.accepted === true
             ? finalCandidate.darkBackgroundSupportConvergence
             : null;
+    const independentDarkBackgroundSupportConvergence =
+        explicitDarkBackgroundSupportConvergence
+            ? null
+            : assessIndependentDarkBackgroundSupportConvergence({
+                originalImageData,
+                candidateImageData,
+                hypothesis,
+                position,
+                alphaMap,
+                alphaGain,
+                original,
+                final,
+                visibility,
+                artifacts,
+                originalNearBlackRatio,
+                candidateNearBlackRatio,
+                rawDamageWarning
+            });
+    const darkBackgroundSupportConvergence =
+        explicitDarkBackgroundSupportConvergence ??
+        independentDarkBackgroundSupportConvergence;
     const textureHardRejectResolved =
         darkBackgroundSupportConvergence?.textureHardRejectResolved === true;
     const darkBackgroundSupportResolved = Boolean(
@@ -243,6 +541,7 @@ export function createCandidateQualitySignals({
     );
     const damageWarning = rawDamageWarning &&
         !darkBackgroundSupportResolved;
+    const damageLoss = darkBackgroundSupportResolved ? 0 : rawDamageLoss;
     const damageRiskResolution = darkBackgroundSupportResolved
         ? 'dark-background-support-converged'
         : null;
@@ -255,6 +554,7 @@ export function createCandidateQualitySignals({
         evidenceLoss: 1 - evidence,
         residualLoss,
         damageLoss,
+        rawDamageLoss,
         residualVisible,
         damageWarning,
         rawDamageWarning,
@@ -302,6 +602,12 @@ function dominates(left, right) {
 }
 
 function hasCatastrophicBlock(signals = {}) {
+    if (
+        signals.damageWarning === false &&
+        signals.darkBackgroundSupportConvergence?.accepted === true
+    ) {
+        return false;
+    }
     const damage = signals.damageComponents ?? {};
     return signals.texture?.hardReject === true &&
         damage.clipped >= 1 &&

@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 
 import * as pipelineCandidateQuality from '../../src/core/pipelineCandidateQuality.js';
+import { removeWatermark } from '../../src/core/blendModes.js';
+import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
+import { decodeImageDataInNode } from '../../scripts/sample-benchmark.js';
 
 import {
     classifyCandidateQuality,
@@ -582,6 +586,93 @@ test('createCandidateQualitySignals should resolve support-confined dark clippin
     assert.equal(resolvedSignals.qualityStatus, 'clean');
 });
 
+test('createCandidateQualitySignals should independently verify a clean 96px standard restoration on a dark local gradient', async () => {
+    const originalImageData = await decodeImageDataInNode(path.resolve(
+        'tests/fixtures/dark-background-standard-support-96.png'
+    ));
+    const candidateImageData = {
+        ...originalImageData,
+        data: new Uint8ClampedArray(originalImageData.data)
+    };
+    const position = { x: 48, y: 48, width: 96, height: 96 };
+    const alphaMap = getEmbeddedAlphaMap('96-20260520');
+    removeWatermark(candidateImageData, alphaMap, position, { alphaGain: 1 });
+
+    const signals = createCandidateQualitySignals({
+        originalImageData,
+        candidateImageData,
+        hypothesis: {
+            id: 'dark-background-standard-96',
+            family: 'standard',
+            config: {
+                logoSize: 96,
+                marginRight: 48,
+                marginBottom: 48,
+                alphaVariant: '20260520'
+            },
+            trial: {
+                source: 'standard',
+                position,
+                alphaMap,
+                alphaGain: 1
+            }
+        },
+        finalCandidate: {
+            position,
+            alphaMap,
+            alphaGain: 1
+        }
+    });
+
+    assert.equal(signals.rawDamageWarning, true);
+    assert.equal(signals.damageWarning, false);
+    assert.equal(
+        signals.damageRiskResolution,
+        'dark-background-support-converged'
+    );
+    assert.equal(
+        signals.darkBackgroundSupportConvergence?.accepted,
+        true,
+        JSON.stringify(signals.darkBackgroundSupportConvergence)
+    );
+    assert.equal(signals.qualityStatus, 'clean');
+});
+
+test('createCandidateQualitySignals should reject dark support convergence when a 96px standard restoration leaves issue101 residuals', async () => {
+    const originalImageData = await decodeImageDataInNode(path.resolve(
+        'tests/fixtures/issue101-outline-dark-landscape.png'
+    ));
+    const candidateImageData = {
+        ...originalImageData,
+        data: new Uint8ClampedArray(originalImageData.data)
+    };
+    const position = { x: 48, y: 96, width: 96, height: 96 };
+    const alphaMap = getEmbeddedAlphaMap('96-20260520');
+    removeWatermark(candidateImageData, alphaMap, position, { alphaGain: 1 });
+
+    const signals = createCandidateQualitySignals({
+        originalImageData,
+        candidateImageData,
+        hypothesis: {
+            id: 'issue101-standard-control',
+            family: 'standard',
+            config: { logoSize: 96, alphaVariant: '20260520' },
+            trial: {
+                source: 'standard',
+                position,
+                alphaMap,
+                alphaGain: 1
+            }
+        },
+        finalCandidate: { position, alphaMap, alphaGain: 1 }
+    });
+
+    assert.equal(signals.darkBackgroundSupportConvergence, null);
+    assert.equal(signals.residualVisible, true);
+    assert.equal(signals.damageWarning, true);
+    assert.equal(signals.qualityStatus, 'mixed');
+});
+
 test('createCandidateQualitySignals should not reward spatial evidence with the wrong polarity', () => {
     const originalImageData = createImageData(16, 16, 180);
     const candidateImageData = createImageData(16, 16, 180);
@@ -791,6 +882,36 @@ test('rankCompletedCandidates should never select a catastrophic clipped black o
     ]);
 
     assert.equal(ranked[0].hypothesis.id, 'ordinary-residual');
+});
+
+test('rankCompletedCandidates should not catastrophically block independently verified dark support convergence', () => {
+    const ranked = rankCompletedCandidates([
+        createCompleted('verified-dark-support', {
+            evidenceLoss: 0,
+            residualLoss: 0.05,
+            damageLoss: 0,
+            rawDamageLoss: 0.75,
+            residualVisible: false,
+            damageWarning: false,
+            damageRiskResolution: 'dark-background-support-converged',
+            darkBackgroundSupportConvergence: { accepted: true },
+            qualityStatus: 'clean',
+            damageComponents: { nearBlack: 1, nearWhite: 0, clipped: 1 },
+            texture: { hardReject: true }
+        }),
+        createCompleted('ordinary-residual', {
+            evidenceLoss: 0.8,
+            residualLoss: 0.8,
+            damageLoss: 0,
+            residualVisible: true,
+            damageWarning: false,
+            qualityStatus: 'visible-residual',
+            damageComponents: { nearBlack: 0, nearWhite: 0, clipped: 0 },
+            texture: { hardReject: false }
+        })
+    ]);
+
+    assert.equal(ranked[0].hypothesis.id, 'verified-dark-support');
 });
 
 test('rankCompletedCandidates should not prefer an empty wrong anchor just because it has zero residual', () => {
