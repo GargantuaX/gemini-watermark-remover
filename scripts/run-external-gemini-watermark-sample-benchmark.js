@@ -7,9 +7,9 @@ import { getEmbeddedAlphaMap } from '../src/core/embeddedAlphaMaps.js';
 import { processWatermarkImageData } from '../src/core/watermarkProcessor.js';
 import { loadLocalEnv } from './local-env.js';
 import {
-    classifyBenchmarkQualityFailure,
     decodeImageDataInNode
 } from './sample-benchmark.js';
+import { classifyExternalBenchmarkCase } from './external-benchmark-evaluation.js';
 import {
     classifyHighPrecisionContourResidual,
     measureMultichannelContourResidual
@@ -18,6 +18,8 @@ import {
     classifyProvisionalLumaInteriorResidual,
     measureAlphaInteriorProjection
 } from './alpha-interior-projection.js';
+
+export { classifyExternalBenchmarkCase } from './external-benchmark-evaluation.js';
 
 loadLocalEnv();
 
@@ -262,58 +264,6 @@ async function listImages(root) {
 
     await visit(root);
     return images.sort((left, right) => left.fileName.localeCompare(right.fileName));
-}
-
-function isConservativeCanonical96Pass(record) {
-    const anchor = record.actualAnchor;
-    const alphaGain = toFiniteNumber(record.alphaGain);
-    const residualScore = toFiniteNumber(record.residualScore);
-    const processedGradientScore = toFiniteNumber(record.processedGradientScore);
-    const originalSpatialScore = toFiniteNumber(record.originalSpatialScore);
-    const originalGradientScore = toFiniteNumber(record.originalGradientScore);
-    const suppressionGain = toFiniteNumber(record.suppressionGain);
-
-    return anchor?.logoSize === 96 &&
-        anchor.marginRight === 64 &&
-        anchor.marginBottom === 64 &&
-        alphaGain !== null &&
-        alphaGain <= 1 &&
-        residualScore !== null &&
-        residualScore <= CONSERVATIVE_CANONICAL_96_MAX_RESIDUAL &&
-        processedGradientScore !== null &&
-        processedGradientScore <= CONSERVATIVE_CANONICAL_96_MAX_GRADIENT &&
-        originalSpatialScore !== null &&
-        originalSpatialScore >= CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_SPATIAL &&
-        originalGradientScore !== null &&
-        originalGradientScore >= CONSERVATIVE_CANONICAL_96_MIN_ORIGINAL_GRADIENT &&
-        suppressionGain !== null &&
-        suppressionGain >= CONSERVATIVE_CANONICAL_96_MIN_SUPPRESSION_GAIN;
-}
-
-export function classifyExternalBenchmarkCase(record) {
-    if (record.applied !== true) {
-        return {
-            status: 'fail',
-            bucket: 'missed-detection'
-        };
-    }
-
-    const qualityFailure = classifyBenchmarkQualityFailure(record, {
-        allowConservativeResidual: isConservativeCanonical96Pass(record)
-    });
-    if (qualityFailure) return qualityFailure;
-
-    if (record.decisionTier === 'insufficient' || record.decisionTier == null) {
-        return {
-            status: 'fail',
-            bucket: 'attribution-mismatch'
-        };
-    }
-
-    return {
-        status: 'pass',
-        bucket: 'pass'
-    };
 }
 
 function anchorKey(anchor) {
