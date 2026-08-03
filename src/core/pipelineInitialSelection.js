@@ -11,6 +11,8 @@ import {
     interpolateAlphaMap
 } from './adaptiveDetector.js';
 import { calculateNearBlackRatio } from './restorationMetrics.js';
+import { resolveGeminiWatermarkSearchCatalogEntries } from './geminiSizeCatalog.js';
+import { measureOutputResidualLocalization } from './outputResidualLocalization.js';
 import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
@@ -51,6 +53,19 @@ const CONFIRMED_V2_MEDIUM_MARGIN = 73;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_SPATIAL = 0.4;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_GRADIENT = 0.5;
 const CONFIRMED_V2_SMALL_PRIOR_MIN_SPATIAL = 0.3;
+const EXACT_48_R96_SOURCE_WITNESS_MIN_PRIMARY = 0.36;
+const EXACT_48_R96_SOURCE_WITNESS_MIN_EDGE_PROMINENCE = 2.5;
+const EXACT_48_R96_SOURCE_WITNESS_MIN_GRADIENT_PERCENTILE = 0.9;
+const EXACT_48_R96_SOURCE_WITNESS_GAIN = 0.6;
+const EXACT_48_R96_SOURCE_WITNESS_REASON =
+    'exact-48-r96-source-witness';
+const EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS = [
+    [-12, 0], [-8, 0], [-4, 0], [4, 0], [8, 0], [12, 0],
+    [0, -12], [0, -8], [0, -4], [0, 4], [0, 8], [0, 12],
+    [-8, -8], [-4, -4], [4, 4], [8, 8],
+    [-8, 8], [-4, 4], [4, -4], [8, -8],
+    [-12, -6], [-6, -12], [6, 12], [12, 6]
+];
 
 // The Allenk V2 renderer and the trusted 768x1376 sample cluster agree on
 // 48px / 73px geometry. Keep it out of the generic catalog because structured
@@ -154,6 +169,103 @@ function createConfirmedV2MediumRescueTrial({
     return trial;
 }
 
+function createExact48R96SourceWitnessRescueTrial({
+    originalImageData,
+    alpha48,
+    config,
+    catalogPriorConfig
+}) {
+    if (!originalImageData || !alpha48) return null;
+
+    const catalogEntry = resolveGeminiWatermarkSearchCatalogEntries(
+        originalImageData.width,
+        originalImageData.height,
+        catalogPriorConfig ?? config
+    ).find((entry) => (
+        entry?.metadata?.family === 'known-current-variant' &&
+        entry.metadata.evidenceGate === 'required' &&
+        entry.config?.logoSize === 48 &&
+        entry.config.marginRight === 96 &&
+        entry.config.marginBottom === 96 &&
+        entry.config.alphaVariant == null
+    ));
+    if (!catalogEntry) return null;
+
+    const sourceTrial = {
+        source: 'standard+catalog',
+        config: catalogEntry.config,
+        position: {
+            x: originalImageData.width - 96 - 48,
+            y: originalImageData.height - 96 - 48,
+            width: 48,
+            height: 48
+        },
+        alphaMap: alpha48,
+        alphaGain: 1,
+        provenance: {
+            catalogVariant: true,
+            catalogFamily: catalogEntry.metadata.family,
+            catalogSourcePriority: catalogEntry.metadata.sourcePriority,
+            catalogEvidenceGate: catalogEntry.metadata.evidenceGate
+        }
+    };
+    const sourceLocalization = measureOutputResidualLocalization({
+        imageData: originalImageData,
+        alphaMap: sourceTrial.alphaMap,
+        position: sourceTrial.position,
+        decoyShifts: EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS
+    });
+    const spatialSignal = Number(sourceLocalization.spatialSignedTarget);
+    const gradientSignal = Number(sourceLocalization.gradientSignedTarget);
+    const primarySignal = Math.max(spatialSignal, gradientSignal);
+    if (
+        !Number.isFinite(spatialSignal) ||
+        spatialSignal <= 0 ||
+        !Number.isFinite(primarySignal) ||
+        primarySignal < EXACT_48_R96_SOURCE_WITNESS_MIN_PRIMARY ||
+        Number(sourceLocalization.twoSidedEdgeProminence) <
+            EXACT_48_R96_SOURCE_WITNESS_MIN_EDGE_PROMINENCE ||
+        Number(sourceLocalization.gradientPercentile) <
+            EXACT_48_R96_SOURCE_WITNESS_MIN_GRADIENT_PERCENTILE
+    ) {
+        return null;
+    }
+
+    const rescueTrial = evaluateRestorationCandidate({
+        originalImageData,
+        alphaMap: sourceTrial.alphaMap,
+        position: sourceTrial.position,
+        source: `${sourceTrial.source ?? 'standard+catalog'}+source-witness-rescue`,
+        config: sourceTrial.config,
+        baselineNearBlackRatio: calculateNearBlackRatio(
+            originalImageData,
+            sourceTrial.position
+        ),
+        alphaGain: EXACT_48_R96_SOURCE_WITNESS_GAIN,
+        provenance: {
+            ...sourceTrial.provenance,
+            sourceWitnessRescue: true,
+            sourceWitnessReason: EXACT_48_R96_SOURCE_WITNESS_REASON,
+            sourceWitnessGate: {
+                primarySignal,
+                spatialSignedTarget: spatialSignal,
+                gradientSignedTarget: gradientSignal,
+                twoSidedEdgeProminence:
+                    sourceLocalization.twoSidedEdgeProminence,
+                gradientPercentile:
+                    sourceLocalization.gradientPercentile
+            }
+        },
+        includeImageData: false
+    });
+    return measurePresenceLocalization(
+        originalImageData,
+        rescueTrial
+    ).repeatedTemplateCollision
+        ? null
+        : rescueTrial;
+}
+
 function isSafeAggressiveFallbackSelection(selection) {
     const trial = selection?.selectedTrial;
     const spatial = Number(trial?.processedSpatialScore);
@@ -169,6 +281,7 @@ function createSelectorRequest(input) {
     return {
         originalImageData: input.originalImageData,
         config: input.config,
+        catalogPriorConfig: input.catalogPriorConfig,
         position: input.position,
         alpha48: input.alpha48,
         alpha96: input.alpha96,
@@ -698,7 +811,16 @@ export function collectInitialWatermarkCandidates(input = {}) {
     const presenceConfirmed = Boolean(
         normalPresenceConfirmed || confirmedV2MediumRescueTrial
     );
-    const bestEffortSelections = presenceConfirmed
+    const exact48R96SourceWitnessRescueTrial = presenceConfirmed
+        ? null
+        : createExact48R96SourceWitnessRescueTrial({
+            originalImageData: input.originalImageData,
+            alpha48: input.alpha48,
+            config: input.config,
+            catalogPriorConfig: input.catalogPriorConfig
+        });
+    const bestEffortSelections = presenceConfirmed ||
+        exact48R96SourceWitnessRescueTrial
         ? []
         : [fixedSelection, automaticSelection]
             .filter((selection, index, values) => (
@@ -708,8 +830,10 @@ export function collectInitialWatermarkCandidates(input = {}) {
                     input.originalImageData
                 )
             ));
-    const bestEffortFallback = !presenceConfirmed &&
-        bestEffortSelections.length > 0;
+    const bestEffortFallback = !presenceConfirmed && Boolean(
+        exact48R96SourceWitnessRescueTrial ||
+        bestEffortSelections.length > 0
+    );
     if (!presenceConfirmed && !bestEffortFallback) {
         return {
             hypotheses: [],
@@ -806,11 +930,13 @@ export function collectInitialWatermarkCandidates(input = {}) {
         ));
     const trials = (
         bestEffortFallback
-            ? [
+            ? exact48R96SourceWitnessRescueTrial
+                ? [exact48R96SourceWitnessRescueTrial]
+                : [
                 includeFixedSelection ? fixedSelection?.selectedTrial : null,
                 includeAutomaticSelection ? automaticSelection?.selectedTrial : null,
                 ...conservativeTrials
-            ]
+                ]
             : [
                 ...(fixedSelection?.candidatePool ?? []),
                 fixedSelection?.selectedTrial,
@@ -869,12 +995,24 @@ export function collectInitialWatermarkCandidates(input = {}) {
             : null,
         1004
     );
+    const exact48R96SourceWitnessRescueHypothesis =
+        createCandidateHypothesis(
+            keepNonRepeatedTrial(exact48R96SourceWitnessRescueTrial) &&
+                isGeometryCompatibleWithLock(
+                    exact48R96SourceWitnessRescueTrial,
+                    geometryLockWitness
+                )
+                ? exact48R96SourceWitnessRescueTrial
+                : null,
+            1005
+        );
     const preferredHypotheses = [
         fixedSelectedHypothesis,
         automaticSelectedHypothesis,
         fixedPresenceHypothesis,
         automaticPresenceHypothesis,
-        confirmedV2MediumRescueHypothesis
+        confirmedV2MediumRescueHypothesis,
+        exact48R96SourceWitnessRescueHypothesis
     ].filter((hypothesis, index, values) => (
         hypothesis &&
         values.findIndex((candidate) => sameTrialIdentity(
@@ -890,10 +1028,15 @@ export function collectInitialWatermarkCandidates(input = {}) {
     const hypotheses = [...preferredHypotheses, ...retainedAlternatives]
         .map((hypothesis) => ({
             ...hypothesis,
-            presenceStatus: bestEffortFallback
+            presenceStatus: exact48R96SourceWitnessRescueTrial
+                ? 'source-witness'
+                : bestEffortFallback
                 ? 'selector-only'
                 : 'confirmed',
-            discoveryRole: bestEffortFallback &&
+            discoveryRole:
+                hypothesis.trial?.provenance?.sourceWitnessRescue === true
+                ? 'source-witness-rescue'
+                : bestEffortFallback &&
                 hypothesis.trial?.provenance?.topNConservative !== true
                 ? 'discovered-alternative'
                 : hypothesis.trial?.provenance?.topNConservative === true
@@ -913,7 +1056,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
         hypotheses,
         presenceConfirmed,
         bestEffortFallback,
-        bestEffortReason: bestEffortFallback
+        bestEffortReason: exact48R96SourceWitnessRescueTrial
+            ? EXACT_48_R96_SOURCE_WITNESS_REASON
+            : bestEffortFallback
             ? 'presence-witness-unconfirmed'
             : null,
         fixedSelection,

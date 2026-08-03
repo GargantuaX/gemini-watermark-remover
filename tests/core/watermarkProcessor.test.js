@@ -6,9 +6,16 @@ import { access } from 'node:fs/promises';
 import { calculateAlphaMap } from '../../src/core/alphaMap.js';
 import { removeWatermark } from '../../src/core/blendModes.js';
 import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
-import { processWatermarkImageData } from '../../src/core/watermarkProcessor.js';
+import {
+    processWatermarkImageData,
+    watermarkProcessorTestInternals
+} from '../../src/core/watermarkProcessor.js';
 import { removeWatermarkFromImageDataSync } from '../../src/sdk/image-data.js';
-import { interpolateAlphaMap, warpAlphaMap, computeRegionSpatialCorrelation } from '../../src/core/adaptiveDetector.js';
+import {
+    computeRegionSpatialCorrelation,
+    interpolateAlphaMap,
+    warpAlphaMap
+} from '../../src/core/adaptiveDetector.js';
 import { assessRemovalDiffArtifacts } from '../../src/core/restorationMetrics.js';
 import { loadLocalEnv } from '../../scripts/local-env.js';
 import { decodeImageDataInNode } from '../../scripts/sample-benchmark.js';
@@ -111,6 +118,174 @@ test('processWatermarkImageData should run in Node without asset imports and rec
     assert.equal(result.meta.decisionPath?.detectionCandidate?.config?.logoSize, 48);
     assert.equal(result.meta.decisionPath?.alphaTrial?.alphaGain, result.meta.alphaGain);
     assert.equal(result.meta.decisionPath?.evaluationDecision, 'accepted');
+});
+
+test('processWatermarkImageData should execute an exact48 source-witness trial without post-selection pixel changes', () => {
+    const width = 320;
+    const height = 320;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let offset = 0; offset < data.length; offset += 4) {
+        data[offset] = 72;
+        data[offset + 1] = 72;
+        data[offset + 2] = 72;
+        data[offset + 3] = 255;
+    }
+
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const edgeAlpha = new Float32Array(alpha48.length);
+    for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 48; x++) {
+            const index = y * 48 + x;
+            const center = alpha48[index];
+            const left = x > 0 ? alpha48[index - 1] : center;
+            const right = x < 47 ? alpha48[index + 1] : center;
+            const up = y > 0 ? alpha48[index - 48] : center;
+            const down = y < 47 ? alpha48[index + 48] : center;
+            const edgeStrength = Math.max(
+                Math.abs(center - left),
+                Math.abs(center - right),
+                Math.abs(center - up),
+                Math.abs(center - down)
+            );
+            edgeAlpha[index] = Math.min(1, edgeStrength * 2) * 0.6;
+        }
+    }
+
+    const position = { x: 176, y: 176, width: 48, height: 48 };
+    const watermarkedImageData = { width, height, data };
+    applySyntheticWatermark(watermarkedImageData, edgeAlpha, position, 1);
+    const pipelineInput = {
+        width,
+        height,
+        data: new Uint8ClampedArray(watermarkedImageData.data)
+    };
+    const expectedImageData = {
+        width,
+        height,
+        data: new Uint8ClampedArray(watermarkedImageData.data)
+    };
+    removeWatermark(expectedImageData, alpha48, position, { alphaGain: 0.6 });
+
+    const result = processWatermarkImageData(pipelineInput, {
+        alpha48,
+        alpha96,
+        adaptiveMode: 'never',
+        locatedAggressiveRemoval: false,
+        debugTimings: true,
+        getAlphaMap: (size) => {
+            if (size === 48) return alpha48;
+            if (size === 96) return alpha96;
+            const numericSize = Number(size);
+            return Number.isFinite(numericSize)
+                ? interpolateAlphaMap(alpha96, 96, numericSize)
+                : null;
+        }
+    });
+
+    assert.equal(result.meta.applied, true);
+    assert.deepEqual(result.meta.config, {
+        logoSize: 48,
+        marginRight: 96,
+        marginBottom: 96
+    });
+    assert.deepEqual(result.meta.position, position);
+    assert.equal(result.meta.alphaGain, 0.6);
+    assert.equal(result.meta.source, 'standard+catalog+source-witness-rescue');
+    assert.equal(result.meta.presenceConfirmed, false);
+    assert.equal(result.meta.bestEffort, true);
+    assert.equal(result.meta.bestEffortReason, 'exact-48-r96-source-witness');
+    assert.equal(result.meta.retryRecommended, false);
+    assert.deepEqual(
+        result.meta.decisionPath?.riskFlags,
+        ['unconfirmed-watermark-presence']
+    );
+    assert.deepEqual(result.meta.alphaAdjustmentStages, []);
+    assert.equal(result.debugTimings.generatedCandidateCount, 1);
+    assert.equal(result.debugTimings.executedCandidateCount, 1);
+    assert.deepEqual(result.imageData.data, expectedImageData.data);
+});
+
+test('small-anchor relocation should materialize scratch candidates with full-image visibility cost', () => {
+    const size = 40;
+    const alphaMap = createSyntheticAlphaMap(size);
+    const originalImageData = createPatternImageData(112, 112);
+    const position = {
+        x: 48,
+        y: 48,
+        width: size,
+        height: size
+    };
+    applySyntheticWatermark(originalImageData, alphaMap, position, 1);
+    const geometry =
+        watermarkProcessorTestInternals
+            .createSmallAnchorRelocationGeometry({
+                originalImageData,
+                alphaMap,
+                size,
+                marginRight: 24,
+                marginBottom: 24
+            });
+
+    assert.ok(geometry);
+    assert.deepEqual(geometry.position, position);
+    assert.notDeepEqual(geometry.searchContext.position, position);
+    assert.ok(
+        geometry.searchContext.originalScratch.width <
+            originalImageData.width
+    );
+
+    const scratchCandidate =
+        watermarkProcessorTestInternals
+            .buildSmallAnchorRelocationScratchCandidate({
+                geometry,
+                alphaGain: 1
+            });
+
+    assert.ok(scratchCandidate);
+    assert.equal('residualVisibility' in scratchCandidate, false);
+    assert.equal('cost' in scratchCandidate, false);
+
+    const expectedImageData = {
+        width: originalImageData.width,
+        height: originalImageData.height,
+        data: new Uint8ClampedArray(originalImageData.data)
+    };
+    removeWatermark(expectedImageData, alphaMap, position, {
+        alphaGain: 1
+    });
+    const materialized =
+        watermarkProcessorTestInternals
+            .materializeSmallAnchorRelocationCandidate({
+                candidate: scratchCandidate,
+                originalImageData
+            });
+
+    assert.ok(materialized);
+    assert.deepEqual(materialized.imageData.data, expectedImageData.data);
+    assert.equal(
+        materialized.spatialScore,
+        scratchCandidate.spatialScore
+    );
+    assert.equal(
+        materialized.gradientScore,
+        scratchCandidate.gradientScore
+    );
+    assert.equal(
+        materialized.suppressionGain,
+        scratchCandidate.suppressionGain
+    );
+    assert.equal(materialized.residualVisibility.visible, false);
+    assert.equal('scratchImageData' in materialized, false);
+    assert.equal(
+        materialized.cost,
+        Math.abs(materialized.spatialScore) * 0.8 +
+            Math.max(0, materialized.gradientScore) * 0.75 +
+            Math.max(
+                0,
+                materialized.residualVisibility.positiveHaloLum ?? 0
+            ) * 0.01
+    );
 });
 
 test('processWatermarkImageData should leave a uniform zero-evidence image unchanged', () => {

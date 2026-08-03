@@ -149,6 +149,7 @@ export function runImageWatermarkPipeline({
         alphaGainCandidates: resolvedAlphaGainCandidates,
         alphaPriorityGains: resolvedAlphaPriorityGains,
         allowAdaptiveSearch,
+        defaultConfig,
         resolvedConfig,
         position
     } = createInitialPipelineContext({
@@ -163,6 +164,7 @@ export function runImageWatermarkPipeline({
     const collection = collectCandidates({
         originalImageData,
         config: resolvedConfig,
+        catalogPriorConfig: defaultConfig,
         position,
         alpha48,
         alpha96,
@@ -263,11 +265,15 @@ export function runImageWatermarkPipeline({
             debugTimings.candidateRankingMs = 0;
             debugTimings.totalMs = nowMs() - totalStartedAt;
         }
-        return createRuntimeFailureResult({
+        const result = createRuntimeFailureResult({
             createRejectedResult,
             originalImageData,
             debugTimings
         });
+        return {
+            ...result,
+            meta: attachPresenceBestEffortMeta(result.meta, collection)
+        };
     }
 
     const rankingStartedAt = nowMs();
@@ -283,11 +289,15 @@ export function runImageWatermarkPipeline({
             debugTimings.failedCandidateCount = failures.length;
             debugTimings.totalMs = nowMs() - totalStartedAt;
         }
-        return createRuntimeFailureResult({
+        const result = createRuntimeFailureResult({
             createRejectedResult,
             originalImageData,
             debugTimings
         });
+        return {
+            ...result,
+            meta: attachPresenceBestEffortMeta(result.meta, collection)
+        };
     }
 
     const candidateSummaries = createSummaries(ranked, failures);

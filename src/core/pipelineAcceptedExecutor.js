@@ -23,6 +23,46 @@ import {
     createTailRepairStageSequenceSpecs
 } from './pipelineRepairStageSpecs.js';
 
+const FROZEN_SELECTED_TRIAL_SKIPPED_TIMING_KEYS = Object.freeze([
+    'recalibrationMs',
+    'localAlphaSearchMs',
+    'overSubtractionRecalibrationMs',
+    'darkCatalogFineTuneMs',
+    'weakAlphaFineTuneMs',
+    'previewBackgroundCleanupMs',
+    'subpixelRefinementMs',
+    'previewEdgeCleanupMs',
+    'smallPreviewRefinementMs',
+    'locatedAggressiveRemovalMs',
+    'smoothPriorCleanupMs',
+    'newMargin96VariantRescueMs',
+    'known48AntiTemplateRescueMs',
+    'powerProfileRescueMs',
+    'positiveResidualRebalanceMs',
+    'smallMarginPriorRepairMs',
+    'smallLocatedPriorRepairMs',
+    'boundaryRepairRescueMs',
+    'darkHaloRescueMs',
+    'quantizedBodyCorrectionMs',
+    'midCoreBiasCorrectionMs'
+]);
+
+function assignFrozenSelectedTrialDebugTimings({
+    nowMs,
+    totalStartedAt,
+    debugTimings,
+    debugTimingsEnabled
+}) {
+    if (!debugTimingsEnabled || !debugTimings) return;
+
+    for (const key of FROZEN_SELECTED_TRIAL_SKIPPED_TIMING_KEYS) {
+        debugTimings[key] = 0;
+    }
+    debugTimings.totalMs = totalStartedAt === null
+        ? 0
+        : Math.max(0, nowMs() - totalStartedAt);
+}
+
 export function runAcceptedAlphaRepairPipeline({
     nowMs = Date.now,
     totalStartedAt = null,
@@ -39,6 +79,7 @@ export function runAcceptedAlphaRepairPipeline({
     templateWarp = null,
     passState,
     subpixelShift = null,
+    freezeSelectedTrial = false,
     metrics = {},
     gates = {},
     config = {},
@@ -70,6 +111,20 @@ export function runAcceptedAlphaRepairPipeline({
         applyState: applyPipelineState,
         debugTimings
     });
+
+    if (freezeSelectedTrial) {
+        assignFrozenSelectedTrialDebugTimings({
+            nowMs,
+            totalStartedAt,
+            debugTimings,
+            debugTimingsEnabled
+        });
+        return {
+            passState,
+            subpixelShift,
+            readPipelineState
+        };
+    }
 
     runRecalibrationStage(createRecalibrationStageSpec({
         nowMs,

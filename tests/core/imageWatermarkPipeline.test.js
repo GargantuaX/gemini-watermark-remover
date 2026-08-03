@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runImageWatermarkPipeline } from '../../src/core/imageWatermarkPipeline.js';
+import { detectWatermarkConfig } from '../../src/core/watermarkConfig.js';
 
 function createImageData(width = 128, height = 128, value = 0) {
     const data = new Uint8ClampedArray(width * height * 4);
@@ -70,6 +71,27 @@ function createPipelineInput({ hypotheses, failures = new Set(), options = {} })
         }
     };
 }
+
+test('runImageWatermarkPipeline should preserve the pre-correlation catalog prior for discovery', () => {
+    const { request } = createPipelineInput({ hypotheses: [] });
+    let capturedInput = null;
+    request.collectCandidates = (input) => {
+        capturedInput = input;
+        return {
+            hypotheses: [],
+            presenceConfirmed: false,
+            fixedSelection: null,
+            automaticSelection: null
+        };
+    };
+
+    runImageWatermarkPipeline(request);
+
+    assert.deepEqual(
+        capturedInput.catalogPriorConfig,
+        detectWatermarkConfig(request.imageData.width, request.imageData.height)
+    );
+});
 
 test('runImageWatermarkPipeline should not reuse convergence from a superseded accepted stage', () => {
     const convergence = {
@@ -364,6 +386,62 @@ test('runImageWatermarkPipeline should reject only when every candidate executio
     assert.equal(result.debugTimings.failedCandidateCount, 2);
 });
 
+test('runImageWatermarkPipeline should preserve unconfirmed witness risk when every candidate execution fails', () => {
+    const hypotheses = [createHypothesis('validated-best-effort', {})];
+    const { request } = createPipelineInput({
+        hypotheses,
+        failures: new Set(['validated-best-effort'])
+    });
+    request.collectCandidates = () => ({
+        hypotheses,
+        presenceConfirmed: false,
+        bestEffortFallback: true,
+        bestEffortReason: 'exact-48-r96-source-witness'
+    });
+
+    const result = runImageWatermarkPipeline(request);
+
+    assert.equal(result.meta.applied, false);
+    assert.equal(result.meta.skipReason, 'candidate-execution-failed');
+    assert.equal(result.meta.presenceConfirmed, false);
+    assert.equal(result.meta.bestEffortReason, 'exact-48-r96-source-witness');
+    assert.deepEqual(
+        result.meta.decisionPath.riskFlags,
+        ['unconfirmed-watermark-presence']
+    );
+    assert.deepEqual(
+        result.meta.decisionPath.evaluation.riskFlags,
+        ['unconfirmed-watermark-presence']
+    );
+});
+
+test('runImageWatermarkPipeline should preserve unconfirmed witness risk when ranking returns no result', () => {
+    const hypotheses = [createHypothesis('validated-best-effort', {})];
+    const { request } = createPipelineInput({ hypotheses });
+    request.collectCandidates = () => ({
+        hypotheses,
+        presenceConfirmed: false,
+        bestEffortFallback: true,
+        bestEffortReason: 'exact-48-r96-source-witness'
+    });
+    request.rankCandidates = () => [];
+
+    const result = runImageWatermarkPipeline(request);
+
+    assert.equal(result.meta.applied, false);
+    assert.equal(result.meta.skipReason, 'candidate-execution-failed');
+    assert.equal(result.meta.presenceConfirmed, false);
+    assert.equal(result.meta.bestEffortReason, 'exact-48-r96-source-witness');
+    assert.deepEqual(
+        result.meta.decisionPath.riskFlags,
+        ['unconfirmed-watermark-presence']
+    );
+    assert.deepEqual(
+        result.meta.decisionPath.evaluation.riskFlags,
+        ['unconfirmed-watermark-presence']
+    );
+});
+
 test('runImageWatermarkPipeline should reject unconfirmed hypotheses before changing pixels', () => {
     const hypotheses = [
         createHypothesis('diagnostic-only', {
@@ -414,11 +492,32 @@ test('runImageWatermarkPipeline should execute an explicit unconfirmed best-effo
         })
     ];
     const { request, executed } = createPipelineInput({ hypotheses });
+    request.runCandidate = ({ hypothesis }) => {
+        executed.push(hypothesis.id);
+        return {
+            hypothesis,
+            result: {
+                imageData: createImageData(128, 128, 31),
+                meta: {
+                    applied: true,
+                    source: `source:${hypothesis.id}`,
+                    config: hypothesis.config,
+                    position: hypothesis.position,
+                    decisionPath: {
+                        riskFlags: [],
+                        evaluation: { riskFlags: [] }
+                    }
+                },
+                debugTimings: { candidateMs: 1 }
+            },
+            elapsedMs: 1
+        };
+    };
     request.collectCandidates = () => ({
         hypotheses,
         presenceConfirmed: false,
         bestEffortFallback: true,
-        bestEffortReason: 'presence-witness-unconfirmed'
+        bestEffortReason: 'exact-48-r96-source-witness'
     });
 
     const result = runImageWatermarkPipeline(request);
@@ -428,7 +527,15 @@ test('runImageWatermarkPipeline should execute an explicit unconfirmed best-effo
     assert.equal(result.meta.bestEffort, true);
     assert.equal(result.meta.retryRecommended, false);
     assert.equal(result.meta.presenceConfirmed, false);
-    assert.equal(result.meta.bestEffortReason, 'presence-witness-unconfirmed');
+    assert.equal(result.meta.bestEffortReason, 'exact-48-r96-source-witness');
+    assert.deepEqual(
+        result.meta.decisionPath.riskFlags,
+        ['unconfirmed-watermark-presence']
+    );
+    assert.deepEqual(
+        result.meta.decisionPath.evaluation.riskFlags,
+        ['unconfirmed-watermark-presence']
+    );
 });
 
 test('runImageWatermarkPipeline should preserve collectors that predate explicit presence metadata', () => {

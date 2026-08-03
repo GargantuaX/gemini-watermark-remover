@@ -269,9 +269,70 @@ function isProjectedPreviewCatalogConfig(originalImageData, candidateConfig, bas
         );
 }
 
+function createCatalogConfigKey(config) {
+    return [
+        config?.logoSize,
+        config?.marginRight,
+        config?.marginBottom,
+        config?.alphaVariant ?? 'default'
+    ].join(':');
+}
+
+function isPreservablePositiveLargeMarginCatalogEntry(entry) {
+    return entry?.config?.logoSize === 96 &&
+        entry.config.marginRight === 192 &&
+        entry.config.marginBottom === 192 &&
+        entry.config.alphaVariant === '20260520' &&
+        entry.metadata?.family === 'known-new-margin-variant' &&
+        entry.metadata?.evidenceGate === 'required';
+}
+
+// Correlation-based config resolution can replace the initial 96px anchor and
+// accidentally hide its cataloged 192px-margin candidate. Preserve only the
+// independently cataloged positive profile: deriving dark/outline profiles
+// from this newly restored prior damaged clean-content controls.
+function resolveStandardCandidateCatalogEntries({
+    originalImageData,
+    config,
+    catalogPriorConfig
+}) {
+    const catalogEntries = resolveGeminiWatermarkSearchCatalogEntries(
+        originalImageData.width,
+        originalImageData.height,
+        config
+    );
+    if (!catalogPriorConfig) return catalogEntries;
+
+    const existingKeys = new Set(catalogEntries.map((entry) => (
+        createCatalogConfigKey(entry?.config)
+    )));
+    const preservedEntries = resolveGeminiWatermarkSearchCatalogEntries(
+        originalImageData.width,
+        originalImageData.height,
+        catalogPriorConfig
+    )
+        .filter((entry) => (
+            isPreservablePositiveLargeMarginCatalogEntry(entry) &&
+            !existingKeys.has(createCatalogConfigKey(entry.config))
+        ))
+        .map((entry) => ({
+            ...entry,
+            metadata: {
+                ...entry.metadata,
+                preservedInitialCatalogPrior: true,
+                preservedCatalogDerivationPolicy: 'positive-only'
+            }
+        }));
+
+    return preservedEntries.length === 0
+        ? catalogEntries
+        : [...catalogEntries, ...preservedEntries];
+}
+
 function buildStandardCandidateSeeds({
     originalImageData,
     config,
+    catalogPriorConfig = null,
     position,
     alpha48,
     alpha96,
@@ -281,11 +342,11 @@ function buildStandardCandidateSeeds({
     includeCatalogVariants = true
 }) {
     const catalogEntries = includeCatalogVariants
-        ? resolveGeminiWatermarkSearchCatalogEntries(
-            originalImageData.width,
-            originalImageData.height,
-            config
-        )
+        ? resolveStandardCandidateCatalogEntries({
+            originalImageData,
+            config,
+            catalogPriorConfig
+        })
         : [{ config, metadata: null }];
     const seeds = [];
 
@@ -323,6 +384,9 @@ function buildStandardCandidateSeeds({
             config
         );
 
+        const positiveOnlyPrior =
+            catalogEntry.metadata?.preservedInitialCatalogPrior === true &&
+            catalogEntry.metadata?.preservedCatalogDerivationPolicy === 'positive-only';
         const baseSeed = {
             config: candidateConfig,
             position: candidatePosition,
@@ -338,13 +402,18 @@ function buildStandardCandidateSeeds({
                 catalogEntry.metadata ? {
                     catalogFamily: catalogEntry.metadata.family,
                     catalogSourcePriority: catalogEntry.metadata.sourcePriority,
-                    catalogEvidenceGate: catalogEntry.metadata.evidenceGate
+                    catalogEvidenceGate: catalogEntry.metadata.evidenceGate,
+                    ...(positiveOnlyPrior ? {
+                        preservedInitialCatalogPrior: true,
+                        preservedCatalogDerivationPolicy: 'positive-only'
+                    } : {})
                 } : null
             )
         };
         seeds.push(baseSeed);
 
-        const outlineLightAlphaMap = candidateConfig.logoSize === 96 &&
+        const outlineLightAlphaMap = !positiveOnlyPrior &&
+            candidateConfig.logoSize === 96 &&
             candidateConfig.marginRight === 192 &&
             candidateConfig.marginBottom === 192
             ? alpha96Variants?.['outline-light'] ?? null
@@ -369,7 +438,8 @@ function buildStandardCandidateSeeds({
             });
         }
 
-        const outlineDarkAlphaMap = candidateConfig.logoSize === 96 &&
+        const outlineDarkAlphaMap = !positiveOnlyPrior &&
+            candidateConfig.logoSize === 96 &&
             candidateConfig.marginRight === 192 &&
             candidateConfig.marginBottom === 192
             ? alpha96Variants?.['outline-dark'] ?? null
@@ -395,7 +465,7 @@ function buildStandardCandidateSeeds({
             });
         }
 
-        if (shouldAddDarkPolaritySeed(candidateConfig)) {
+        if (!positiveOnlyPrior && shouldAddDarkPolaritySeed(candidateConfig)) {
             const weakDarkPolarity48 = candidateConfig.logoSize === 48;
             seeds.push({
                 ...baseSeed,
@@ -2668,6 +2738,7 @@ function evaluateStandardTrialsForSeeds({
 function resolveStandardAnchorSelection({
     originalImageData,
     config,
+    catalogPriorConfig,
     position,
     alpha48,
     alpha96,
@@ -2680,6 +2751,7 @@ function resolveStandardAnchorSelection({
     let standardCandidateSeeds = buildStandardCandidateSeeds({
         originalImageData,
         config,
+        catalogPriorConfig,
         position,
         alpha48,
         alpha96,
@@ -2715,6 +2787,7 @@ function resolveStandardAnchorSelection({
         standardCandidateSeeds = buildStandardCandidateSeeds({
             originalImageData,
             config,
+            catalogPriorConfig,
             position,
             alpha48,
             alpha96,
@@ -3093,6 +3166,7 @@ function refineSelectedAnchorCandidate({
 export function selectInitialCandidate({
     originalImageData,
     config,
+    catalogPriorConfig = null,
     position,
     alpha48,
     alpha96,
@@ -3116,6 +3190,7 @@ export function selectInitialCandidate({
     } = resolveStandardAnchorSelection({
         originalImageData,
         config,
+        catalogPriorConfig,
         position,
         alpha48,
         alpha96,

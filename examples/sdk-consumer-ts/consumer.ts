@@ -21,6 +21,13 @@ const enginePromise = createWatermarkEngine();
 const result = removeWatermarkFromImageDataSync(imageData, {
     adaptiveMode: 'never'
 });
+const processingContract = {
+    presenceConfirmed: result.meta.presenceConfirmed,
+    bestEffort: result.meta.bestEffort,
+    bestEffortReason: result.meta.bestEffortReason,
+    retryRecommended: result.meta.retryRecommended,
+    decisionPathRiskFlags: result.meta.decisionPath?.riskFlags
+};
 const manualMeta: WatermarkMeta = {
     applied: false,
     skipReason: 'manual-check',
@@ -62,6 +69,7 @@ const options: NodeBufferRemovalOptions = {
 
 void enginePromise;
 void result.meta;
+void processingContract;
 void manualMeta;
 void options;
 void browserRuntime.processWatermarkBlob;
