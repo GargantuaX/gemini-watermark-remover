@@ -104,7 +104,15 @@ const NEW_MARGIN_96_FLAT_FILL_MIN_GRADIENT_IMPROVEMENT = 0.025;
 const NEW_MARGIN_96_FLAT_FILL_MAX_SPATIAL_DRIFT = 0.08;
 const NEW_MARGIN_96_FLAT_FILL_MAX_ACCEPTED_ABS_SPATIAL = 0.22;
 const NEW_MARGIN_96_FLAT_FILL_PRESETS = Object.freeze([
-    { name: 'edge', minAlpha: 0.006, maxAlpha: 0.45, strength: 0.75 }
+    { name: 'edge', minAlpha: 0.006, maxAlpha: 0.45, strength: 0.75 },
+    {
+        name: 'expanded-edge',
+        minAlpha: 0.006,
+        maxAlpha: 0.45,
+        strength: 1,
+        edgeMaskAlphaScale: 0.2,
+        minBaselineGradient: 0.6
+    }
 ]);
 const NEW_MARGIN_96_SMOOTH_EDGE_MIN_ALPHA_GAIN = 0.8;
 const NEW_MARGIN_96_SMOOTH_EDGE_MAX_ALPHA_GAIN = 0.9;
@@ -1957,6 +1965,7 @@ function applyFlatBackgroundFill({
     strength,
     maxBackgroundStd = KNOWN_48_FLAT_FILL_MAX_BACKGROUND_STD,
     edgeWeightFloor = 0.35,
+    edgeMaskAlphaScale = 0,
     pad = KNOWN_48_FLAT_FILL_PAD,
     outsideAlphaMax = KNOWN_48_FLAT_FILL_OUTSIDE_ALPHA_MAX,
     minSampleLum = 0
@@ -1989,7 +1998,12 @@ function applyFlatBackgroundFill({
         for (let col = 0; col < position.width; col++) {
             const localIndex = row * position.width + col;
             const alpha = alphaMap[localIndex];
-            if (alpha < minAlpha || alpha > maxAlpha) continue;
+            const edgeWeight = getAlphaGradientWeight(edgeMask, localIndex, edgeWeightFloor);
+            const repairAlpha = Math.max(
+                alpha,
+                Number(edgeMask[localIndex] ?? 0) * edgeMaskAlphaScale
+            );
+            if (repairAlpha < minAlpha || repairAlpha > maxAlpha) continue;
 
             const x = col / Math.max(1, position.width);
             const y = row / Math.max(1, position.height);
@@ -1999,8 +2013,10 @@ function applyFlatBackgroundFill({
                 bluePlane[0] + bluePlane[1] * x + bluePlane[2] * y
             ];
             const pixelIndex = ((position.y + row) * candidate.width + position.x + col) * 4;
-            const edgeWeight = getAlphaGradientWeight(edgeMask, localIndex, edgeWeightFloor);
-            const blend = Math.max(0, Math.min(1, strength * Math.min(1, alpha / 0.2) * edgeWeight));
+            const blend = Math.max(0, Math.min(
+                1,
+                strength * Math.min(1, repairAlpha / 0.2) * edgeWeight
+            ));
             for (let channel = 0; channel < 3; channel++) {
                 candidate.data[pixelIndex + channel] = clampChannel(
                     candidate.data[pixelIndex + channel] * (1 - blend) + target[channel] * blend
@@ -2164,6 +2180,12 @@ function refineNewMargin96FlatBackgroundResidual({
 
     let best = null;
     for (const preset of NEW_MARGIN_96_FLAT_FILL_PRESETS) {
+        if (
+            Number.isFinite(preset.minBaselineGradient) &&
+            baselineGradientScore < preset.minBaselineGradient
+        ) {
+            continue;
+        }
         const filled = applyFlatBackgroundFill({
             sourceImageData,
             alphaMap,
