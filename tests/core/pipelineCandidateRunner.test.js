@@ -86,9 +86,54 @@ test('runCandidateHypothesis should materialize and finalize one isolated candid
         'finalize'
     ]);
     assert.equal(calls[0].original, originalImageData);
+    assert.equal(calls[1].request.freezeSelectedTrial, false);
     assert.equal(calls[2].request.allowFailClosed, false);
     assert.notEqual(output.result.imageData, originalImageData);
     assert.deepEqual(originalImageData.data, originalPixels);
     assert.equal(output.hypothesis, hypothesis);
     assert.ok(output.elapsedMs >= 0);
+});
+
+test('runCandidateHypothesis should freeze a source-witness rescue before repair searches', () => {
+    const originalImageData = createImageData(8, 8);
+    let capturedRequest = null;
+    const trial = {
+        source: 'standard+catalog+source-witness-rescue',
+        config: { logoSize: 2, marginRight: 2, marginBottom: 2 },
+        position: { x: 4, y: 4, width: 2, height: 2 },
+        alphaMap: new Float32Array([0.2, 0.4, 0.4, 0.2]),
+        alphaGain: 0.6,
+        provenance: { sourceWitnessRescue: true },
+        imageData: createImageData(8, 8, 110)
+    };
+
+    runCandidateHypothesis({
+        hypothesis: {
+            id: 'source-witness',
+            family: 'alpha',
+            rankingKey: [0],
+            trial
+        },
+        originalImageData,
+        resolvedConfig: trial.config,
+        createAcceptedPipelineDependencies: () => ({
+            metrics: {}, gates: {}, config: {}, refiners: {}
+        }),
+        materializeCandidate: () => trial,
+        runAcceptedPipeline: (request) => {
+            capturedRequest = request;
+            return {
+                passState: request.passState,
+                subpixelShift: null,
+                readPipelineState:
+                    request.runtimeBootstrap.readPipelineState
+            };
+        },
+        createAcceptedFinalResult: (request) => ({
+            imageData: request.pipelineState.finalImageData,
+            meta: { applied: true }
+        })
+    });
+
+    assert.equal(capturedRequest.freezeSelectedTrial, true);
 });

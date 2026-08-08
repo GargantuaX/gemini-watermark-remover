@@ -11,6 +11,7 @@ export function createAcceptedPipelineExecutorRequest({
     visualPostProcessingEnabled,
     templateWarp,
     subpixelShift,
+    freezeSelectedTrial = false,
     acceptedPipelineDependencies
 } = {}) {
     const {
@@ -36,6 +37,7 @@ export function createAcceptedPipelineExecutorRequest({
         templateWarp,
         passState: runtimeBootstrap.passState,
         subpixelShift,
+        freezeSelectedTrial,
         metrics,
         gates,
         config: executorConfig,

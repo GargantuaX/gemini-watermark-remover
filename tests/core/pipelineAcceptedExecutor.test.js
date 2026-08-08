@@ -119,3 +119,88 @@ test('runAcceptedAlphaRepairPipeline should execute accepted stages and expose c
     assert.equal(debugTimings.subpixelRefinementMs, 10);
     assert.equal(typeof debugTimings.totalMs, 'number');
 });
+
+test('runAcceptedAlphaRepairPipeline should preserve a frozen source-witness trial without refinements', () => {
+    const skippedTimingKeys = [
+        'recalibrationMs',
+        'localAlphaSearchMs',
+        'overSubtractionRecalibrationMs',
+        'darkCatalogFineTuneMs',
+        'weakAlphaFineTuneMs',
+        'previewBackgroundCleanupMs',
+        'subpixelRefinementMs',
+        'previewEdgeCleanupMs',
+        'smallPreviewRefinementMs',
+        'locatedAggressiveRemovalMs',
+        'smoothPriorCleanupMs',
+        'newMargin96VariantRescueMs',
+        'known48AntiTemplateRescueMs',
+        'powerProfileRescueMs',
+        'positiveResidualRebalanceMs',
+        'smallMarginPriorRepairMs',
+        'smallLocatedPriorRepairMs',
+        'boundaryRepairRescueMs',
+        'darkHaloRescueMs',
+        'quantizedBodyCorrectionMs',
+        'midCoreBiasCorrectionMs'
+    ];
+    const debugTimings = Object.fromEntries(
+        skippedTimingKeys.map((key) => [key, 999])
+    );
+    debugTimings.totalMs = 999;
+    const state = {
+        finalImageData: { id: 'fixed-gain-output' },
+        alphaMap: 'alpha-48',
+        position: { x: 1, y: 2, width: 48, height: 48 },
+        config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+        alphaGain: 0.6,
+        originalSpatialScore: 0.2,
+        originalGradientScore: 0.7,
+        finalProcessedSpatialScore: -0.1,
+        finalProcessedGradientScore: 0.05,
+        source: 'standard+catalog+source-witness-rescue'
+    };
+    const passState = createFirstPassPipelinePassState({
+        firstPassMetrics: {
+            passStopReason: 'single-pass',
+            passRecord: { index: 1 }
+        }
+    });
+    const pipelineTraceRecorder = createPipelineTraceRecorder();
+
+    const result = runAcceptedAlphaRepairPipeline({
+        nowMs: () => 135,
+        totalStartedAt: 100,
+        runtimeBootstrap: {
+            readPipelineState: () => state,
+            applyPipelineState: () => {
+                throw new Error('frozen trial must not be changed');
+            },
+            cleanupFlags: {
+                usePreviewAnchorFastCleanup: false,
+                useKnown48EdgeCleanup: true,
+                useStrongUndersizedAdaptiveCleanup: false,
+                useV2SmallEdgeCleanup: false
+            }
+        },
+        pipelineTraceRecorder,
+        originalImageData: { id: 'source' },
+        debugTimings,
+        debugTimingsEnabled: true,
+        passState,
+        freezeSelectedTrial: true,
+        refiners: {
+            refineLocatedAggressiveRemoval: () => {
+                throw new Error('frozen trial must not search');
+            }
+        }
+    });
+
+    assert.equal(result.readPipelineState(), state);
+    assert.equal(result.passState, passState);
+    assert.deepEqual(pipelineTraceRecorder.alphaAdjustmentStages, []);
+    for (const key of skippedTimingKeys) {
+        assert.equal(debugTimings[key], 0, `${key} should record a skipped stage`);
+    }
+    assert.equal(debugTimings.totalMs, 35);
+});

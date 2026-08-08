@@ -484,6 +484,143 @@ test('selectInitialCandidate should return a skipped result when no standard tri
     assert.equal(result.standardGradientScore, null);
 });
 
+test('selectInitialCandidate should preserve only the positive 96px large-margin seed from the initial catalog prior', () => {
+    const alpha96 = createSyntheticAlphaMap(96);
+    const alpha48 = interpolateAlphaMap(alpha96, 96, 48);
+    const imageData = createPatternImageData(1039, 1050);
+    const resolvedConfig = {
+        logoSize: 48,
+        marginRight: 96,
+        marginBottom: 96
+    };
+    const resolvedPosition = {
+        x: imageData.width - resolvedConfig.marginRight - resolvedConfig.logoSize,
+        y: imageData.height - resolvedConfig.marginBottom - resolvedConfig.logoSize,
+        width: resolvedConfig.logoSize,
+        height: resolvedConfig.logoSize
+    };
+    const catalogPriorConfig = {
+        logoSize: 96,
+        marginRight: 64,
+        marginBottom: 64
+    };
+    const preservedPosition = {
+        x: imageData.width - 192 - 96,
+        y: imageData.height - 192 - 96,
+        width: 96,
+        height: 96
+    };
+    applySyntheticWatermark(imageData, alpha96, preservedPosition, 1);
+
+    const baseline = selectInitialCandidate({
+        originalImageData: imageData,
+        config: resolvedConfig,
+        position: resolvedPosition,
+        alpha48,
+        alpha96,
+        alpha96Variants: {
+            '20260520': alpha96,
+            'outline-light': alpha96,
+            'outline-dark': alpha96
+        },
+        getAlphaMap: () => null,
+        allowAdaptiveSearch: false,
+        allowAutomaticSearch: false,
+        alphaGainCandidates: [1],
+        alphaPriorityGains: [1]
+    });
+    assert.equal(
+        baseline.candidatePool.some((trial) => (
+            trial.config?.logoSize === 96 &&
+            trial.config?.marginRight === 192 &&
+            trial.config?.marginBottom === 192
+        )),
+        false
+    );
+
+    const result = selectInitialCandidate({
+        originalImageData: imageData,
+        config: resolvedConfig,
+        catalogPriorConfig,
+        position: resolvedPosition,
+        alpha48,
+        alpha96,
+        alpha96Variants: {
+            '20260520': alpha96,
+            'outline-light': alpha96,
+            'outline-dark': alpha96
+        },
+        getAlphaMap: () => null,
+        allowAdaptiveSearch: false,
+        allowAutomaticSearch: false,
+        alphaGainCandidates: [1],
+        alphaPriorityGains: [1]
+    });
+    const preservedTrials = result.candidatePool.filter((trial) => (
+        trial.provenance?.preservedInitialCatalogPrior === true &&
+        trial.provenance?.preservedCatalogDerivationPolicy === 'positive-only'
+    ));
+
+    assert.ok(preservedTrials.length > 0);
+    const preservedBase = preservedTrials.find((trial) => (
+        trial.source === 'standard+catalog' &&
+        trial.position?.x === preservedPosition.x &&
+        trial.position?.y === preservedPosition.y
+    ));
+    assert.ok(preservedBase, 'expected the canonical positive preserved seed');
+    assert.deepEqual(preservedBase.config, {
+        logoSize: 96,
+        marginRight: 192,
+        marginBottom: 192,
+        alphaVariant: '20260520'
+    });
+    assert.deepEqual(preservedBase.position, preservedPosition);
+    assert.equal(preservedBase.provenance?.catalogFamily, 'known-new-margin-variant');
+    assert.ok(preservedTrials.every((trial) => (
+        trial.provenance?.outlineLight === undefined &&
+        trial.provenance?.outlineDark === undefined &&
+        trial.provenance?.darkPolarity === undefined &&
+        !String(trial.source).includes('outline') &&
+        !String(trial.source).includes('dark-polarity')
+    )));
+
+    const existingCatalogResult = selectInitialCandidate({
+        originalImageData: imageData,
+        config: {
+            logoSize: 96,
+            marginRight: 192,
+            marginBottom: 192,
+            alphaVariant: '20260520'
+        },
+        catalogPriorConfig,
+        position: preservedPosition,
+        alpha48,
+        alpha96,
+        alpha96Variants: {
+            '20260520': alpha96,
+            'outline-light': alpha96,
+            'outline-dark': alpha96
+        },
+        getAlphaMap: () => null,
+        allowAdaptiveSearch: false,
+        allowAutomaticSearch: false,
+        alphaGainCandidates: [1],
+        alphaPriorityGains: [1]
+    });
+    assert.equal(existingCatalogResult.candidatePool.some((trial) => (
+        trial.provenance?.preservedInitialCatalogPrior === true
+    )), false);
+    assert.ok(existingCatalogResult.candidatePool.some((trial) => (
+        trial.provenance?.outlineLight === true
+    )));
+    assert.ok(existingCatalogResult.candidatePool.some((trial) => (
+        trial.provenance?.outlineDark === true
+    )));
+    assert.ok(existingCatalogResult.candidatePool.some((trial) => (
+        trial.provenance?.darkPolarity === true
+    )));
+});
+
 test('selectInitialCandidate should not require eager adaptive search when the standard candidate is already strong', () => {
     const alpha96 = createSyntheticAlphaMap(96);
     const alpha48 = interpolateAlphaMap(alpha96, 96, 48);

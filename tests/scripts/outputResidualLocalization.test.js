@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 let outputLocalization = {};
+let coreOutputLocalization = {};
 try {
     outputLocalization = await import(
         '../../scripts/output-residual-localization.js'
+    );
+    coreOutputLocalization = await import(
+        '../../src/core/outputResidualLocalization.js'
     );
 } catch {
     // The first TDD run intentionally precedes the implementation module.
@@ -51,6 +55,13 @@ function createResidualImage(alphaMap, size, {
     }
     return { width: size, height: size, data };
 }
+
+test('script entry point should re-export the core localization implementation', () => {
+    assert.equal(
+        outputLocalization.measureOutputResidualLocalization,
+        coreOutputLocalization.measureOutputResidualLocalization
+    );
+});
 
 function createBroadGradientImage(size) {
     const data = new Uint8ClampedArray(size * size * 4);

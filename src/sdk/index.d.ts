@@ -99,6 +99,21 @@ export interface WatermarkSelectionDebug {
     usedPreviewAnchor: boolean;
 }
 
+export interface WatermarkDecisionPathMeta {
+    version?: number | null;
+    decision?: string | null;
+    detectionSource?: string | null;
+    alphaSource?: string | null;
+    repairSource?: string | null;
+    evaluationDecision?: string | null;
+    blockedGate?: string | null;
+    riskFlags?: string[];
+    detectionCandidate?: unknown;
+    alphaTrial?: unknown;
+    repairTrial?: unknown;
+    evaluation?: unknown;
+}
+
 export interface WatermarkMeta {
     applied: boolean;
     skipReason: string | null;
@@ -113,6 +128,11 @@ export interface WatermarkMeta {
     attemptedPassCount: number;
     passStopReason: string | null;
     selectionDebug?: WatermarkSelectionDebug | null;
+    presenceConfirmed?: boolean;
+    bestEffort?: boolean;
+    bestEffortReason?: string | null;
+    retryRecommended?: boolean | null;
+    decisionPath?: WatermarkDecisionPathMeta | null;
 }
 
 export interface RemoveOptions {

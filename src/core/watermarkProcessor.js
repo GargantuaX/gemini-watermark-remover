@@ -3954,13 +3954,12 @@ function resolveRelocationAlphaMap({ size, currentAlphaMap, currentPosition, alp
     return interpolateAlphaMap(alpha96, 96, size);
 }
 
-function buildSmallAnchorRelocationCandidate({
+function createSmallAnchorRelocationGeometry({
     originalImageData,
     alphaMap,
     size,
     marginRight,
-    marginBottom,
-    alphaGain
+    marginBottom
 }) {
     const position = {
         x: originalImageData.width - marginRight - size,
@@ -3991,17 +3990,59 @@ function buildSmallAnchorRelocationCandidate({
         alphaMap,
         region: { x: position.x, y: position.y, size }
     });
-    const candidateImageData = cloneImageData(originalImageData);
-    removeWatermark(candidateImageData, alphaMap, position, { alphaGain });
-    const spatialScore = computeRegionSpatialCorrelation({
-        imageData: candidateImageData,
+
+    return {
         alphaMap,
-        region: { x: position.x, y: position.y, size }
+        position,
+        size,
+        marginRight,
+        marginBottom,
+        originalSpatialScore,
+        originalGradientScore,
+        searchContext: createLocalAlphaSearchContext(
+            originalImageData,
+            position
+        )
+    };
+}
+
+function buildSmallAnchorRelocationScratchCandidate({
+    geometry,
+    alphaGain
+}) {
+    const {
+        alphaMap,
+        position,
+        size,
+        marginRight,
+        marginBottom,
+        originalSpatialScore,
+        originalGradientScore,
+        searchContext
+    } = geometry;
+    // Spatial and gradient gates only read the candidate ROI, so the translated
+    // scratch result is an exact cheap prefilter. Do not make the final
+    // visibility decision here: halo scoring is re-run on the full image below.
+    const scratchPosition = searchContext.position;
+    const scratchImageData = cloneImageData(searchContext.originalScratch);
+    removeWatermark(scratchImageData, alphaMap, scratchPosition, { alphaGain });
+    const spatialScore = computeRegionSpatialCorrelation({
+        imageData: scratchImageData,
+        alphaMap,
+        region: {
+            x: scratchPosition.x,
+            y: scratchPosition.y,
+            size
+        }
     });
     const gradientScore = computeRegionGradientCorrelation({
-        imageData: candidateImageData,
+        imageData: scratchImageData,
         alphaMap,
-        region: { x: position.x, y: position.y, size }
+        region: {
+            x: scratchPosition.x,
+            y: scratchPosition.y,
+            size
+        }
     });
     const suppressionGain = originalSpatialScore - spatialScore;
     if (
@@ -4012,15 +4053,8 @@ function buildSmallAnchorRelocationCandidate({
         return null;
     }
 
-    const residualVisibility = assessWatermarkResidualVisibility({
-        imageData: candidateImageData,
-        position,
-        alphaMap
-    });
-    if (residualVisibility.visible) return null;
-
     return {
-        imageData: candidateImageData,
+        scratchImageData,
         alphaMap,
         position,
         config: { logoSize: size, marginRight, marginBottom },
@@ -4029,11 +4063,68 @@ function buildSmallAnchorRelocationCandidate({
         originalGradientScore,
         spatialScore,
         gradientScore,
+        suppressionGain
+    };
+}
+
+function materializeSmallAnchorRelocationCandidate({
+    candidate,
+    originalImageData
+}) {
+    // A scratch candidate cannot be selected directly. Rebuild and re-score it
+    // on the full image so this optimization preserves the original decision.
+    const imageData = cloneImageData(originalImageData);
+    removeWatermark(imageData, candidate.alphaMap, candidate.position, {
+        alphaGain: candidate.alphaGain
+    });
+    const size = candidate.position.width;
+    const spatialScore = computeRegionSpatialCorrelation({
+        imageData,
+        alphaMap: candidate.alphaMap,
+        region: {
+            x: candidate.position.x,
+            y: candidate.position.y,
+            size
+        }
+    });
+    const gradientScore = computeRegionGradientCorrelation({
+        imageData,
+        alphaMap: candidate.alphaMap,
+        region: {
+            x: candidate.position.x,
+            y: candidate.position.y,
+            size
+        }
+    });
+    const suppressionGain = candidate.originalSpatialScore - spatialScore;
+    if (
+        Math.abs(spatialScore) > SMALL_ANCHOR_RELOCATION_MAX_ACCEPTED_SPATIAL ||
+        gradientScore > SMALL_ANCHOR_RELOCATION_MAX_ACCEPTED_GRADIENT ||
+        suppressionGain < SMALL_ANCHOR_RELOCATION_MIN_SUPPRESSION_GAIN
+    ) {
+        return null;
+    }
+    const residualVisibility = assessWatermarkResidualVisibility({
+        imageData,
+        position: candidate.position,
+        alphaMap: candidate.alphaMap
+    });
+    if (residualVisibility.visible) return null;
+
+    const { scratchImageData, ...rest } = candidate;
+    return {
+        ...rest,
+        imageData,
+        spatialScore,
+        gradientScore,
         suppressionGain,
         residualVisibility,
         cost: Math.abs(spatialScore) * 0.8 +
             Math.max(0, gradientScore) * 0.75 +
-            Math.max(0, residualVisibility.positiveHaloLum ?? 0) * 0.01
+            Math.max(
+                0,
+                residualVisibility.positiveHaloLum ?? 0
+            ) * 0.01
     };
 }
 
@@ -4087,14 +4178,23 @@ function refineSmallFixedLocalAnchorGeometry({
             for (let marginBottom = minMarginBottom; marginBottom <= maxMarginBottom; marginBottom++) {
                 const candidateY = originalImageData.height - marginBottom - size;
                 if (candidateY > currentPosition.y + 1) continue;
+                const geometry = createSmallAnchorRelocationGeometry({
+                    originalImageData,
+                    alphaMap,
+                    size,
+                    marginRight,
+                    marginBottom
+                });
+                if (!geometry) continue;
                 for (const candidateAlphaGain of ALPHA_GAIN_CANDIDATES) {
-                    const candidate = buildSmallAnchorRelocationCandidate({
-                        originalImageData,
-                        alphaMap,
-                        size,
-                        marginRight,
-                        marginBottom,
+                    const scratchCandidate = buildSmallAnchorRelocationScratchCandidate({
+                        geometry,
                         alphaGain: candidateAlphaGain
+                    });
+                    if (!scratchCandidate) continue;
+                    const candidate = materializeSmallAnchorRelocationCandidate({
+                        candidate: scratchCandidate,
+                        originalImageData
                     });
                     if (!candidate) continue;
                     if (!best || candidate.cost < best.cost) {
@@ -6151,6 +6251,12 @@ function createAcceptedPipelineDependencies({
         })
     };
 }
+
+export const watermarkProcessorTestInternals = Object.freeze({
+    createSmallAnchorRelocationGeometry,
+    buildSmallAnchorRelocationScratchCandidate,
+    materializeSmallAnchorRelocationCandidate
+});
 
 export function processWatermarkImageData(imageData, options = {}) {
     const instrumentationByCandidateId = new Map();

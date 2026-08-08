@@ -73,6 +73,8 @@ export function runCandidateHypothesis({
         visualPostProcessingEnabled,
         templateWarp: acceptedPipelineState.templateWarp,
         subpixelShift: acceptedPipelineState.subpixelShift,
+        freezeSelectedTrial:
+            selectedTrial.provenance?.sourceWitnessRescue === true,
         acceptedPipelineDependencies
     }));
     const finalizationRequest = createAcceptedPipelineFinalizationRequest({

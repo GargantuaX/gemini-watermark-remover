@@ -33,6 +33,7 @@ test('createAcceptedPipelineExecutorRequest should map runtime context and injec
         visualPostProcessingEnabled: false,
         templateWarp: { dx: 1 },
         subpixelShift: { dx: 0.25 },
+        freezeSelectedTrial: true,
         acceptedPipelineDependencies: {
             metrics,
             gates,
@@ -55,6 +56,7 @@ test('createAcceptedPipelineExecutorRequest should map runtime context and injec
     assert.equal(request.visualPostProcessingEnabled, false);
     assert.deepEqual(request.templateWarp, { dx: 1 });
     assert.deepEqual(request.subpixelShift, { dx: 0.25 });
+    assert.equal(request.freezeSelectedTrial, true);
     assert.equal(request.passState, passState);
     assert.equal(request.metrics, metrics);
     assert.equal(request.gates, gates);
@@ -74,4 +76,5 @@ test('createAcceptedPipelineExecutorRequest should normalize missing alpha varia
     });
 
     assert.equal(request.alpha96Variants, null);
+    assert.equal(request.freezeSelectedTrial, false);
 });

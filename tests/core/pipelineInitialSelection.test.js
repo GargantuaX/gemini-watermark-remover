@@ -51,6 +51,81 @@ function applyWhiteWatermark(imageData, alphaMap, position) {
     }
 }
 
+function applyBlackWatermark(imageData, alphaMap, position) {
+    for (let y = 0; y < position.height; y++) {
+        for (let x = 0; x < position.width; x++) {
+            const alpha = alphaMap[y * position.width + x];
+            const offset = (
+                (position.y + y) * imageData.width +
+                position.x + x
+            ) * 4;
+            for (let channel = 0; channel < 3; channel++) {
+                imageData.data[offset + channel] = Math.round(
+                    imageData.data[offset + channel] * (1 - alpha)
+                );
+            }
+        }
+    }
+}
+
+function createExact48R96Trial(imageData, alpha48, overrides = {}) {
+    const position = {
+        x: imageData.width - 96 - 48,
+        y: imageData.height - 96 - 48,
+        width: 48,
+        height: 48
+    };
+    return {
+        source: 'standard+catalog',
+        config: {
+            logoSize: 48,
+            marginRight: 96,
+            marginBottom: 96
+        },
+        position,
+        alphaMap: alpha48,
+        alphaGain: 1,
+        accepted: false,
+        evaluation: { eligible: false },
+        originalSpatialScore: 0,
+        originalGradientScore: 0,
+        processedSpatialScore: -1,
+        processedGradientScore: -1,
+        damage: { safe: false },
+        rankingKey: [9, 9, 9, 9, 9, 9],
+        provenance: {
+            catalogVariant: true,
+            catalogFamily: 'known-current-variant'
+        },
+        ...overrides
+    };
+}
+
+function createExact48R96CollectionInput(imageData, alpha48, trial) {
+    const selection = {
+        selectedTrial: null,
+        candidatePool: trial ? [trial] : [],
+        source: 'skipped',
+        decisionTier: 'insufficient'
+    };
+    return {
+        originalImageData: imageData,
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: {
+            x: imageData.width - 32 - 48,
+            y: imageData.height - 32 - 48,
+            width: 48,
+            height: 48
+        },
+        alpha48,
+        alpha96: getEmbeddedAlphaMap(96),
+        allowAdaptiveSearch: false,
+        alphaGainCandidates: [1],
+        alphaPriorityGains: [1],
+        selectCandidate: () => selection
+    };
+}
+
 function createV2MediumCollectionInput(imageData, selectCandidate) {
     return {
         originalImageData: imageData,
@@ -83,6 +158,26 @@ test('selectInitialWatermarkCandidate should keep the first selected standard ca
     assert.equal(result.source, 'standard');
     assert.equal(calls.length, 1);
     assert.equal(calls[0].allowAutomaticSearch, false);
+});
+
+test('collectInitialWatermarkCandidates should forward the initial catalog prior to every selector pass', () => {
+    const calls = [];
+    const catalogPriorConfig = { logoSize: 96, marginRight: 64, marginBottom: 64 };
+    collectInitialWatermarkCandidates({
+        ...createBaseInput((args) => {
+            calls.push(args);
+            return {
+                selectedTrial: null,
+                candidatePool: [],
+                source: 'skipped',
+                decisionTier: 'insufficient'
+            };
+        }),
+        catalogPriorConfig
+    });
+
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every((call) => call.catalogPriorConfig === catalogPriorConfig));
 });
 
 test('selectInitialWatermarkCandidate should use aggressive located fallback when standard selection skips', () => {
@@ -1136,5 +1231,188 @@ test('collectInitialWatermarkCandidates should only replace a sufficiently stron
         assert.equal(result.hypotheses.some((hypothesis) => (
             hypothesis.trial?.provenance?.confirmedV2MediumRescue === true
         )), expectedRescue);
+    }
+});
+
+test('collectInitialWatermarkCandidates should rescue only the exact 48px R96 source witness at fixed gain', () => {
+    const imageData = createFlatImageData(320, 320, 72);
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const trial = createExact48R96Trial(imageData, alpha48);
+    applyWhiteWatermark(imageData, alpha48, trial.position);
+
+    const result = collectInitialWatermarkCandidates(
+        createExact48R96CollectionInput(imageData, alpha48, trial)
+    );
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.equal(result.bestEffortFallback, true);
+    assert.equal(result.bestEffortReason, 'exact-48-r96-source-witness');
+    assert.equal(result.hypotheses.length, 1);
+    const [hypothesis] = result.hypotheses;
+    assert.equal(hypothesis.presenceStatus, 'source-witness');
+    assert.equal(hypothesis.discoveryRole, 'source-witness-rescue');
+    assert.equal(hypothesis.trial.alphaGain, 0.6);
+    assert.equal(hypothesis.trial.provenance.sourceWitnessRescue, true);
+    assert.equal(hypothesis.trial.provenance.catalogEvidenceGate, 'required');
+    assert.equal(
+        hypothesis.trial.provenance.sourceWitnessReason,
+        'exact-48-r96-source-witness'
+    );
+    assert.ok(
+        hypothesis.trial.provenance.sourceWitnessGate.spatialSignedTarget > 0
+    );
+});
+
+test('collectInitialWatermarkCandidates should reject an exact48 edge witness with inverse white-template polarity', () => {
+    const imageData = createFlatImageData(320, 320, 200);
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const trial = createExact48R96Trial(imageData, alpha48);
+    applyBlackWatermark(imageData, alpha48, trial.position);
+
+    const result = collectInitialWatermarkCandidates(
+        createExact48R96CollectionInput(imageData, alpha48, trial)
+    );
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.equal(result.bestEffortFallback, false);
+    assert.equal(result.bestEffortReason, null);
+    assert.equal(result.hypotheses.length, 0);
+});
+
+test('collectInitialWatermarkCandidates should not admit processed-score-only exact 48px evidence', () => {
+    const imageData = createFlatImageData(320, 320, 72);
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const trial = createExact48R96Trial(imageData, alpha48, {
+        processedSpatialScore: -999,
+        processedGradientScore: -999,
+        residual: { score: 0 },
+        damage: { safe: true }
+    });
+
+    const result = collectInitialWatermarkCandidates(
+        createExact48R96CollectionInput(imageData, alpha48, trial)
+    );
+
+    assert.equal(result.bestEffortFallback, false);
+    assert.equal(result.hypotheses.length, 0);
+});
+
+test('collectInitialWatermarkCandidates should derive the exact source witness independently of processed pool winners', () => {
+    const imageData = createFlatImageData(320, 320, 72);
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const exactTrial = createExact48R96Trial(imageData, alpha48);
+    applyWhiteWatermark(imageData, alpha48, exactTrial.position);
+    const poolCases = [
+        null,
+        { ...exactTrial, alphaGain: 0.6 },
+        {
+            ...exactTrial,
+            config: { ...exactTrial.config, marginRight: 95 },
+            alphaMap: new Float32Array(alpha48),
+            position: { ...exactTrial.position, x: exactTrial.position.x - 1 }
+        }
+    ];
+
+    for (const poolTrial of poolCases) {
+        const result = collectInitialWatermarkCandidates(
+            createExact48R96CollectionInput(
+                imageData,
+                alpha48,
+                poolTrial
+            )
+        );
+        assert.equal(result.bestEffortFallback, true);
+        assert.equal(
+            result.bestEffortReason,
+            'exact-48-r96-source-witness'
+        );
+        assert.equal(result.hypotheses[0].trial.alphaGain, 0.6);
+    }
+});
+
+test('collectInitialWatermarkCandidates should reject an alpha mismatch or a geometry absent from the current catalog', () => {
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const imageData = createFlatImageData(320, 320, 72);
+    const trial = createExact48R96Trial(imageData, alpha48);
+    applyWhiteWatermark(imageData, alpha48, trial.position);
+
+    const alphaMismatch = collectInitialWatermarkCandidates(
+        createExact48R96CollectionInput(
+            imageData,
+            new Float32Array(48 * 48),
+            trial
+        )
+    );
+    assert.equal(alphaMismatch.bestEffortFallback, false);
+    assert.equal(alphaMismatch.hypotheses.length, 0);
+
+    const catalogAbsentImage = createFlatImageData(2048, 2048, 72);
+    const catalogAbsentTrial = createExact48R96Trial(
+        catalogAbsentImage,
+        alpha48
+    );
+    applyWhiteWatermark(
+        catalogAbsentImage,
+        alpha48,
+        catalogAbsentTrial.position
+    );
+    const catalogAbsentInput = createExact48R96CollectionInput(
+        catalogAbsentImage,
+        alpha48,
+        null
+    );
+    catalogAbsentInput.config = {
+        logoSize: 96,
+        marginRight: 64,
+        marginBottom: 64
+    };
+    catalogAbsentInput.catalogPriorConfig = catalogAbsentInput.config;
+    const catalogAbsent = collectInitialWatermarkCandidates(
+        catalogAbsentInput
+    );
+    assert.equal(catalogAbsent.bestEffortFallback, false);
+    assert.equal(catalogAbsent.hypotheses.length, 0);
+});
+
+test('collectInitialWatermarkCandidates should reject flat, shifted, and repeated exact-geometry controls', () => {
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const controls = [
+        ['flat', () => createFlatImageData(320, 320, 72)],
+        ['shifted', (position) => {
+            const imageData = createFlatImageData(320, 320, 72);
+            applyWhiteWatermark(imageData, alpha48, {
+                ...position,
+                x: position.x + 12
+            });
+            return imageData;
+        }],
+        ['repeated', (position) => {
+            const imageData = createFlatImageData(320, 320, 72);
+            for (const [offsetX, offsetY] of [
+                [0, 0], [-1, 0], [0, -1], [-1, -1]
+            ]) {
+                applyWhiteWatermark(imageData, alpha48, {
+                    ...position,
+                    x: position.x + offsetX * 48,
+                    y: position.y + offsetY * 48
+                });
+            }
+            return imageData;
+        }]
+    ];
+
+    for (const [name, createControl] of controls) {
+        const placeholder = createFlatImageData(320, 320, 72);
+        const position = createExact48R96Trial(
+            placeholder,
+            alpha48
+        ).position;
+        const imageData = createControl(position);
+        const trial = createExact48R96Trial(imageData, alpha48);
+        const result = collectInitialWatermarkCandidates(
+            createExact48R96CollectionInput(imageData, alpha48, trial)
+        );
+        assert.equal(result.bestEffortFallback, false, name);
+        assert.equal(result.hypotheses.length, 0, name);
     }
 });
