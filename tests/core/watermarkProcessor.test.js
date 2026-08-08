@@ -95,6 +95,142 @@ function measureIssue111ReferenceDelta(actual, expected) {
     };
 }
 
+function createSolidImageData(width, height, color) {
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let index = 0; index < data.length; index += 4) {
+        data[index] = color[0];
+        data[index + 1] = color[1];
+        data[index + 2] = color[2];
+        data[index + 3] = 255;
+    }
+    return { width, height, data };
+}
+
+function paintIssue120DiagonalStripe(imageData, position) {
+    for (let row = -32; row < 128; row++) {
+        for (let col = -32; col < 128; col++) {
+            if (Math.abs(row - (-col + 20)) > 6) continue;
+            const x = position.x + col;
+            const y = position.y + row;
+            if (x < 0 || y < 0 || x >= imageData.width || y >= imageData.height) continue;
+            const index = (y * imageData.width + x) * 4;
+            imageData.data[index] = 35;
+            imageData.data[index + 1] = 58;
+            imageData.data[index + 2] = 70;
+        }
+    }
+}
+
+function fillIssue120Rect(imageData, x, y, width, height, color) {
+    for (let row = y; row < y + height; row++) {
+        for (let col = x; col < x + width; col++) {
+            const index = (row * imageData.width + col) * 4;
+            imageData.data[index] = color[0];
+            imageData.data[index + 1] = color[1];
+            imageData.data[index + 2] = color[2];
+        }
+    }
+}
+
+function paintIssue120LetterE(imageData, x, y) {
+    const color = [24, 45, 64];
+    fillIssue120Rect(imageData, x, y, 8, 52, color);
+    fillIssue120Rect(imageData, x, y, 30, 8, color);
+    fillIssue120Rect(imageData, x, y + 22, 25, 8, color);
+    fillIssue120Rect(imageData, x, y + 44, 30, 8, color);
+}
+
+function measureRegionMeanAbsoluteDelta(actual, expected, position) {
+    let sum = 0;
+    let count = 0;
+    for (let row = 0; row < position.height; row++) {
+        for (let col = 0; col < position.width; col++) {
+            const index = ((position.y + row) * actual.width + position.x + col) * 4;
+            for (let channel = 0; channel < 3; channel++) {
+                sum += Math.abs(actual.data[index + channel] - expected.data[index + channel]);
+                count++;
+            }
+        }
+    }
+    return sum / Math.max(1, count);
+}
+
+test('processWatermarkImageData should best-effort rescue an exact 96px new-margin source witness over structured content', () => {
+    const position = { x: 2464, y: 1248, width: 96, height: 96 };
+    const alphaMap = getEmbeddedAlphaMap('96-20260520');
+    const clean = createSolidImageData(2752, 1536, [201, 239, 235]);
+    paintIssue120DiagonalStripe(clean, position);
+    const watermarked = cloneImageDataForIssue111(clean);
+    applySyntheticWatermark(watermarked, alphaMap, position);
+    const beforeDelta = measureRegionMeanAbsoluteDelta(watermarked, clean, position);
+
+    const result = removeWatermarkFromImageDataSync(watermarked, { debugTimings: true });
+    const afterDelta = measureRegionMeanAbsoluteDelta(result.imageData, clean, position);
+
+    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
+    assert.deepEqual(result.meta.config, {
+        logoSize: 96,
+        marginRight: 192,
+        marginBottom: 192,
+        alphaVariant: '20260520'
+    });
+    assert.deepEqual(result.meta.position, position);
+    assert.equal(result.meta.alphaGain, 0.45);
+    assert.equal(result.meta.presenceConfirmed, false);
+    assert.equal(result.meta.bestEffort, true);
+    assert.equal(result.meta.bestEffortReason, 'exact-96-r192-source-witness');
+    assert.match(result.meta.source, /source-witness-rescue/);
+    assert.ok(afterDelta < beforeDelta * 0.7, `before=${beforeDelta}, after=${afterDelta}`);
+});
+
+test('processWatermarkImageData should prefer a conservative exact source witness over a damaging shifted dark candidate', () => {
+    const position = { x: 2464, y: 1248, width: 96, height: 96 };
+    const alphaMap = getEmbeddedAlphaMap('96-20260520');
+    const clean = createSolidImageData(2752, 1536, [201, 239, 235]);
+    fillIssue120Rect(clean, 2380, 1212, 260, 150, [249, 250, 248]);
+    paintIssue120LetterE(clean, 2484, 1268);
+    const watermarked = cloneImageDataForIssue111(clean);
+    applySyntheticWatermark(watermarked, alphaMap, position);
+
+    const result = removeWatermarkFromImageDataSync(watermarked);
+    const roiDelta = measureRegionMeanAbsoluteDelta(result.imageData, clean, position);
+    const contentDelta = measureRegionMeanAbsoluteDelta(result.imageData, clean, {
+        x: 2484,
+        y: 1268,
+        width: 30,
+        height: 52
+    });
+
+    assert.match(result.meta.source, /source-witness-rescue/);
+    assert.deepEqual(result.meta.position, position);
+    assert.equal(result.meta.alphaGain, 0.45);
+    assert.equal(result.meta.qualitySignals?.damageWarning, false);
+    assert.ok(roiDelta <= 5, `roiDelta=${roiDelta}, source=${result.meta.source}`);
+    assert.ok(contentDelta <= 25, `contentDelta=${contentDelta}, source=${result.meta.source}`);
+});
+
+test('processWatermarkImageData should repair expanded new-margin alpha edges on a flat background', () => {
+    const position = { x: 2464, y: 1248, width: 96, height: 96 };
+    const alphaMap = getEmbeddedAlphaMap('96-20260520');
+    const expandedAlphaMap = warpAlphaMap(alphaMap, 96, { scale: 1.03 });
+    const clean = createSolidImageData(2752, 1536, [201, 239, 235]);
+    const watermarked = cloneImageDataForIssue111(clean);
+    applySyntheticWatermark(watermarked, expandedAlphaMap, position);
+
+    const result = removeWatermarkFromImageDataSync(watermarked);
+    const afterDelta = measureRegionMeanAbsoluteDelta(result.imageData, clean, position);
+
+    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
+    assert.deepEqual(result.meta.position, position);
+    assert.ok(
+        result.meta.alphaAdjustmentStages?.some((stage) =>
+            stage.stage === 'new-margin-96-flat-background-fill'
+        ),
+        JSON.stringify(result.meta.alphaAdjustmentStages)
+    );
+    assert.ok(afterDelta <= 0.08, `afterDelta=${afterDelta}`);
+});
+
 test('processWatermarkImageData should run in Node without asset imports and record single-pass meta', () => {
     const alpha96 = createSyntheticAlphaMap(96);
     const alpha48 = interpolateAlphaMap(alpha96, 96, 48);

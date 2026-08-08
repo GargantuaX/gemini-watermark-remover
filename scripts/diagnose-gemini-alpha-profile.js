@@ -22,6 +22,7 @@ import {
     decodeImageDataInNode,
     listBenchmarkSampleAssets
 } from './sample-benchmark.js';
+import { buildAlphaProfileAdmission } from './alpha-profile-admission.js';
 
 const DEFAULT_OUTPUT_DIR = path.resolve('.artifacts/gemini-alpha-profile-diagnosis/latest');
 const SHEET_PANEL_SIZE = 190;
@@ -448,29 +449,6 @@ function buildSampleDiagnosis({ before, current, floorOnly, profileTrials, postC
     };
 }
 
-function buildAdmission({ current, trial }) {
-    const haloImproved = Number.isFinite(current.positiveHaloLum) &&
-        Number.isFinite(trial.positiveHaloLum) &&
-        trial.positiveHaloLum < current.positiveHaloLum - 0.5;
-    const gradientSafe = Number.isFinite(current.gradient) &&
-        Number.isFinite(trial.gradient) &&
-        trial.gradient <= current.gradient + 0.01;
-    const artifactSafe = Number.isFinite(current.visualArtifactCost) &&
-        Number.isFinite(trial.visualArtifactCost) &&
-        trial.visualArtifactCost <= current.visualArtifactCost + 0.001;
-    const spatialSafe = Number.isFinite(current.spatial) &&
-        Number.isFinite(trial.spatial) &&
-        Math.abs(trial.spatial) <= Math.abs(current.spatial) + 0.02;
-
-    return {
-        productionCandidate: haloImproved && gradientSafe && artifactSafe && spatialSafe,
-        haloImproved,
-        gradientSafe,
-        artifactSafe,
-        spatialSafe
-    };
-}
-
 function stripImageData(trial) {
     const { imageData, ...rest } = trial;
     return rest;
@@ -697,7 +675,7 @@ async function run() {
             });
             profileTrials.push({
                 ...trial,
-                admission: buildAdmission({ current, trial })
+                admission: buildAlphaProfileAdmission({ current, trial })
             });
         }
         const productionCandidates = profileTrials
@@ -725,7 +703,7 @@ async function run() {
             });
             postCorrectionTrials.push({
                 ...trial,
-                admission: buildAdmission({ current, trial })
+                admission: buildAlphaProfileAdmission({ current, trial })
             });
         }
         const postCorrectionCandidates = postCorrectionTrials
@@ -765,7 +743,7 @@ async function run() {
         policy: {
             reportOnly: true,
             scriptWritesProductionCode: false,
-            admissionRule: 'A profile variant is only a production candidate when halo improves by >0.5 while gradient, spatial residual, and visualArtifactCost do not increase beyond the tiny tolerance encoded in the script.'
+            admissionRule: 'A profile variant is only a production candidate when halo improves by >0.5, gradient/spatial/artifact metrics stay within tolerance, residual visibility is false, and every measured alpha band has positive delta <= 0.5 luma.'
         },
         outputDir: args.outputDir,
         sheetPath,

@@ -66,6 +66,19 @@ const EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS = [
     [-8, 8], [-4, 4], [4, -4], [8, -8],
     [-12, -6], [-6, -12], [6, 12], [12, 6]
 ];
+const EXACT_96_R192_SOURCE_WITNESS_MIN_GRADIENT = 0.02;
+const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PROMINENCE = 0.2;
+const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PERCENTILE = 0.5;
+const EXACT_96_R192_SOURCE_WITNESS_GAIN = 0.45;
+const EXACT_96_R192_SOURCE_WITNESS_REASON =
+    'exact-96-r192-source-witness';
+const EXACT_96_R192_SOURCE_WITNESS_DECOY_SHIFTS = [
+    [-24, 0], [-16, 0], [-8, 0], [8, 0], [16, 0], [24, 0],
+    [0, -24], [0, -16], [0, -8], [0, 8], [0, 16], [0, 24],
+    [-16, -16], [-8, -8], [8, 8], [16, 16],
+    [-16, 16], [-8, 8], [8, -8], [16, -16],
+    [-24, -12], [-12, -24], [12, 24], [24, 12]
+];
 
 // The Allenk V2 renderer and the trusted 768x1376 sample cluster agree on
 // 48px / 73px geometry. Keep it out of the generic catalog because structured
@@ -254,6 +267,122 @@ function createExact48R96SourceWitnessRescueTrial({
                     sourceLocalization.twoSidedEdgeProminence,
                 gradientPercentile:
                     sourceLocalization.gradientPercentile
+            }
+        },
+        includeImageData: false
+    });
+    return measurePresenceLocalization(
+        originalImageData,
+        rescueTrial
+    ).repeatedTemplateCollision
+        ? null
+        : rescueTrial;
+}
+
+function createExact96R192SourceWitnessRescueTrial({
+    originalImageData,
+    alpha96Variants,
+    config,
+    catalogPriorConfig,
+    fixedSelection,
+    automaticSelection
+}) {
+    const alphaMap = alpha96Variants?.['20260520'];
+    if (
+        !originalImageData ||
+        !alphaMap ||
+        alphaMap.length !== 96 * 96
+    ) {
+        return null;
+    }
+
+    const catalogEntry = resolveGeminiWatermarkSearchCatalogEntries(
+        originalImageData.width,
+        originalImageData.height,
+        catalogPriorConfig ?? config
+    ).find((entry) => (
+        entry?.metadata?.evidenceGate === 'required' &&
+        entry.config?.logoSize === 96 &&
+        entry.config.marginRight === 192 &&
+        entry.config.marginBottom === 192 &&
+        entry.config.alphaVariant === '20260520'
+    ));
+    if (!catalogEntry) return null;
+
+    const position = {
+        x: originalImageData.width - 192 - 96,
+        y: originalImageData.height - 192 - 96,
+        width: 96,
+        height: 96
+    };
+    const acceptedEligibleTrials = [
+        fixedSelection?.selectedTrial,
+        automaticSelection?.selectedTrial
+    ].filter((trial, index, trials) => (
+        trial?.accepted === true &&
+        trial.evaluation?.eligible === true &&
+        trials.indexOf(trial) === index
+    ));
+    const hasDriftedDarkPolaritySelection = acceptedEligibleTrials.some(
+        (trial) => (
+            trial.provenance?.darkPolarity === true &&
+            (
+                trial.position?.x !== position.x ||
+                trial.position?.y !== position.y ||
+                trial.position?.width !== position.width ||
+                trial.position?.height !== position.height
+            )
+        )
+    );
+    if (
+        acceptedEligibleTrials.length > 0 &&
+        !hasDriftedDarkPolaritySelection
+    ) {
+        return null;
+    }
+    const sourceLocalization = measureOutputResidualLocalization({
+        imageData: originalImageData,
+        alphaMap,
+        position,
+        decoyShifts: EXACT_96_R192_SOURCE_WITNESS_DECOY_SHIFTS
+    });
+    const gradientSignal = Number(sourceLocalization.gradientSignedTarget);
+    if (
+        !Number.isFinite(gradientSignal) ||
+        gradientSignal < EXACT_96_R192_SOURCE_WITNESS_MIN_GRADIENT ||
+        Number(sourceLocalization.twoSidedEdgeProminence) <
+            EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PROMINENCE ||
+        Number(sourceLocalization.twoSidedEdgePercentile) <
+            EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PERCENTILE
+    ) {
+        return null;
+    }
+
+    const rescueTrial = evaluateRestorationCandidate({
+        originalImageData,
+        alphaMap,
+        position,
+        source: 'standard+catalog+source-witness-rescue',
+        config: catalogEntry.config,
+        baselineNearBlackRatio: calculateNearBlackRatio(
+            originalImageData,
+            position
+        ),
+        alphaGain: EXACT_96_R192_SOURCE_WITNESS_GAIN,
+        provenance: {
+            catalogVariant: true,
+            catalogFamily: catalogEntry.metadata.family,
+            catalogSourcePriority: catalogEntry.metadata.sourcePriority,
+            catalogEvidenceGate: catalogEntry.metadata.evidenceGate,
+            sourceWitnessRescue: true,
+            sourceWitnessReason: EXACT_96_R192_SOURCE_WITNESS_REASON,
+            sourceWitnessGate: {
+                spatialSignedTarget: sourceLocalization.spatialSignedTarget,
+                gradientSignedTarget: gradientSignal,
+                twoSidedEdgeProminence:
+                    sourceLocalization.twoSidedEdgeProminence,
+                twoSidedEdgePercentile:
+                    sourceLocalization.twoSidedEdgePercentile
             }
         },
         includeImageData: false
@@ -819,8 +948,22 @@ export function collectInitialWatermarkCandidates(input = {}) {
             config: input.config,
             catalogPriorConfig: input.catalogPriorConfig
         });
-    const bestEffortSelections = presenceConfirmed ||
+    const exact96R192SourceWitnessRescueTrial =
         exact48R96SourceWitnessRescueTrial
+            ? null
+            : createExact96R192SourceWitnessRescueTrial({
+                originalImageData: input.originalImageData,
+                alpha96Variants: input.alpha96Variants,
+                config: input.config,
+                catalogPriorConfig: input.catalogPriorConfig,
+                fixedSelection,
+                automaticSelection
+            });
+    const sourceWitnessRescueTrial =
+        exact48R96SourceWitnessRescueTrial ??
+        exact96R192SourceWitnessRescueTrial;
+    const bestEffortSelections = presenceConfirmed ||
+        sourceWitnessRescueTrial
         ? []
         : [fixedSelection, automaticSelection]
             .filter((selection, index, values) => (
@@ -831,7 +974,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 )
             ));
     const bestEffortFallback = !presenceConfirmed && Boolean(
-        exact48R96SourceWitnessRescueTrial ||
+        sourceWitnessRescueTrial ||
         bestEffortSelections.length > 0
     );
     if (!presenceConfirmed && !bestEffortFallback) {
@@ -930,8 +1073,8 @@ export function collectInitialWatermarkCandidates(input = {}) {
         ));
     const trials = (
         bestEffortFallback
-            ? exact48R96SourceWitnessRescueTrial
-                ? [exact48R96SourceWitnessRescueTrial]
+            ? sourceWitnessRescueTrial
+                ? [sourceWitnessRescueTrial]
                 : [
                 includeFixedSelection ? fixedSelection?.selectedTrial : null,
                 includeAutomaticSelection ? automaticSelection?.selectedTrial : null,
@@ -995,24 +1138,24 @@ export function collectInitialWatermarkCandidates(input = {}) {
             : null,
         1004
     );
-    const exact48R96SourceWitnessRescueHypothesis =
+    const sourceWitnessRescueHypothesis =
         createCandidateHypothesis(
-            keepNonRepeatedTrial(exact48R96SourceWitnessRescueTrial) &&
+            keepNonRepeatedTrial(sourceWitnessRescueTrial) &&
                 isGeometryCompatibleWithLock(
-                    exact48R96SourceWitnessRescueTrial,
+                    sourceWitnessRescueTrial,
                     geometryLockWitness
                 )
-                ? exact48R96SourceWitnessRescueTrial
+                ? sourceWitnessRescueTrial
                 : null,
             1005
         );
     const preferredHypotheses = [
         fixedSelectedHypothesis,
         automaticSelectedHypothesis,
+        sourceWitnessRescueHypothesis,
         fixedPresenceHypothesis,
         automaticPresenceHypothesis,
-        confirmedV2MediumRescueHypothesis,
-        exact48R96SourceWitnessRescueHypothesis
+        confirmedV2MediumRescueHypothesis
     ].filter((hypothesis, index, values) => (
         hypothesis &&
         values.findIndex((candidate) => sameTrialIdentity(
@@ -1028,7 +1171,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
     const hypotheses = [...preferredHypotheses, ...retainedAlternatives]
         .map((hypothesis) => ({
             ...hypothesis,
-            presenceStatus: exact48R96SourceWitnessRescueTrial
+            presenceStatus: sourceWitnessRescueTrial
                 ? 'source-witness'
                 : bestEffortFallback
                 ? 'selector-only'
@@ -1056,8 +1199,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
         hypotheses,
         presenceConfirmed,
         bestEffortFallback,
-        bestEffortReason: exact48R96SourceWitnessRescueTrial
-            ? EXACT_48_R96_SOURCE_WITNESS_REASON
+        bestEffortReason: sourceWitnessRescueTrial
+            ? sourceWitnessRescueTrial.provenance?.sourceWitnessReason ??
+                'source-witness'
             : bestEffortFallback
             ? 'presence-witness-unconfirmed'
             : null,
