@@ -187,6 +187,7 @@ pnpm serve
 - 根路径 `/` 现在是轻量入口页，只负责引导到官网、userscript 安装地址和仓库内保留的内部预览页。
 - 内部浏览器预览页位于 `/dev-preview.html`，当前保留为中文静态单图对比 harness，用于本地算法/UI 调试，不再作为对外开发者预览站，也不再维护多语言和主题切换。
 - `pnpm dev` / `pnpm serve` 仍会提供 userscript、probe 页面和这些静态资产。
+- 跟进附带 Release 样本的 GitHub issue 时，可用 `pnpm issue:verify -- --issue <编号>` 复用登录态、缓存样本、核验摘要并生成评论草稿；详见 [GitHub Issue 样本复核](docs/github-issue-verification.zh.md)。
 
 ### macOS 下调试油猴固定 Profile
 

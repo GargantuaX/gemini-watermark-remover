@@ -87,6 +87,7 @@
     "probe:real-page:copy-download": "node scripts/real-page-copy-download-probe.js",
     "benchmark:samples": "node scripts/sample-benchmark.js",
     "benchmark:userscript": "node scripts/userscript-benchmark.js",
+    "issue:verify": "node scripts/verify-github-issue.js",
     "benchmark:online-sample:gate": "node scripts/gate-online-gemini-watermark-sample-benchmark.js",
     "report:online-sample:remaining-audit": "node scripts/audit-online-tier-a-remaining.js",
     "report:online-sample:remaining-taxonomy": "node scripts/create-online-sample-remaining-failure-taxonomy.js",

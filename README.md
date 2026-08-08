@@ -187,6 +187,7 @@ Notes:
 - The root path `/` is now a lightweight entry page that points to the official website, the userscript artifact, and the retained internal preview page.
 - The internal browser preview harness lives at `/dev-preview.html`, is now kept as a static Chinese-only single-image compare harness for local algorithm/UI debugging, and no longer maintains public-facing locale or theme-switching features.
 - `pnpm dev` / `pnpm serve` still host the userscript, probe pages, and these static assets.
+- For GitHub issues with Release-hosted samples, `pnpm issue:verify -- --issue <number>` reuses the `gh` login, caches and verifies the samples, and generates a reviewable comment draft. See [GitHub issue sample verification](docs/github-issue-verification.zh.md).
 
 ### Tampermonkey Debugging on macOS
 
