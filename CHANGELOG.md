@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.34 - 2026-08-08
+
+### Watermark Removal
+
+- Added evidence-gated V2 and exact 96px/R192 source-witness rescues so all 14 reported issue samples produce a best-effort result instead of leaving three visibly watermarked inputs unchanged.
+- Preferred a conservative exact white-polarity R192 candidate when a shifted dark-polarity candidate would damage nearby content; on the reported text-overlap sample, the newly clipped pixel ratio drops from about 3.55% to 0.
+- Preserved visible-residual and uncertainty metadata for imperfect results. This release improves coverage and content safety but does not claim to eliminate the remaining variable contour residuals.
+
+### Verification and Tooling
+
+- Added a repeatable GitHub issue verification command that reuses the authenticated `gh` keyring session, verifies Release asset SHA-256 digests, caches samples, and generates reviewable JSON, Markdown, CSV, and opt-in comment drafts.
+- Hardened diagnostic alpha-profile admission so relative score improvement alone cannot promote a visibly dirty candidate; absolute residual visibility, signed halo, and alpha-band checks must also pass.
+- Revalidated all 14 reported assets after the merge: watermark detection reached 14/14, the strict end-to-end quality gate passed 3/14, and the alpha-profile diagnostic admitted 0 production candidates.
+
 ## 1.0.33 - 2026-07-29
 
 ### CLI Packaging
