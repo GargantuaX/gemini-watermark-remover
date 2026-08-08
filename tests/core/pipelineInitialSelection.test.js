@@ -5,6 +5,8 @@ import {
     collectInitialWatermarkCandidates,
     selectInitialWatermarkCandidate
 } from '../../src/core/pipelineInitialSelection.js';
+import { interpolateAlphaMap } from '../../src/core/adaptiveDetector.js';
+import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
 
 function createBaseInput(selectCandidate) {
     return {
@@ -13,6 +15,52 @@ function createBaseInput(selectCandidate) {
         position: { x: 20, y: 20, width: 48, height: 48 },
         alpha48: new Float32Array(48 * 48),
         alpha96: new Float32Array(96 * 96),
+        alphaGainCandidates: [1],
+        alphaPriorityGains: [1],
+        selectCandidate
+    };
+}
+
+function createFlatImageData(width, height, value = 96) {
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let index = 0; index < width * height; index++) {
+        const offset = index * 4;
+        data[offset] = value;
+        data[offset + 1] = value;
+        data[offset + 2] = value;
+        data[offset + 3] = 255;
+    }
+    return { width, height, data };
+}
+
+function applyWhiteWatermark(imageData, alphaMap, position) {
+    for (let y = 0; y < position.height; y++) {
+        for (let x = 0; x < position.width; x++) {
+            const alpha = alphaMap[y * position.width + x];
+            const offset = (
+                (position.y + y) * imageData.width +
+                position.x + x
+            ) * 4;
+            for (let channel = 0; channel < 3; channel++) {
+                imageData.data[offset + channel] = Math.round(
+                    imageData.data[offset + channel] * (1 - alpha) +
+                    255 * alpha
+                );
+            }
+        }
+    }
+}
+
+function createV2MediumCollectionInput(imageData, selectCandidate) {
+    return {
+        originalImageData: imageData,
+        config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+        position: { x: 624, y: 1232, width: 48, height: 48 },
+        alpha48: getEmbeddedAlphaMap(48),
+        alpha96: getEmbeddedAlphaMap(96),
+        getAlphaMap: (key) => key === '36-v2'
+            ? getEmbeddedAlphaMap('36-v2')
+            : null,
         alphaGainCandidates: [1],
         alphaPriorityGains: [1],
         selectCandidate
@@ -976,4 +1024,117 @@ test('collectInitialWatermarkCandidates should retain a localized direct-match p
         hypothesis.trial?.position?.width === 48 &&
         hypothesis.trial?.alphaGain <= 0.25
     )));
+});
+
+test('collectInitialWatermarkCandidates should rescue a strong exact 768x1376 V2 medium watermark when normal selection skips', () => {
+    const imageData = createFlatImageData(768, 1376, 72);
+    const alpha36V2 = getEmbeddedAlphaMap('36-v2');
+    const alpha48V2 = interpolateAlphaMap(alpha36V2, 36, 48);
+    const position = {
+        x: 768 - 73 - 48,
+        y: 1376 - 73 - 48,
+        width: 48,
+        height: 48
+    };
+    applyWhiteWatermark(imageData, alpha48V2, position);
+
+    const result = collectInitialWatermarkCandidates(
+        createV2MediumCollectionInput(imageData, () => ({
+            selectedTrial: null,
+            candidatePool: [],
+            source: 'skipped',
+            decisionTier: 'insufficient'
+        }))
+    );
+
+    const rescue = result.hypotheses.find((hypothesis) => (
+        hypothesis.trial?.provenance?.confirmedV2MediumRescue === true
+    ));
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(rescue, 'expected exact V2 medium rescue hypothesis');
+    assert.deepEqual(rescue.trial.config, {
+        logoSize: 48,
+        marginRight: 73,
+        marginBottom: 73,
+        alphaVariant: 'v2'
+    });
+    assert.equal(rescue.trial.alphaGain, 1);
+});
+
+test('collectInitialWatermarkCandidates should not rescue an exact 768x1376 image without V2 evidence', () => {
+    const imageData = createFlatImageData(768, 1376, 72);
+    const result = collectInitialWatermarkCandidates(
+        createV2MediumCollectionInput(imageData, () => ({
+            selectedTrial: null,
+            candidatePool: [],
+            source: 'skipped',
+            decisionTier: 'insufficient'
+        }))
+    );
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.equal(result.hypotheses.length, 0);
+});
+
+test('collectInitialWatermarkCandidates should only replace a sufficiently strong 36px V2 prior with the medium rescue', () => {
+    const imageData = createFlatImageData(768, 1376, 72);
+    const alpha36V2 = getEmbeddedAlphaMap('36-v2');
+    const alpha48V2 = interpolateAlphaMap(alpha36V2, 36, 48);
+    applyWhiteWatermark(imageData, alpha48V2, {
+        x: 768 - 73 - 48,
+        y: 1376 - 73 - 48,
+        width: 48,
+        height: 48
+    });
+    const prior = {
+        source: 'standard+catalog+validated',
+        config: {
+            logoSize: 36,
+            marginRight: 96,
+            marginBottom: 96,
+            alphaVariant: 'v2'
+        },
+        position: {
+            x: 768 - 96 - 36,
+            y: 1376 - 96 - 36,
+            width: 36,
+            height: 36
+        },
+        alphaMap: alpha36V2,
+        alphaGain: 1,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: 0,
+        originalGradientScore: 0.19,
+        processedSpatialScore: 0.01,
+        processedGradientScore: 0.12,
+        damage: { safe: true },
+        rankingKey: [2, -2, 0, 0.12, 1, 0],
+        provenance: {
+            catalogVariant: true,
+            alphaVariant: 'v2',
+            catalogFamily: 'gemini-v2-small',
+            catalogEvidenceGate: 'medium'
+        }
+    };
+
+    for (const [originalSpatialScore, expectedRescue] of [
+        [0.299, false],
+        [0.3, true]
+    ]) {
+        const selectedPrior = { ...prior, originalSpatialScore };
+        const result = collectInitialWatermarkCandidates(
+            createV2MediumCollectionInput(imageData, () => ({
+                selectedTrial: selectedPrior,
+                candidatePool: [selectedPrior],
+                source: selectedPrior.source,
+                decisionTier: 'validated-match'
+            }))
+        );
+
+        assert.equal(result.presenceConfirmed, true);
+        assert.equal(result.hypotheses.some((hypothesis) => (
+            hypothesis.trial?.provenance?.confirmedV2MediumRescue === true
+        )), expectedRescue);
+    }
 });
