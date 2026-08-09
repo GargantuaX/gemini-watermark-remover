@@ -69,6 +69,8 @@ const EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS = [
 const EXACT_96_R192_SOURCE_WITNESS_MIN_GRADIENT = 0.02;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PROMINENCE = 0.2;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PERCENTILE = 0.5;
+const EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL = 0.1;
+const EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL_PERCENTILE = 0.5;
 const EXACT_96_R192_SOURCE_WITNESS_GAIN = 0.45;
 const EXACT_96_R192_SOURCE_WITNESS_REASON =
     'exact-96-r192-source-witness';
@@ -346,8 +348,24 @@ function createExact96R192SourceWitnessRescueTrial({
         position,
         decoyShifts: EXACT_96_R192_SOURCE_WITNESS_DECOY_SHIFTS
     });
+    const spatialSignal = Number(sourceLocalization.spatialSignedTarget);
+    const spatialPercentile = Number(sourceLocalization.spatialPercentile);
     const gradientSignal = Number(sourceLocalization.gradientSignedTarget);
+    // White inverse removal needs positive signed evidence. Preserve the
+    // structured-content exception only when a separate drifted dark trial
+    // exists and the exact anchor still has strong localized spatial support;
+    // otherwise unsigned edges alone can reproduce the Issue #123 dark hole.
+    const hasSupportedSpatialPolarity = spatialSignal > 0 || (
+        hasDriftedDarkPolaritySelection &&
+        Math.abs(spatialSignal) >=
+            EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL &&
+        spatialPercentile >=
+            EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL_PERCENTILE
+    );
     if (
+        !Number.isFinite(spatialSignal) ||
+        !Number.isFinite(spatialPercentile) ||
+        !hasSupportedSpatialPolarity ||
         !Number.isFinite(gradientSignal) ||
         gradientSignal < EXACT_96_R192_SOURCE_WITNESS_MIN_GRADIENT ||
         Number(sourceLocalization.twoSidedEdgeProminence) <
@@ -377,7 +395,8 @@ function createExact96R192SourceWitnessRescueTrial({
             sourceWitnessRescue: true,
             sourceWitnessReason: EXACT_96_R192_SOURCE_WITNESS_REASON,
             sourceWitnessGate: {
-                spatialSignedTarget: sourceLocalization.spatialSignedTarget,
+                spatialSignedTarget: spatialSignal,
+                spatialPercentile,
                 gradientSignedTarget: gradientSignal,
                 twoSidedEdgeProminence:
                     sourceLocalization.twoSidedEdgeProminence,
