@@ -122,6 +122,40 @@ test('getVideoAlphaMap should support experimental embedded alpha profile select
     assert.ok(legacyMax > defaultMax, { defaultMax, legacyMax });
 });
 
+test('detectVideoWatermarkFromFrames should use the V1 alpha family for projected 32px video marks', () => {
+    const width = 848;
+    const height = 478;
+    const target = resolveVideoWatermarkCandidates(width, height)
+        .find((candidate) => candidate.id === 'veo-1080p-inset');
+    const v1Alpha = getVideoAlphaMap(target.size, {
+        candidate: target,
+        alphaProfile: 48
+    });
+    const frames = [];
+
+    for (let i = 0; i < 4; i++) {
+        const imageData = createPatternImageData(width, height);
+        applyWhiteWatermark(imageData, v1Alpha, {
+            x: target.x,
+            y: target.y,
+            width: target.size,
+            height: target.size
+        });
+        frames.push({ timestamp: i / 24, imageData });
+    }
+
+    const result = detectVideoWatermarkFromFrames({
+        frames,
+        width,
+        height,
+        candidates: [target],
+        minConfidence: 0.02
+    });
+
+    assert.equal(result.candidate.id, target.id);
+    assert.deepEqual(result.alphaMap, v1Alpha);
+});
+
 test('detectVideoWatermarkFromFrames should auto-select a legacy alpha shape for relocated portrait frames', () => {
     const width = 720;
     const height = 1280;

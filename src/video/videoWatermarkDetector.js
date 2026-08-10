@@ -18,6 +18,7 @@ const VIDEO_INSET_ALPHA_EDGE_BOOST = 0.035;
 const ALPHA_REFINEMENT_ROUNDS = 5;
 const LOGO_VALUE = 255;
 const AUTO_ALPHA_SHAPE_MIN_SIZE = 40;
+const VIDEO_V1_ALPHA_MAX_SIZE = AUTO_ALPHA_SHAPE_MIN_SIZE - 1;
 const AUTO_ALPHA_SHAPE_MIN_IMPROVEMENT = 0.04;
 const AUTO_ALPHA_SHAPE_MIN_RELATIVE_IMPROVEMENT = 0.08;
 const AUTO_ALPHA_SHAPE_MAX_EDGE_BOOST = 0.12;
@@ -97,7 +98,10 @@ export function resolveVideoAlphaEdgeBoost(candidate = null) {
 }
 
 function getVideoAlphaMap(size, options = {}) {
-    const profile = normalizeVideoAlphaProfile(options.profile ?? options.alphaProfile);
+    const requestedProfile = options.profile ?? options.alphaProfile;
+    const profile = requestedProfile === undefined || requestedProfile === null || requestedProfile === ''
+        ? (size <= VIDEO_V1_ALPHA_MAX_SIZE ? 48 : VIDEO_ALPHA_PROFILE)
+        : normalizeVideoAlphaProfile(requestedProfile);
     const alphaSource =
         getEmbeddedAlphaMap(profile) ||
         getEmbeddedAlphaMap(VIDEO_ALPHA_PROFILE) ||

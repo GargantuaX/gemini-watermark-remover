@@ -140,6 +140,7 @@ async function blobUrlToBuffer(page) {
 
 async function collectVideoExportControls(page) {
     return await page.evaluate(() => ({
+        adaptiveAlpha: Boolean(document.getElementById('adaptiveAlpha')?.checked),
         denoiseBackend: document.getElementById('denoiseBackend')?.value || '',
         edgeDenoiseStrength: Number(document.getElementById('edgeDenoiseStrength')?.value),
         videoBitrateMbps: Number(document.getElementById('videoBitrateMbps')?.value),
@@ -258,6 +259,9 @@ export async function exportVideoBackendVariant({
                 }, Math.max(0.5, Math.min(1.5, alphaLocalBodyScale)));
             }
             if (adaptiveAlpha) {
+                await page.evaluate(() => {
+                    window.__gwrVideoOverrideAdaptiveAlpha = true;
+                });
                 await setCheckboxValue(page, '#adaptiveAlpha', true);
             }
             if (Number.isFinite(edgeDenoiseStrength)) {
