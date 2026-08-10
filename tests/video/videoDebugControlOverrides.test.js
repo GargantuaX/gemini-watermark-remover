@@ -4,6 +4,22 @@ import assert from 'node:assert/strict';
 import {
     applyVideoBitrateDebugOverride
 } from '../../src/video/videoDebugControlOverrides.js';
+import * as videoDebugControlOverrides from '../../src/video/videoDebugControlOverrides.js';
+
+test('applyVideoAdaptiveAlphaDebugOverride should restore an explicit SDK choice after automatic presets', () => {
+    assert.equal(typeof videoDebugControlOverrides.applyVideoAdaptiveAlphaDebugOverride, 'function');
+
+    const checkbox = { checked: false };
+    const applied = videoDebugControlOverrides.applyVideoAdaptiveAlphaDebugOverride({
+        windowObject: {
+            __gwrVideoOverrideAdaptiveAlpha: true
+        },
+        adaptiveAlphaInput: checkbox
+    });
+
+    assert.equal(applied, true);
+    assert.equal(checkbox.checked, true);
+});
 
 test('applyVideoBitrateDebugOverride should write bitrate overrides after automatic presets', () => {
     const input = { value: '12' };

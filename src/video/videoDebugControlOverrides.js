@@ -1,3 +1,14 @@
+export function applyVideoAdaptiveAlphaDebugOverride({
+    windowObject = globalThis,
+    adaptiveAlphaInput
+} = {}) {
+    const adaptiveAlpha = windowObject?.__gwrVideoOverrideAdaptiveAlpha;
+    if (typeof adaptiveAlpha !== 'boolean' || !adaptiveAlphaInput) return false;
+
+    adaptiveAlphaInput.checked = adaptiveAlpha;
+    return true;
+}
+
 export function applyVideoBitrateDebugOverride({
     windowObject = globalThis,
     videoBitrateInput,

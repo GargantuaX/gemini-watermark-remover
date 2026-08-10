@@ -182,6 +182,7 @@ async function readDownloadBufferFromPage(page) {
 
 async function collectVideoControls(page) {
     return page.evaluate(() => ({
+        adaptiveAlpha: Boolean(document.getElementById('adaptiveAlpha')?.checked),
         denoiseBackend: document.getElementById('denoiseBackend')?.value || '',
         edgeDenoiseStrength: Number(document.getElementById('edgeDenoiseStrength')?.value),
         residualCleanupStrength: Number(document.getElementById('residualCleanup')?.value),
@@ -224,6 +225,9 @@ async function processVideoWithPreviewPage(inputPath, options = {}) {
             await setControlValue(page, '#denoiseBackend', denoiseBackend);
 
             if (adaptiveAlpha) {
+                await page.evaluate(() => {
+                    window.__gwrVideoOverrideAdaptiveAlpha = true;
+                });
                 await setCheckboxValue(page, '#adaptiveAlpha', true);
             }
             if (allowLowConfidence) {

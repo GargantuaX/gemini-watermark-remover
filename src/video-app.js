@@ -18,7 +18,10 @@ import {
     getRelocatedReviewPresetConfig
 } from './video/videoPresetPolicy.js';
 import { resolveAllenkFdncnnRuntimeProfile } from './video/videoDenoiseRuntimePolicy.js';
-import { applyVideoBitrateDebugOverride } from './video/videoDebugControlOverrides.js';
+import {
+    applyVideoAdaptiveAlphaDebugOverride,
+    applyVideoBitrateDebugOverride
+} from './video/videoDebugControlOverrides.js';
 import {
     consumeDebugFileHandoff,
     getDebugFileKind,
@@ -740,6 +743,10 @@ function applyAutomaticPreset(detection = state.detection, metadata = state.meta
 }
 
 function applyDebugControlOverrides() {
+    applyVideoAdaptiveAlphaDebugOverride({
+        windowObject: window,
+        adaptiveAlphaInput: els.adaptiveAlpha
+    });
     if (typeof window.__gwrVideoOverrideDenoiseBackend === 'string') {
         if (els.denoiseBackend.value !== window.__gwrVideoOverrideDenoiseBackend) {
             els.denoiseBackend.value = window.__gwrVideoOverrideDenoiseBackend;
