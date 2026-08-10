@@ -68,6 +68,67 @@ function applyBlackWatermark(imageData, alphaMap, position) {
     }
 }
 
+function paintIssue123ContentCollision(imageData, alphaMap, position) {
+    let randomState = 4;
+    const random = () => {
+        randomState = (
+            Math.imul(randomState, 1664525) + 1013904223
+        ) >>> 0;
+        return randomState / 0x100000000;
+    };
+    const blockSize = 4;
+    for (let top = 0; top < position.height; top += blockSize) {
+        for (let left = 0; left < position.width; left += blockSize) {
+            const value = Math.round(128 + (random() * 2 - 1) * 96);
+            for (let y = top; y < top + blockSize; y++) {
+                for (let x = left; x < left + blockSize; x++) {
+                    const offset = (
+                        (position.y + y) * imageData.width +
+                        position.x + x
+                    ) * 4;
+                    imageData.data[offset] = value;
+                    imageData.data[offset + 1] = value;
+                    imageData.data[offset + 2] = value;
+                }
+            }
+        }
+    }
+
+    const edgeStrengths = new Float64Array(alphaMap.length);
+    let maximumEdgeStrength = 0;
+    for (let y = 1; y < position.height - 1; y++) {
+        for (let x = 1; x < position.width - 1; x++) {
+            const index = y * position.width + x;
+            const gradientX = (alphaMap[index + 1] - alphaMap[index - 1]) / 2;
+            const gradientY = (
+                alphaMap[index + position.width] -
+                alphaMap[index - position.width]
+            ) / 2;
+            const edgeStrength = Math.hypot(gradientX, gradientY);
+            edgeStrengths[index] = edgeStrength;
+            maximumEdgeStrength = Math.max(maximumEdgeStrength, edgeStrength);
+        }
+    }
+    for (let y = 0; y < position.height; y++) {
+        for (let x = 0; x < position.width; x++) {
+            const index = y * position.width + x;
+            const darkening = Math.round(
+                edgeStrengths[index] / maximumEdgeStrength * 24
+            );
+            const offset = (
+                (position.y + y) * imageData.width +
+                position.x + x
+            ) * 4;
+            for (let channel = 0; channel < 3; channel++) {
+                imageData.data[offset + channel] = Math.max(
+                    0,
+                    imageData.data[offset + channel] - darkening
+                );
+            }
+        }
+    }
+}
+
 function createExact48R96Trial(imageData, alpha48, overrides = {}) {
     const position = {
         x: imageData.width - 96 - 48,
@@ -119,6 +180,32 @@ function createExact48R96CollectionInput(imageData, alpha48, trial) {
         },
         alpha48,
         alpha96: getEmbeddedAlphaMap(96),
+        allowAdaptiveSearch: false,
+        alphaGainCandidates: [1],
+        alphaPriorityGains: [1],
+        selectCandidate: () => selection
+    };
+}
+
+function createExact96R192CollectionInput(imageData, alpha96) {
+    const selection = {
+        selectedTrial: null,
+        candidatePool: [],
+        source: 'skipped',
+        decisionTier: 'insufficient'
+    };
+    return {
+        originalImageData: imageData,
+        config: { logoSize: 96, marginRight: 64, marginBottom: 64 },
+        position: {
+            x: imageData.width - 64 - 96,
+            y: imageData.height - 64 - 96,
+            width: 96,
+            height: 96
+        },
+        alpha48: getEmbeddedAlphaMap(48),
+        alpha96,
+        alpha96Variants: { '20260520': alpha96 },
         allowAdaptiveSearch: false,
         alphaGainCandidates: [1],
         alphaPriorityGains: [1],
@@ -1271,6 +1358,27 @@ test('collectInitialWatermarkCandidates should reject an exact48 edge witness wi
 
     const result = collectInitialWatermarkCandidates(
         createExact48R96CollectionInput(imageData, alpha48, trial)
+    );
+
+    assert.equal(result.presenceConfirmed, false);
+    assert.equal(result.bestEffortFallback, false);
+    assert.equal(result.bestEffortReason, null);
+    assert.equal(result.hypotheses.length, 0);
+});
+
+test('collectInitialWatermarkCandidates should reject an issue123 weak inverse-polarity edge collision', () => {
+    const imageData = createFlatImageData(2754, 1536, 128);
+    const alpha96 = getEmbeddedAlphaMap('96-20260520');
+    const position = {
+        x: imageData.width - 192 - 96,
+        y: imageData.height - 192 - 96,
+        width: 96,
+        height: 96
+    };
+    paintIssue123ContentCollision(imageData, alpha96, position);
+
+    const result = collectInitialWatermarkCandidates(
+        createExact96R192CollectionInput(imageData, alpha96)
     );
 
     assert.equal(result.presenceConfirmed, false);
