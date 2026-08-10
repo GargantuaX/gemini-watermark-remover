@@ -313,6 +313,156 @@ test('rankCompletedCandidates should apply exact-96 imperfection preference afte
     assert.equal(ranked[0].selectionConfidence, 0);
 });
 
+function createExactNewMarginCandidate(id, qualitySignals, {
+    alphaGain,
+    originalSpatialScore,
+    processedGradientScore,
+    damageSafe = true,
+    alphaVariant = '20260520',
+    finalAlphaGain = alphaGain,
+    sourceWitnessSpatial = null
+}) {
+    const completed = createCompletedAt(id, qualitySignals, {
+        position: { x: 2112, y: 1504, width: 96, height: 96 }
+    });
+    const config = {
+        logoSize: 96,
+        marginRight: 192,
+        marginBottom: 192,
+        ...(alphaVariant ? { alphaVariant } : {})
+    };
+    const position = { x: 2112, y: 1504, width: 96, height: 96 };
+    return {
+        ...completed,
+        hypothesis: {
+            ...completed.hypothesis,
+            trial: {
+                ...completed.hypothesis.trial,
+                config,
+                alphaGain,
+                originalSpatialScore,
+                originalGradientScore: 0.2,
+                processedGradientScore,
+                provenance: Number.isFinite(sourceWitnessSpatial)
+                    ? {
+                        sourceWitnessRescue: true,
+                        sourceWitnessGate: {
+                            spatialSignedTarget: sourceWitnessSpatial
+                        }
+                    }
+                    : {},
+                damage: {
+                    safe: damageSafe,
+                    newlyClippedRatio: 0.001
+                }
+            }
+        },
+        result: {
+            ...completed.result,
+            meta: {
+                ...completed.result.meta,
+                alphaGain: finalAlphaGain,
+                config,
+                position,
+                detection: {
+                    originalSpatialScore,
+                    originalGradientScore: 0.2,
+                    processedGradientScore
+                }
+            }
+        }
+    };
+}
+
+test('rankCompletedCandidates should preserve positive-source full-strength exact-R192 alpha despite a noisy damage warning', () => {
+    const conservative = createExactNewMarginCandidate('conservative', {
+        evidenceLoss: 0.1,
+        residualLoss: 0.1,
+        damageLoss: 0.1,
+        qualityStatus: 'clean'
+    }, {
+        alphaGain: 1,
+        finalAlphaGain: 0.54,
+        originalSpatialScore: 0.6,
+        processedGradientScore: 0.09,
+        alphaVariant: null
+    });
+    const fullStrength = createExactNewMarginCandidate('full-strength', {
+        evidenceLoss: 0.1,
+        residualLoss: 0.7,
+        damageLoss: 0.2,
+        qualityStatus: 'possible-content-damage'
+    }, {
+        alphaGain: 1,
+        originalSpatialScore: 0.6,
+        processedGradientScore: 0.06,
+        damageSafe: false
+    });
+
+    const ranked = rankCompletedCandidates([conservative, fullStrength]);
+
+    assert.equal(ranked[0].hypothesis.id, 'full-strength');
+});
+
+test('rankCompletedCandidates should not promote full-strength exact-R192 alpha for inverse source polarity', () => {
+    const conservative = createExactNewMarginCandidate('conservative', {
+        evidenceLoss: 0.1,
+        residualLoss: 0.1,
+        damageLoss: 0.1,
+        qualityStatus: 'clean'
+    }, {
+        alphaGain: 0.54,
+        originalSpatialScore: -0.01,
+        processedGradientScore: 0.32,
+        alphaVariant: null
+    });
+    const fullStrength = createExactNewMarginCandidate('full-strength', {
+        evidenceLoss: 0.1,
+        residualLoss: 0.7,
+        damageLoss: 0.2,
+        qualityStatus: 'possible-content-damage'
+    }, {
+        alphaGain: 1,
+        originalSpatialScore: -0.01,
+        processedGradientScore: 0.06
+    });
+
+    const ranked = rankCompletedCandidates([conservative, fullStrength]);
+
+    assert.equal(ranked[0].hypothesis.id, 'conservative');
+});
+
+test('rankCompletedCandidates should trust a positive localized source witness over circular gradient ranking', () => {
+    const conservative = createExactNewMarginCandidate('conservative', {
+        evidenceLoss: 0.1,
+        residualLoss: 0.1,
+        damageLoss: 0.1,
+        qualityStatus: 'clean'
+    }, {
+        alphaGain: 1,
+        finalAlphaGain: 0.45,
+        originalSpatialScore: 0.2,
+        processedGradientScore: 0.04,
+        alphaVariant: null
+    });
+    const fullStrength = createExactNewMarginCandidate('full-strength', {
+        evidenceLoss: 0.1,
+        residualLoss: 0.7,
+        damageLoss: 0.2,
+        qualityStatus: 'possible-content-damage'
+    }, {
+        alphaGain: 1,
+        originalSpatialScore: 0.2,
+        processedGradientScore: 0.044,
+        damageSafe: false,
+        sourceWitnessSpatial: 0.18
+    });
+
+    const ranked = rankCompletedCandidates([conservative, fullStrength]);
+
+    assert.equal(ranked[0].hypothesis.id, 'full-strength');
+});
+
 test('classifyCandidateQuality should expose residual and damage independently', () => {
     assert.equal(classifyCandidateQuality({
         residualVisible: false,

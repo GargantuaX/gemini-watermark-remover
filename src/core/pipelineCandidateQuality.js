@@ -12,6 +12,7 @@ import {
     measurePreviewBoundaryMetrics
 } from './previewAlphaCalibration.js';
 import { compareRankingKey } from './watermarkScoring.js';
+import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.js';
 
 export const FINAL_EVIDENCE_WEIGHT = 0.35;
 export const FINAL_RESIDUAL_WEIGHT = 0.40;
@@ -693,6 +694,43 @@ export function applySameAnchor96ImperfectionPreference(baseRanked = []) {
     return [promoted, ...baseRanked.filter((candidate) => candidate !== promoted)];
 }
 
+function applyFullStrengthNewMarginPreference(baseRanked = []) {
+    const incumbent = baseRanked[0];
+    if (!incumbent) return baseRanked;
+
+    const getFinalTrialView = (candidate) => {
+        const trial = candidate?.hypothesis?.trial ?? {};
+        const meta = candidate?.result?.meta ?? {};
+        const detection = meta.detection ?? {};
+        return {
+            ...trial,
+            alphaGain: Number.isFinite(Number(meta.alphaGain))
+                ? Number(meta.alphaGain)
+                : trial.alphaGain,
+            config: meta.config ?? trial.config,
+            position: meta.position ?? trial.position,
+            originalSpatialScore:
+                detection.originalSpatialScore ?? trial.originalSpatialScore,
+            originalGradientScore:
+                detection.originalGradientScore ?? trial.originalGradientScore,
+            processedGradientScore:
+                detection.processedGradientScore ?? trial.processedGradientScore
+        };
+    };
+    const incumbentTrial = getFinalTrialView(incumbent);
+
+    const promoted = baseRanked.slice(1).find((candidate) => (
+        !hasCatastrophicBlock(candidate.qualitySignals) &&
+        shouldPreferFullStrengthNewMarginVariant(
+            getFinalTrialView(candidate),
+            incumbentTrial
+        )
+    ));
+    if (!promoted) return baseRanked;
+
+    return [promoted, ...baseRanked.filter((candidate) => candidate !== promoted)];
+}
+
 function strictlyDominatesQuality(leftSignals = {}, rightSignals = {}) {
     const keys = ['evidenceLoss', 'residualLoss', 'damageLoss'];
     const noWorse = keys.every((key) => (
@@ -740,7 +778,8 @@ export function rankCompletedCandidates(completed = []) {
         ));
     }
     scored.sort(compareRankedCandidates);
-    const preferred = applySameAnchor96ImperfectionPreference(scored);
+    const imperfectionPreferred = applySameAnchor96ImperfectionPreference(scored);
+    const preferred = applyFullStrengthNewMarginPreference(imperfectionPreferred);
 
     const first = preferred[0];
     const second = preferred[1];

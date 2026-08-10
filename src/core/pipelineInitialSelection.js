@@ -14,6 +14,7 @@ import { calculateNearBlackRatio } from './restorationMetrics.js';
 import { resolveGeminiWatermarkSearchCatalogEntries } from './geminiSizeCatalog.js';
 import { measureOutputResidualLocalization } from './outputResidualLocalization.js';
 import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
+import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
 const AGGRESSIVE_FALLBACK_MAX_NEAR_BLACK_INCREASE = 0.05;
@@ -336,12 +337,6 @@ function createExact96R192SourceWitnessRescueTrial({
             )
         )
     );
-    if (
-        acceptedEligibleTrials.length > 0 &&
-        !hasDriftedDarkPolaritySelection
-    ) {
-        return null;
-    }
     const sourceLocalization = measureOutputResidualLocalization({
         imageData: originalImageData,
         alphaMap,
@@ -376,36 +371,52 @@ function createExact96R192SourceWitnessRescueTrial({
         return null;
     }
 
-    const rescueTrial = evaluateRestorationCandidate({
+    const baselineNearBlackRatio = calculateNearBlackRatio(
+        originalImageData,
+        position
+    );
+    const provenance = {
+        catalogVariant: true,
+        alphaVariant: '20260520',
+        catalogFamily: catalogEntry.metadata.family,
+        catalogSourcePriority: catalogEntry.metadata.sourcePriority,
+        catalogEvidenceGate: catalogEntry.metadata.evidenceGate,
+        sourceWitnessRescue: true,
+        sourceWitnessReason: EXACT_96_R192_SOURCE_WITNESS_REASON,
+        sourceWitnessGate: {
+            spatialSignedTarget: spatialSignal,
+            spatialPercentile,
+            gradientSignedTarget: gradientSignal,
+            twoSidedEdgeProminence:
+                sourceLocalization.twoSidedEdgeProminence,
+            twoSidedEdgePercentile:
+                sourceLocalization.twoSidedEdgePercentile
+        }
+    };
+    const createRescueTrial = (alphaGain) => evaluateRestorationCandidate({
         originalImageData,
         alphaMap,
         position,
         source: 'standard+catalog+source-witness-rescue',
         config: catalogEntry.config,
-        baselineNearBlackRatio: calculateNearBlackRatio(
-            originalImageData,
-            position
-        ),
-        alphaGain: EXACT_96_R192_SOURCE_WITNESS_GAIN,
-        provenance: {
-            catalogVariant: true,
-            catalogFamily: catalogEntry.metadata.family,
-            catalogSourcePriority: catalogEntry.metadata.sourcePriority,
-            catalogEvidenceGate: catalogEntry.metadata.evidenceGate,
-            sourceWitnessRescue: true,
-            sourceWitnessReason: EXACT_96_R192_SOURCE_WITNESS_REASON,
-            sourceWitnessGate: {
-                spatialSignedTarget: spatialSignal,
-                spatialPercentile,
-                gradientSignedTarget: gradientSignal,
-                twoSidedEdgeProminence:
-                    sourceLocalization.twoSidedEdgeProminence,
-                twoSidedEdgePercentile:
-                    sourceLocalization.twoSidedEdgePercentile
-            }
-        },
+        baselineNearBlackRatio,
+        alphaGain,
+        provenance,
         includeImageData: false
     });
+    const conservativeTrial = createRescueTrial(EXACT_96_R192_SOURCE_WITNESS_GAIN);
+    const fullStrengthTrial = spatialSignal > 0 ? createRescueTrial(1) : null;
+    const rescueTrial = fullStrengthTrial &&
+        shouldPreferFullStrengthNewMarginVariant(fullStrengthTrial, conservativeTrial)
+        ? fullStrengthTrial
+        : conservativeTrial;
+    if (
+        acceptedEligibleTrials.length > 0 &&
+        !hasDriftedDarkPolaritySelection &&
+        rescueTrial !== fullStrengthTrial
+    ) {
+        return null;
+    }
     return measurePresenceLocalization(
         originalImageData,
         rescueTrial
@@ -1190,7 +1201,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
     const hypotheses = [...preferredHypotheses, ...retainedAlternatives]
         .map((hypothesis) => ({
             ...hypothesis,
-            presenceStatus: sourceWitnessRescueTrial
+            presenceStatus: !presenceConfirmed && sourceWitnessRescueTrial
                 ? 'source-witness'
                 : bestEffortFallback
                 ? 'selector-only'
@@ -1218,7 +1229,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
         hypotheses,
         presenceConfirmed,
         bestEffortFallback,
-        bestEffortReason: sourceWitnessRescueTrial
+        bestEffortReason: bestEffortFallback && sourceWitnessRescueTrial
             ? sourceWitnessRescueTrial.provenance?.sourceWitnessReason ??
                 'source-witness'
             : bestEffortFallback
