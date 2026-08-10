@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.37 - 2026-08-10
+
+### Watermark Removal
+
+- Restored full-strength alpha removal for positively signed exact 96px/R192 `20260520` watermarks. This reduces the visible residuals reported in issue #101 without weakening the anchor or source-evidence gates.
+- Preferred the full-strength candidate when a localized positive source witness provides stronger independent evidence than the candidate's circular self-template score, and kept the accepted result out of the later aggressive downgrade path.
+- Preserved the issue #123 inverse-polarity safety guard. Inputs without positive signed source evidence remain on the conservative path instead of risking a dark-hole artifact.
+
+### Verification
+
+- Reprocessed all six issue #101 reporter samples: five positive-source samples selected full-strength alpha and were visually clean in the review sheet; the inverse-polarity sample remained conservatively limited.
+- Added deterministic exact 96px/R192 fixtures and regressions for full-strength selection, candidate ranking, source-witness arbitration, and inverse-polarity rejection.
+- Revalidated the focused watermark suites, the complete automated test suite, and pull-request CI after the fix.
+
 ## 1.0.36 - 2026-08-10
 
 ### Video processing
