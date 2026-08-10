@@ -2726,6 +2726,70 @@ test('processWatermarkImageData should remove the 2816x1536 issue #68 watermark 
     );
 });
 
+test('processWatermarkImageData should keep full exact-R192 alpha for issue101 positive source witnesses', async () => {
+    const width = 2400;
+    const height = 1792;
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alpha96 = getEmbeddedAlphaMap(96);
+    const alpha96NewMargin = getEmbeddedAlphaMap('96-20260520');
+
+    for (const fixtureName of [
+        'issue101-r192-positive-source.png',
+        'issue101-r192-positive-source-witness.png'
+    ]) {
+        const fixture = await decodeImageDataInNode(path.resolve('tests/fixtures', fixtureName));
+        const data = new Uint8ClampedArray(width * height * 4);
+        for (let offset = 0; offset < data.length; offset += 4) {
+            data[offset] = 96;
+            data[offset + 1] = 96;
+            data[offset + 2] = 96;
+            data[offset + 3] = 255;
+        }
+        const fixtureLeft = width - fixture.width;
+        const fixtureTop = height - fixture.height;
+        for (let row = 0; row < fixture.height; row++) {
+            const sourceStart = row * fixture.width * 4;
+            const targetStart = ((fixtureTop + row) * width + fixtureLeft) * 4;
+            data.set(
+                fixture.data.subarray(sourceStart, sourceStart + fixture.width * 4),
+                targetStart
+            );
+        }
+        const result = processWatermarkImageData({ width, height, data }, {
+            alpha48,
+            alpha96,
+            alpha96Variants: { '20260520': alpha96NewMargin },
+            adaptiveMode: 'never',
+            getAlphaMap: (size) => size === '96-20260520'
+                ? alpha96NewMargin
+                : (size === 48 ? alpha48 : interpolateAlphaMap(alpha96, 96, size))
+        });
+
+        assert.equal(result.meta.applied, true, `${fixtureName}: skipReason=${result.meta.skipReason}`);
+        assert.deepEqual(result.meta.config, {
+            logoSize: 96,
+            marginRight: 192,
+            marginBottom: 192,
+            alphaVariant: '20260520'
+        }, fixtureName);
+        assert.deepEqual(result.meta.position, {
+            x: 2112,
+            y: 1504,
+            width: 96,
+            height: 96
+        }, fixtureName);
+        assert.equal(result.meta.alphaGain, 1, `${fixtureName}: source=${result.meta.source}`);
+        assert.ok(
+            result.meta.detection.originalSpatialScore > 0,
+            `${fixtureName}: originalSpatial=${result.meta.detection.originalSpatialScore}`
+        );
+        assert.ok(
+            result.meta.detection.processedGradientScore <= 0.1,
+            `${fixtureName}: processedGradient=${result.meta.detection.processedGradientScore}, source=${result.meta.source}`
+        );
+    }
+});
+
 test('processWatermarkImageData should reject issue #92 weak 192px-margin text-overlap false positive', async () => {
     const alpha48 = calculateAlphaMap(await decodeImageDataInNode(path.resolve('src/assets/bg_48.png')));
     const alpha96 = calculateAlphaMap(await decodeImageDataInNode(path.resolve('src/assets/bg_96.png')));

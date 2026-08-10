@@ -16,6 +16,10 @@ const DEFAULT_ALPHA_NEW_MARGIN_MAX_SPATIAL_RESIDUAL = 0.18;
 const DEFAULT_ALPHA_NEW_MARGIN_MAX_GRADIENT_RESIDUAL = 0.08;
 const DEFAULT_ALPHA_NEW_MARGIN_MIN_IMPROVEMENT = 0.12;
 const DEFAULT_ALPHA_NEW_MARGIN_DAMAGE_ADVANTAGE = 0.03;
+const FULL_STRENGTH_NEW_MARGIN_MIN_ORIGINAL_GRADIENT = 0.08;
+const FULL_STRENGTH_NEW_MARGIN_MAX_PROCESSED_GRADIENT = 0.1;
+const FULL_STRENGTH_NEW_MARGIN_MIN_GRADIENT_ADVANTAGE = 0.03;
+const FULL_STRENGTH_NEW_MARGIN_MAX_CLIPPED_RATIO = 0.02;
 const UNSAFE_SHIFTED_MIN_STRONG_SPATIAL_EVIDENCE = 0.4;
 const UNSAFE_SHIFTED_MIN_STRONG_GRADIENT_EVIDENCE = 0.08;
 
@@ -213,7 +217,70 @@ export function shouldPreferDefaultAlphaNewMarginCandidate(currentBest, candidat
     return candidateDamage + DEFAULT_ALPHA_NEW_MARGIN_DAMAGE_ADVANTAGE < currentDamage;
 }
 
+function hasSameExactNewMarginAnchor(fullStrength, conservative) {
+    if (!isNewMarginAlphaVariantTrial(fullStrength) || !isNewMargin96Candidate(conservative)) {
+        return false;
+    }
+    const fullPosition = fullStrength?.position ?? {};
+    const conservativePosition = conservative?.position ?? {};
+    return fullPosition.x === conservativePosition.x &&
+        fullPosition.y === conservativePosition.y &&
+        fullPosition.width === NEW_MARGIN_96_SIZE &&
+        fullPosition.height === NEW_MARGIN_96_SIZE &&
+        conservativePosition.width === NEW_MARGIN_96_SIZE &&
+        conservativePosition.height === NEW_MARGIN_96_SIZE;
+}
+
+export function shouldPreferFullStrengthNewMarginVariant(fullStrength, conservative) {
+    if (!hasSameExactNewMarginAnchor(fullStrength, conservative)) return false;
+    if (numberOr(fullStrength?.alphaGain) !== 1) return false;
+    if (numberOr(conservative?.alphaGain) >= 1) return false;
+    if (getProvenance(fullStrength).darkPolarity === true) return false;
+
+    const originalSpatial = numberOr(fullStrength?.originalSpatialScore, -Infinity);
+    const originalGradient = numberOr(fullStrength?.originalGradientScore, -Infinity);
+    const fullGradient = Math.max(0, numberOr(
+        fullStrength?.processedGradientScore,
+        Infinity
+    ));
+    const conservativeGradient = Math.max(0, numberOr(
+        conservative?.processedGradientScore,
+        Infinity
+    ));
+    const clippedRatio = numberOr(
+        fullStrength?.damage?.newlyClippedRatio,
+        Infinity
+    );
+    const provenance = getProvenance(fullStrength);
+    const positiveLocalizedSourceWitness =
+        provenance.sourceWitnessRescue === true &&
+        numberOr(
+            provenance.sourceWitnessGate?.spatialSignedTarget,
+            -Infinity
+        ) > 0;
+
+    // The full-strength trial scores itself with the same alpha profile it
+    // applies, so a negative spatial residual or noisy damage warning is not
+    // independent rejection evidence. Require positive source polarity and
+    // either a real gradient advantage or the decoy-localized source witness.
+    return originalSpatial > 0 &&
+        originalGradient >= FULL_STRENGTH_NEW_MARGIN_MIN_ORIGINAL_GRADIENT &&
+        fullGradient <= FULL_STRENGTH_NEW_MARGIN_MAX_PROCESSED_GRADIENT &&
+        (
+            positiveLocalizedSourceWitness ||
+            conservativeGradient - fullGradient >=
+                FULL_STRENGTH_NEW_MARGIN_MIN_GRADIENT_ADVANTAGE
+        ) &&
+        clippedRatio <= FULL_STRENGTH_NEW_MARGIN_MAX_CLIPPED_RATIO;
+}
+
 export function arbitrateCandidateByEvaluation(currentBest, candidate) {
+    if (shouldPreferFullStrengthNewMarginVariant(currentBest, candidate)) {
+        return currentBest;
+    }
+    if (shouldPreferFullStrengthNewMarginVariant(candidate, currentBest)) {
+        return candidate;
+    }
     if (shouldPreferDefaultAlphaNewMarginCandidate(currentBest, candidate)) {
         return candidate;
     }

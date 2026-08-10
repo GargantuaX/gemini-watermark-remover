@@ -313,6 +313,8 @@ const CANONICAL_96_MODERATE_SIGNAL_MIN_ORIGINAL_SPATIAL = 0.4;
 const CANONICAL_96_MODERATE_SIGNAL_MIN_ORIGINAL_GRADIENT = 0.1;
 const CANONICAL_96_MODERATE_SIGNAL_MAX_CURRENT_SPATIAL = 0.26;
 const CANONICAL_96_MODERATE_SIGNAL_MAX_CURRENT_GRADIENT = 0.04;
+const FULL_STRENGTH_NEW_MARGIN_MIN_ORIGINAL_GRADIENT = 0.08;
+const FULL_STRENGTH_NEW_MARGIN_MAX_CURRENT_GRADIENT = 0.1;
 const CANONICAL_96_POSITIVE_HALO_RESCUE_MIN_ORIGINAL_SPATIAL = 0.4;
 const CANONICAL_96_POSITIVE_HALO_RESCUE_MIN_ORIGINAL_GRADIENT = 0.3;
 const CANONICAL_96_POSITIVE_HALO_RESCUE_MAX_ABS_CURRENT_SPATIAL = 0.12;
@@ -3731,6 +3733,17 @@ function shouldSkipLocatedAggressiveForCleanCanonical96({
         originalGradient >= 0.05 &&
         originalGradient < 0.08;
     if (cleanExactNewMarginVariant) return true;
+
+    const cleanFullStrengthNewMarginVariant =
+        config?.logoSize === 96 &&
+        config.marginRight === 192 &&
+        config.marginBottom === 192 &&
+        config.alphaVariant === '20260520' &&
+        resolvedAlphaGain === 1 &&
+        originalSpatial > 0 &&
+        originalGradient >= FULL_STRENGTH_NEW_MARGIN_MIN_ORIGINAL_GRADIENT &&
+        currentGradient <= FULL_STRENGTH_NEW_MARGIN_MAX_CURRENT_GRADIENT;
+    if (cleanFullStrengthNewMarginVariant) return true;
 
     if (
         config?.logoSize !== 96 ||
