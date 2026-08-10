@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.35 - 2026-08-10
+
+### Watermark Removal Safety
+
+- Prevented the exact 96px/R192 white source-witness rescue from accepting inverted or effectively zero signed spatial evidence solely because unsigned edges are strongly localized. This avoids the visible black-hole damage reproduced from issue #123 on structured dark content.
+- Kept the existing dark-polarity exception narrowly gated: it still requires an independently selected drifted dark-polarity trial plus strong, localized signed spatial evidence at the exact anchor.
+- On the reported issue #123 image, the guarded path now preserves the source pixels and reports `no-watermark-detected`. This is a damage-prevention hotfix, not a claim that the watermark itself is reliably removed; the issue remains open for additional samples and profile discovery.
+
+### Verification
+
+- Added a deterministic exact-96/R192 regression reproducing the negative-polarity edge collision and asserting that the unsafe rescue is rejected.
+- Revalidated the issue #120 exact-96/R192 positive regressions, the focused watermark processor suites, and the complete main-branch CI workflow after the safety gate change.
+
 ## 1.0.34 - 2026-08-08
 
 ### Watermark Removal
