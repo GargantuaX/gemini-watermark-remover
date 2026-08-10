@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.36 - 2026-08-10
+
+### Video processing
+
+- Use the V1 alpha family by default for projected video watermarks smaller than 40px. This improves the reported 848x478 / 32px case in issue #119 while preserving the existing multi-shape selection path for 40px and larger marks.
+- Preserve an explicit SDK or backend-script `adaptiveAlpha: true` choice after the video page reapplies its automatic export preset.
+
+### Validation
+
+- Added focused regressions for the 32px projected watermark and the SDK adaptive-alpha control override.
+- Reprocessed the issue #119 source with the website preset and no explicit alpha profile: fixed-anchor confidence fell from `0.3795` to `0.0366` (90.4% reduction), with a passing residual verdict.
+- Revalidated all five registered real-video fixtures, including existing 48px and Veo text-watermark paths; all five passed.
+
 ## 1.0.35 - 2026-08-10
 
 ### Watermark Removal Safety
