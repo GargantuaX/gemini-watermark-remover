@@ -3,9 +3,12 @@ import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
 import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import {
+    DEFAULT_VIDEO_TIMEOUT_MS,
+    configureVideoPageTimeouts
+} from './videoProgress.js';
 
 const DEFAULT_VIDEO_DENOISE_BACKEND = 'allenk-fdncnn-browser-spike';
-const DEFAULT_VIDEO_TIMEOUT_MS = 6 * 60 * 1000;
 
 function normalizeBufferLike(value) {
     if (Buffer.isBuffer(value)) return value;
@@ -216,7 +219,7 @@ async function processVideoWithPreviewPage(inputPath, options = {}) {
     try {
         return await withLocalVideoPreviewPage(pagePath, async (pageUrl) => {
             const page = await browser.newPage();
-            page.setDefaultTimeout(timeoutMs);
+            configureVideoPageTimeouts(page);
             await page.goto(pageUrl);
             await page.locator('#fileInput').setInputFiles(inputPath);
             await page.evaluate((value) => {

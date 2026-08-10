@@ -30,6 +30,7 @@ import {
     normalizeVideoCleanupOptions
 } from './videoCleanupBackends.js';
 import { resolveAllenkFdncnnRuntimeProfile } from './videoDenoiseRuntimePolicy.js';
+import { resolveVideoMetadata } from './videoMetadata.js';
 
 const DEFAULT_SAMPLE_COUNT = 12;
 const DEFAULT_ALPHA_GAIN = 1;
@@ -93,35 +94,6 @@ async function getVideoContext(file) {
         throw new Error('文件中没有可处理的视频轨');
     }
     return { input, videoTrack };
-}
-
-async function resolveVideoMetadata(input, videoTrack) {
-    const [width, height, firstTimestamp, codec, durationFromMetadata, packetStats] = await Promise.all([
-        videoTrack.getDisplayWidth(),
-        videoTrack.getDisplayHeight(),
-        videoTrack.getFirstTimestamp().catch(() => 0),
-        videoTrack.getCodec().catch(() => null),
-        input.getDurationFromMetadata([videoTrack], { skipLiveWait: true }).catch(() => null),
-        videoTrack.computePacketStats(90, { skipLiveWait: true }).catch(() => null)
-    ]);
-
-    const duration = Number.isFinite(durationFromMetadata) && durationFromMetadata > 0
-        ? durationFromMetadata
-        : await videoTrack.computeDuration({ skipLiveWait: true }).catch(() => null);
-    const frameRate = packetStats?.averagePacketRate && Number.isFinite(packetStats.averagePacketRate)
-        ? packetStats.averagePacketRate
-        : 30;
-
-    return {
-        width,
-        height,
-        firstTimestamp: Number.isFinite(firstTimestamp) ? firstTimestamp : 0,
-        duration: Number.isFinite(duration) ? duration : null,
-        codec,
-        frameRate,
-        frameCountEstimate: packetStats?.packetCount || (duration ? Math.round(duration * frameRate) : null),
-        averageBitrate: packetStats?.averageBitrate || null
-    };
 }
 
 function getSampleTargetTimestamps({ firstTimestamp, duration, sampleCount }) {
