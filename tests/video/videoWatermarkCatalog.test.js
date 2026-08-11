@@ -116,6 +116,17 @@ test('resolveVideoWatermarkCandidates should expose confirmed 720x1280 vertical 
                 exactSizeVariant: true
             },
             {
+                id: 'veo-720x1280-animated-compact-24',
+                x: 648,
+                y: 1208,
+                size: 24,
+                marginRight: 48,
+                marginBottom: 48,
+                sourceFamily: 'exact-size-exception',
+                evidenceGate: 'required',
+                exactSizeVariant: true
+            },
+            {
                 id: 'veo-720x1280-portrait-48',
                 x: 600,
                 y: 1160,

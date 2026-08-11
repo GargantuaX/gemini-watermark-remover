@@ -1076,6 +1076,79 @@ function summarizeCandidate(scores) {
     };
 }
 
+export function selectIndependentVideoWatermarkTracks(summaries, {
+    minConfidence = DEFAULT_MIN_CONFIDENCE
+} = {}) {
+    if (!Array.isArray(summaries) || summaries.length === 0) return [];
+
+    const qualified = summaries.filter((summary, index) => {
+        if (index === 0) return true;
+        return summary.meanConfidence >= minConfidence;
+    });
+    const selected = [];
+
+    for (const summary of qualified) {
+        const candidate = summary.candidate;
+        const candidateSize = Number(candidate?.size);
+        const candidateArea = candidateSize * candidateSize;
+        const overlapsSelected = selected.some((selectedSummary) => {
+            const selectedCandidate = selectedSummary.candidate;
+            const selectedSize = Number(selectedCandidate?.size);
+            const overlapWidth = Math.max(0, Math.min(
+                Number(candidate?.x) + candidateSize,
+                Number(selectedCandidate?.x) + selectedSize
+            ) - Math.max(Number(candidate?.x), Number(selectedCandidate?.x)));
+            const overlapHeight = Math.max(0, Math.min(
+                Number(candidate?.y) + candidateSize,
+                Number(selectedCandidate?.y) + selectedSize
+            ) - Math.max(Number(candidate?.y), Number(selectedCandidate?.y)));
+            const smallerArea = Math.min(candidateArea, selectedSize * selectedSize);
+            return smallerArea > 0 && (overlapWidth * overlapHeight) / smallerArea >= 0.5;
+        });
+        if (!overlapsSelected) selected.push(summary);
+    }
+
+    return selected;
+}
+
+export function selectVideoWatermarkDetectionForFrame(imageSource, detection) {
+    const detections = Array.isArray(detection?.detections) && detection.detections.length > 0
+        ? detection.detections
+        : [detection];
+    let selected = null;
+
+    for (const candidateDetection of detections) {
+        if (!candidateDetection?.position || !candidateDetection?.alphaMap) continue;
+        const position = candidateDetection.position;
+        const hasRoiReader = typeof imageSource?.getImageData === 'function';
+        const imageData = hasRoiReader
+            ? imageSource.getImageData(position.x, position.y, position.width, position.height)
+            : imageSource;
+        const frameScore = scoreVideoWatermarkFrame(
+            imageData,
+            hasRoiReader
+                ? { x: 0, y: 0, width: position.width, height: position.height }
+                : position,
+            candidateDetection.alphaMap
+        );
+        const meanConfidence = Math.max(0.01, Number(candidateDetection.meanConfidence) || 0.01);
+        const normalizedConfidence = frameScore.confidence / meanConfidence;
+        if (
+            !selected ||
+            normalizedConfidence > selected.normalizedConfidence ||
+            (normalizedConfidence === selected.normalizedConfidence && frameScore.confidence > selected.frameScore.confidence)
+        ) {
+            selected = {
+                detection: candidateDetection,
+                frameScore,
+                normalizedConfidence
+            };
+        }
+    }
+
+    return selected;
+}
+
 export function detectDiamondVideoWatermarkFromFrames({
     frames,
     width,
@@ -1133,10 +1206,14 @@ export function detectDiamondVideoWatermarkFromFrames({
         });
 
     const best = summaries[0];
+    const trackSummaries = selectIndependentVideoWatermarkTracks(summaries, { minConfidence });
     const voteRatio = frames.length > 0 ? best.votes / frames.length : 0;
+    const combinedVoteRatio = frames.length > 0
+        ? Math.min(1, trackSummaries.reduce((sum, summary) => sum + summary.votes, 0) / frames.length)
+        : 0;
     const isConfident =
         best.meanConfidence >= minConfidence &&
-        voteRatio >= 0.6;
+        (voteRatio >= 0.6 || (trackSummaries.length > 1 && combinedVoteRatio >= 0.6));
     const position = {
         x: best.candidate.x,
         y: best.candidate.y,
@@ -1153,6 +1230,40 @@ export function detectDiamondVideoWatermarkFromFrames({
         alphaMapOptions
     });
     const { alphaMap, alphaSeed } = alphaSelection;
+    const detections = [{
+        watermarkKind: 'diamond',
+        position,
+        alphaMap,
+        alphaSeed,
+        candidate: best.candidate,
+        meanConfidence: best.meanConfidence
+    }];
+
+    for (const summary of trackSummaries.slice(1)) {
+        const candidatePosition = {
+            x: summary.candidate.x,
+            y: summary.candidate.y,
+            width: summary.candidate.size,
+            height: summary.candidate.size
+        };
+        const candidateAlphaSelection = selectVideoAlphaShapeForDetection({
+            frames,
+            position: candidatePosition,
+            candidate: summary.candidate,
+            best: summary,
+            voteRatio: frames.length > 0 ? summary.votes / frames.length : 0,
+            frameWinners,
+            alphaMapOptions
+        });
+        detections.push({
+            watermarkKind: 'diamond',
+            position: candidatePosition,
+            alphaMap: candidateAlphaSelection.alphaMap,
+            alphaSeed: candidateAlphaSelection.alphaSeed,
+            candidate: summary.candidate,
+            meanConfidence: summary.meanConfidence
+        });
+    }
 
     return {
         watermarkKind: 'diamond',
@@ -1160,6 +1271,7 @@ export function detectDiamondVideoWatermarkFromFrames({
         alphaMap,
         alphaSeed,
         candidate: best.candidate,
+        detections,
         isConfident,
         summary: {
             frameCount: frames.length,
@@ -1257,10 +1369,14 @@ export async function detectDiamondVideoWatermarkFromFramesAsync({
         });
 
     const best = summaries[0];
+    const trackSummaries = selectIndependentVideoWatermarkTracks(summaries, { minConfidence });
     const voteRatio = frames.length > 0 ? best.votes / frames.length : 0;
+    const combinedVoteRatio = frames.length > 0
+        ? Math.min(1, trackSummaries.reduce((sum, summary) => sum + summary.votes, 0) / frames.length)
+        : 0;
     const isConfident =
         best.meanConfidence >= minConfidence &&
-        voteRatio >= 0.6;
+        (voteRatio >= 0.6 || (trackSummaries.length > 1 && combinedVoteRatio >= 0.6));
     const position = {
         x: best.candidate.x,
         y: best.candidate.y,
@@ -1277,6 +1393,40 @@ export async function detectDiamondVideoWatermarkFromFramesAsync({
         alphaMapOptions
     });
     const { alphaMap, alphaSeed } = alphaSelection;
+    const detections = [{
+        watermarkKind: 'diamond',
+        position,
+        alphaMap,
+        alphaSeed,
+        candidate: best.candidate,
+        meanConfidence: best.meanConfidence
+    }];
+
+    for (const summary of trackSummaries.slice(1)) {
+        const candidatePosition = {
+            x: summary.candidate.x,
+            y: summary.candidate.y,
+            width: summary.candidate.size,
+            height: summary.candidate.size
+        };
+        const candidateAlphaSelection = selectVideoAlphaShapeForDetection({
+            frames,
+            position: candidatePosition,
+            candidate: summary.candidate,
+            best: summary,
+            voteRatio: frames.length > 0 ? summary.votes / frames.length : 0,
+            frameWinners,
+            alphaMapOptions
+        });
+        detections.push({
+            watermarkKind: 'diamond',
+            position: candidatePosition,
+            alphaMap: candidateAlphaSelection.alphaMap,
+            alphaSeed: candidateAlphaSelection.alphaSeed,
+            candidate: summary.candidate,
+            meanConfidence: summary.meanConfidence
+        });
+    }
 
     return {
         watermarkKind: 'diamond',
@@ -1284,6 +1434,7 @@ export async function detectDiamondVideoWatermarkFromFramesAsync({
         alphaMap,
         alphaSeed,
         candidate: best.candidate,
+        detections,
         isConfident,
         summary: {
             frameCount: frames.length,

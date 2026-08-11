@@ -217,6 +217,14 @@ function getExplicitCandidates(width, height) {
                 sourcePriority: 0
             },
             {
+                id: 'veo-720x1280-animated-compact-24',
+                label: '720x1280 animated compact, 24px, margin 48',
+                size: 24,
+                marginRight: 48,
+                marginBottom: 48,
+                sourcePriority: 0
+            },
+            {
                 id: 'veo-720x1280-vertical-inset',
                 label: '720x1280 vertical inset, 35px, margin 102/96',
                 size: 35,

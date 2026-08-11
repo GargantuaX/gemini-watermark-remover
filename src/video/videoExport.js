@@ -14,7 +14,8 @@ import {
 import { removeWatermark } from '../core/blendModes.js';
 import {
     detectVideoWatermarkFromFramesAsync,
-    scoreVideoWatermarkFrame
+    scoreVideoWatermarkFrame,
+    selectVideoWatermarkDetectionForFrame
 } from './videoWatermarkDetector.js';
 import { resolveVideoWatermarkCandidates } from './videoWatermarkCatalog.js';
 import {
@@ -841,6 +842,42 @@ async function processWatermarkRoiAsync(ctx, detection, options) {
     };
 }
 
+export async function processVideoWatermarkFrame(ctx, detection, trackStates = new Map(), options = {}) {
+    const selection = selectVideoWatermarkDetectionForFrame(ctx, detection);
+    const selectedDetection = selection?.detection || detection;
+    const trackId = selectedDetection?.candidate?.id || [
+        selectedDetection?.position?.x,
+        selectedDetection?.position?.y,
+        selectedDetection?.position?.width,
+        selectedDetection?.position?.height
+    ].join(':');
+    const trackState = trackStates.get(trackId) || {};
+    const frameResult = await processWatermarkRoiAsync(ctx, selectedDetection, {
+        ...options,
+        seedAlphaGain: selectedDetection?.alphaSeed?.seedGain ?? options.seedAlphaGain ?? DEFAULT_ALPHA_GAIN,
+        previousAlphaGain: trackState.previousAlphaGain ?? null,
+        previousTemporalRoi: trackState.previousTemporalRoi ?? null,
+        previousTemporalDeltaFrame: trackState.previousTemporalDeltaFrame ?? null,
+        previousTemporalMatchDeltaFrame: trackState.previousTemporalMatchDeltaFrame ?? null,
+        allenkFdncnnFrameCache: trackState.allenkFdncnnFrameCache ?? options.allenkFdncnnFrameCache ?? {}
+    });
+
+    trackState.previousAlphaGain = frameResult.alphaGain;
+    trackState.previousTemporalRoi = frameResult.skipped ? null : frameResult.temporalRoi || null;
+    trackState.previousTemporalDeltaFrame = frameResult.skipped ? null : frameResult.temporalDeltaFrame || null;
+    trackState.previousTemporalMatchDeltaFrame = frameResult.skipped
+        ? null
+        : frameResult.temporalMatchDeltaFrame || null;
+    trackState.allenkFdncnnFrameCache = trackState.allenkFdncnnFrameCache ?? options.allenkFdncnnFrameCache ?? {};
+    trackStates.set(trackId, trackState);
+
+    return {
+        ...frameResult,
+        selectedDetection,
+        selection
+    };
+}
+
 export async function removeGeminiVideoWatermark(file, options = {}) {
     const requestedAlphaGain = Number.isFinite(options.alphaGain) && options.alphaGain > 0
         ? options.alphaGain
@@ -933,13 +970,7 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
     let aiDenoiseFrames = 0;
     let aiReuseFrames = 0;
     let lastTimestamp = -Infinity;
-    let previousAlphaGain = null;
-    let previousTemporalRoi = null;
-    let previousTemporalDeltaFrame = null;
-    let previousTemporalMatchDeltaFrame = null;
-    const allenkFdncnnFrameCache = denoiseBackend === VIDEO_DENOISE_BACKENDS.ALLENK_FDNCNN_BROWSER_SPIKE
-        ? {}
-        : null;
+    const trackStates = new Map();
     const fallbackDuration = metadata.frameRate > 0 ? 1 / metadata.frameRate : 1 / 30;
 
     try {
@@ -958,9 +989,8 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
 
             try {
                 sample.draw(ctx, 0, 0, metadata.width, metadata.height);
-                const frameResult = await processWatermarkRoiAsync(ctx, detection, {
+                const frameResult = await processVideoWatermarkFrame(ctx, detection, trackStates, {
                     seedAlphaGain: alphaGain,
-                    previousAlphaGain,
                     adaptiveAlpha,
                     residualCleanupStrength,
                     highQualityCleanup,
@@ -972,14 +1002,9 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
                     allenkFdncnnSigma: options.allenkFdncnnSigma,
                     allenkFdncnnPadding,
                     allenkFdncnnTemporalReuse: options.allenkFdncnnTemporalReuse,
-                    allenkFdncnnFrameCache,
-                    previousTemporalRoi,
-                    previousTemporalDeltaFrame,
-                    previousTemporalMatchDeltaFrame,
                     highConfidenceThreshold: options.highConfidenceThreshold ?? FRAME_HIGH_CONFIDENCE,
                     lowConfidenceThreshold: options.lowConfidenceThreshold ?? FRAME_LOW_CONFIDENCE
                 });
-                previousAlphaGain = frameResult.alphaGain;
                 const denoiseStatus = frameResult.cleanupResult?.denoiseRuntimeStatus;
                 if (denoiseStatus === 'applied') {
                     aiDenoiseFrames++;
@@ -988,19 +1013,10 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
                 }
                 if (frameResult.skipped) {
                     skippedFrames++;
-                    previousTemporalRoi = null;
-                    previousTemporalDeltaFrame = null;
-                    previousTemporalMatchDeltaFrame = null;
                 } else if (frameResult.mode === 'adaptive') {
                     adaptiveFrames++;
-                    previousTemporalRoi = frameResult.temporalRoi || null;
-                    previousTemporalDeltaFrame = frameResult.temporalDeltaFrame || null;
-                    previousTemporalMatchDeltaFrame = frameResult.temporalMatchDeltaFrame || null;
                 } else {
                     seedFrames++;
-                    previousTemporalRoi = frameResult.temporalRoi || null;
-                    previousTemporalDeltaFrame = frameResult.temporalDeltaFrame || null;
-                    previousTemporalMatchDeltaFrame = frameResult.temporalMatchDeltaFrame || null;
                 }
             } finally {
                 sample.close();

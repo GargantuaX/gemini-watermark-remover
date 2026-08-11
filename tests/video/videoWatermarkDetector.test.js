@@ -16,6 +16,7 @@ import {
     scoreVideoWatermarkFramePolarity,
     summarizeVideoWatermarkFrameEvidence
 } from '../../src/video/videoWatermarkDetector.js';
+import * as videoWatermarkDetectorModule from '../../src/video/videoWatermarkDetector.js';
 import { resolveVideoWatermarkCandidates } from '../../src/video/videoWatermarkCatalog.js';
 
 function createPatternImageData(width, height) {
@@ -300,6 +301,176 @@ test('detectVideoWatermarkFromFrames should vote for the candidate present acros
     assert.equal(result.candidate.id, target.id);
     assert.equal(result.position.x, target.x);
     assert.equal(result.position.y, target.y);
+    assert.equal(result.isConfident, true);
+});
+
+test('detectVideoWatermarkFromFrames should preserve independent alternating watermark tracks', () => {
+    const width = 192;
+    const height = 128;
+    const relocated = {
+        id: 'alternating-relocated-32',
+        label: 'alternating relocated 32',
+        x: 12,
+        y: 12,
+        size: 32,
+        width: 32,
+        height: 32,
+        sourceFamily: 'exact-size-exception',
+        evidenceGate: 'required'
+    };
+    const standard = {
+        id: 'alternating-standard-18',
+        label: 'alternating standard 18',
+        x: 158,
+        y: 98,
+        size: 18,
+        width: 18,
+        height: 18,
+        sourceFamily: 'reference-projected',
+        evidenceGate: 'standard'
+    };
+    const relocatedAlpha = getVideoAlphaMap(relocated.size, { candidate: relocated });
+    const standardAlpha = getVideoAlphaMap(standard.size, { candidate: standard });
+    const frames = [];
+
+    for (let i = 0; i < 6; i++) {
+        const imageData = createPatternImageData(width, height);
+        const active = i < 3 ? relocated : standard;
+        applyWhiteWatermark(
+            imageData,
+            active === relocated ? relocatedAlpha : standardAlpha,
+            { x: active.x, y: active.y, width: active.size, height: active.size }
+        );
+        frames.push({ timestamp: i / 24, imageData });
+    }
+
+    const result = detectVideoWatermarkFromFrames({
+        frames,
+        width,
+        height,
+        candidates: [relocated, standard],
+        minConfidence: 0.02
+    });
+
+    assert.deepEqual(
+        result.detections?.map((detection) => detection.candidate.id).sort(),
+        [relocated.id, standard.id].sort()
+    );
+    assert.equal(result.isConfident, true);
+});
+
+test('selectIndependentVideoWatermarkTracks should collapse overlapping catalog variants', () => {
+    const summaries = [
+        {
+            candidate: { id: 'relocated-48', x: 576, y: 1136, size: 48, evidenceGate: 'required' },
+            meanConfidence: 0.3909,
+            maxConfidence: 0.9658
+        },
+        {
+            candidate: { id: 'overlapping-inset-35', x: 583, y: 1149, size: 35, evidenceGate: 'required' },
+            meanConfidence: 0.2198,
+            maxConfidence: 0.4003
+        },
+        {
+            candidate: { id: 'animated-compact-24', x: 648, y: 1208, size: 24, evidenceGate: 'required' },
+            meanConfidence: 0.5341,
+            maxConfidence: 0.9889
+        }
+    ];
+
+    const selected = videoWatermarkDetectorModule.selectIndependentVideoWatermarkTracks?.(summaries, {
+        minConfidence: 0.18
+    });
+
+    assert.deepEqual(selected?.map((summary) => summary.candidate.id), ['relocated-48', 'animated-compact-24']);
+});
+
+test('selectVideoWatermarkDetectionForFrame should choose the active fallback track', () => {
+    const width = 192;
+    const height = 128;
+    const relocated = {
+        candidate: { id: 'relocated-32' },
+        position: { x: 12, y: 12, width: 32, height: 32 },
+        alphaMap: getVideoAlphaMap(32),
+        meanConfidence: 0.4
+    };
+    const standard = {
+        candidate: { id: 'standard-18' },
+        position: { x: 158, y: 98, width: 18, height: 18 },
+        alphaMap: getVideoAlphaMap(18),
+        meanConfidence: 0.15
+    };
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let pixel = 0; pixel < width * height; pixel++) {
+        const idx = pixel * 4;
+        data[idx] = 90;
+        data[idx + 1] = 90;
+        data[idx + 2] = 90;
+        data[idx + 3] = 255;
+    }
+    const imageData = { width, height, data };
+    applyWhiteWatermark(imageData, standard.alphaMap, standard.position);
+
+    const selected = videoWatermarkDetectorModule.selectVideoWatermarkDetectionForFrame?.(
+        imageData,
+        { ...relocated, detections: [relocated, standard] }
+    );
+
+    assert.equal(selected?.detection.candidate.id, 'standard-18');
+});
+
+test('detectVideoWatermarkFromFramesAsync should preserve independent alternating watermark tracks', async () => {
+    const width = 192;
+    const height = 128;
+    const relocated = {
+        id: 'async-alternating-relocated-32',
+        label: 'async alternating relocated 32',
+        x: 12,
+        y: 12,
+        size: 32,
+        width: 32,
+        height: 32,
+        sourceFamily: 'exact-size-exception',
+        evidenceGate: 'required'
+    };
+    const standard = {
+        id: 'async-alternating-standard-18',
+        label: 'async alternating standard 18',
+        x: 158,
+        y: 98,
+        size: 18,
+        width: 18,
+        height: 18,
+        sourceFamily: 'reference-projected',
+        evidenceGate: 'standard'
+    };
+    const relocatedAlpha = getVideoAlphaMap(relocated.size, { candidate: relocated });
+    const standardAlpha = getVideoAlphaMap(standard.size, { candidate: standard });
+    const frames = [];
+
+    for (let i = 0; i < 6; i++) {
+        const imageData = createPatternImageData(width, height);
+        const active = i < 3 ? relocated : standard;
+        applyWhiteWatermark(
+            imageData,
+            active === relocated ? relocatedAlpha : standardAlpha,
+            { x: active.x, y: active.y, width: active.size, height: active.size }
+        );
+        frames.push({ timestamp: i / 24, imageData });
+    }
+
+    const result = await detectVideoWatermarkFromFramesAsync({
+        frames,
+        width,
+        height,
+        candidates: [relocated, standard],
+        minConfidence: 0.02
+    });
+
+    assert.deepEqual(
+        result.detections?.map((detection) => detection.candidate.id).sort(),
+        [relocated.id, standard.id].sort()
+    );
     assert.equal(result.isConfident, true);
 });
 
