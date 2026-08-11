@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.38 - 2026-08-11
+
+### Video CLI and SDK
+
+- Estimate total video frames from duration and the sampled frame rate instead of treating the capped metadata probe as the full video. CLI and SDK progress totals now reflect the complete export more accurately.
+- Treat `--video-timeout-ms` as an inactivity timeout, independent from the fixed Playwright page setup timeout. Long exports may run past the configured interval while frames continue to advance, while genuinely stalled exports still fail with actionable progress context.
+- Report throttled video phase, percentage, frame-count, and AI reuse progress on stderr; expose the existing encoder bitrate control through `--video-bitrate-mbps`; and publish the progress callback contract in the TypeScript declarations.
+
+### Verification
+
+- Added unit, CLI, browser-level SDK, TypeScript consumer, and video metadata regressions covering inactivity resets, true stalls, frame estimates, progress forwarding, output throttling, bitrate validation, and option forwarding.
+- Revalidated the production build and complete automated test suite after merging PRs #135 and #137.
+- Processed a 240-frame repository video with a 60-second inactivity timeout: the export completed in 61.9 seconds because progress continued through 240/240 frames. A 100 ms timeout failed during a real no-progress interval as expected.
+- Based on the original implementation and tests contributed by @shantz1 in PR #110.
+
 ## 1.0.37 - 2026-08-10
 
 ### Watermark Removal
