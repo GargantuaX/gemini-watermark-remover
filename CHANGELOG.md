@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.39 - 2026-08-11
+
+### Animated Video Watermarks
+
+- Detect and retain multiple non-overlapping watermark tracks when Gemini alternates watermark geometry during a video, including the reported compact `24x24` / 48px-margin and relocated `48x48` / 96px-margin tracks.
+- Select the active track independently for each frame instead of collapsing the whole video to one global candidate, while keeping overlapping catalog variants deduplicated.
+- Isolate alpha, temporal, and AI reuse state per track and combine track vote coverage for confidence, preventing one animation phase from contaminating another during export.
+
+### Verification
+
+- Added regressions for exact 24px video candidates, non-overlapping track retention, overlapping-candidate collapse, per-frame active-track selection, per-track export caches, and combined vote coverage.
+- Reprocessed the 240-frame issue #136 source with the default CLI path: all 240 frames were exported and all 469 AAC packets were retained.
+- On two repeated exports, fixed-anchor residual confidence fell from `0.5344` to `0.0780`-`0.0889` for the 24px track and from `0.3909` to `0.0685`-`0.0729` for the 48px track; visual before/after crops were clean.
+- Revalidated the production build and complete automated test suite: 1,671 passed, 32 skipped, and 0 failed.
+
 ## 1.0.38 - 2026-08-11
 
 ### Video CLI and SDK
