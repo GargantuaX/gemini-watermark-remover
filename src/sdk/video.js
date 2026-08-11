@@ -5,7 +5,8 @@ import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
     DEFAULT_VIDEO_TIMEOUT_MS,
-    configureVideoPageTimeouts
+    configureVideoPageTimeouts,
+    waitForVideoProcessing
 } from './videoProgress.js';
 
 const DEFAULT_VIDEO_DENOISE_BACKEND = 'allenk-fdncnn-browser-spike';
@@ -205,7 +206,8 @@ async function processVideoWithPreviewPage(inputPath, options = {}) {
         videoBitrate,
         adaptiveAlpha = false,
         alphaGain,
-        alphaProfile
+        alphaProfile,
+        onProgress
     } = options;
 
     if (!isHttpUrl(pagePath)) {
@@ -269,13 +271,10 @@ async function processVideoWithPreviewPage(inputPath, options = {}) {
             }
 
             await page.locator('#processBtn').click();
-            await page.waitForFunction(() => {
-                const status = document.getElementById('status');
-                return status?.dataset?.tone === 'success' || status?.dataset?.tone === 'error';
-            }, null, { timeout: timeoutMs });
-
-            const status = await page.locator('#status').textContent();
-            const tone = await page.locator('#status').getAttribute('data-tone');
+            const { status, tone } = await waitForVideoProcessing(page, {
+                timeoutMs,
+                onProgress
+            });
             if (tone !== 'success') {
                 throw new Error(status || 'Video export failed');
             }

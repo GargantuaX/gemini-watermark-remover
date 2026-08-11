@@ -4,6 +4,7 @@ export type {
     VideoBufferRemovalResult,
     VideoFileRemovalOptions,
     VideoFileRemovalResult,
+    VideoProcessingProgress,
     VideoRemovalMeta
 } from './video.js';
 

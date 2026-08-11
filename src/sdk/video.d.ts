@@ -7,6 +7,19 @@ export interface VideoRemovalMeta {
     [key: string]: unknown;
 }
 
+export interface VideoProcessingProgress {
+    tone: string;
+    status: string;
+    progressText: string;
+    progress: number | null;
+    phase: string | null;
+    processedFrames: number | null;
+    frameEstimate: number | null;
+    aiDenoiseFrames: number | null;
+    aiReuseFrames: number | null;
+    elapsedMs: number;
+}
+
 export interface VideoFileProcessorContext {
     outputPath?: string | null;
     mimeType: string;
@@ -21,6 +34,7 @@ export interface VideoFileProcessorContext {
     adaptiveAlpha?: boolean;
     alphaGain?: number;
     alphaProfile?: string;
+    onProgress?: (progress: VideoProcessingProgress) => void;
 }
 
 export interface VideoBufferProcessorContext extends Omit<VideoFileProcessorContext, 'filePath'> {
@@ -45,6 +59,7 @@ export interface VideoFileRemovalOptions {
     adaptiveAlpha?: boolean;
     alphaGain?: number;
     alphaProfile?: string;
+    onProgress?: (progress: VideoProcessingProgress) => void;
     processVideoFile?: (
         inputPath: string,
         context: VideoFileProcessorContext

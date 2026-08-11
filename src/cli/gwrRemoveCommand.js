@@ -10,9 +10,9 @@ import {
 } from '../sdk/node.js';
 
 const REMOVE_USAGE =
-  'Usage: gwr remove <input> [--output <file> | --out-dir <dir>] [--overwrite] [--json] [--video-page <url-or-file>]';
+  'Usage: gwr remove <input> [--output <file> | --out-dir <dir>] [--overwrite] [--json] [--video-page <url-or-file>] [--video-timeout-ms <ms>] [--video-bitrate-mbps <Mbps>]';
 
-export async function runRemoveCommand(argv, io) {
+export async function runRemoveCommand(argv, io, dependencies = {}) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
     io.stdout.write(`${REMOVE_USAGE}\n`);
     return 0;
@@ -24,7 +24,12 @@ export async function runRemoveCommand(argv, io) {
     return 2;
   }
 
-  const commandOptions = { ...options, imageCodecPromise: null };
+  const commandOptions = {
+    ...options,
+    imageCodecPromise: null,
+    onVideoProgress: createVideoProgressReporter(io.stderr),
+    removeVideoFile: dependencies.removeVideoWatermarkFromFile || removeVideoWatermarkFromFile
+  };
   const inputStats = await stat(commandOptions.input).catch(() => null);
   if (!inputStats) {
     io.stderr.write(`Input not found: ${commandOptions.input}\n`);
@@ -66,6 +71,7 @@ function parseRemoveArgs(argv) {
     videoPage: null,
     videoDenoiseBackend: null,
     videoTimeoutMs: null,
+    videoBitrateMbps: null,
     allowLowConfidence: false
   };
 
@@ -142,6 +148,14 @@ function parseRemoveArgs(argv) {
       continue;
     }
 
+    if (token === '--video-bitrate-mbps') {
+      const parsed = parseOptionValue(argv, index, '--video-bitrate-mbps');
+      if (!parsed.ok) return parsed;
+      options.videoBitrateMbps = Number(parsed.value);
+      index = parsed.index;
+      continue;
+    }
+
     if (token === '--overwrite') {
       options.overwrite = true;
       continue;
@@ -180,6 +194,10 @@ function parseRemoveArgs(argv) {
     return { ok: false, error: '--video-timeout-ms must be a positive number.' };
   }
 
+  if (options.videoBitrateMbps !== null && (!Number.isFinite(options.videoBitrateMbps) || options.videoBitrateMbps <= 0)) {
+    return { ok: false, error: '--video-bitrate-mbps must be a positive number.' };
+  }
+
   return options;
 }
 
@@ -202,6 +220,30 @@ function parseOptionValue(argv, optionIndex, optionName) {
   }
 
   return { ok: true, value: nextToken, index: optionIndex + 1 };
+}
+
+function createVideoProgressReporter(stderr) {
+  let lastPercent = -1;
+  let lastPhase = null;
+
+  return (progress = {}) => {
+    const percent = Number.isFinite(progress.progress)
+      ? Math.max(0, Math.min(100, Math.round(progress.progress * 100)))
+      : null;
+    const phaseChanged = progress.phase && progress.phase !== lastPhase;
+    const percentChanged = percent !== null && (percent === 100 || percent >= lastPercent + 5);
+    if (!phaseChanged && !percentChanged) return;
+
+    const frameLabel = Number.isFinite(progress.processedFrames)
+      ? ` ${progress.processedFrames}${Number.isFinite(progress.frameEstimate) ? `/${progress.frameEstimate}` : ''} frames`
+      : '';
+    const inferenceLabel = Number.isFinite(progress.aiDenoiseFrames) || Number.isFinite(progress.aiReuseFrames)
+      ? ` (AI ${progress.aiDenoiseFrames || 0}, reused ${progress.aiReuseFrames || 0})`
+      : '';
+    stderr.write(`[video] ${percent ?? '?'}%${frameLabel}${inferenceLabel}\n`);
+    if (percent !== null) lastPercent = percent;
+    lastPhase = progress.phase || lastPhase;
+  };
 }
 
 async function resolveCodecOptions(options) {
@@ -337,7 +379,7 @@ async function processOneFile(inputPath, outputPath, options) {
 
   await mkdir(path.dirname(outputPath), { recursive: true });
   if (isVideoPath(inputPath) || isVideoPath(outputPath)) {
-    const result = await removeVideoWatermarkFromFile(inputPath, {
+    const result = await options.removeVideoFile(inputPath, {
       outputPath,
       mimeType: inferVideoMimeTypeFromPath(outputPath || inputPath),
       pagePath: options.videoPage || undefined,
@@ -345,6 +387,10 @@ async function processOneFile(inputPath, outputPath, options) {
       timeoutMs: Number.isFinite(options.videoTimeoutMs) && options.videoTimeoutMs > 0
         ? options.videoTimeoutMs
         : undefined,
+      videoBitrate: Number.isFinite(options.videoBitrateMbps) && options.videoBitrateMbps > 0
+        ? options.videoBitrateMbps * 1_000_000
+        : undefined,
+      onProgress: options.onVideoProgress,
       allowLowConfidence: options.allowLowConfidence
     });
 
@@ -383,3 +429,5 @@ async function getImageCodec(options) {
   }
   return options.imageCodecPromise;
 }
+
+export { parseRemoveArgs };

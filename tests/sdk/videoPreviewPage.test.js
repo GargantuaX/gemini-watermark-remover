@@ -5,6 +5,7 @@ import path from 'node:path';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 
 import {
+    removeVideoWatermarkFromFile,
     resolveDefaultVideoPreviewPage,
     withLocalVideoPreviewPage
 } from '../../src/sdk/video.js';
@@ -56,4 +57,56 @@ test('SDK video export should keep explicit bitrate through page auto presets', 
     const source = await readFile(new URL('../../src/sdk/video.js', import.meta.url), 'utf8');
 
     assert.match(source, /__gwrVideoOverrideBitrate/);
+});
+
+test('SDK video export forwards page progress to the caller', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'gwr-video-progress-page-'));
+    const pagePath = path.join(tempDir, 'video-preview.html');
+    const inputPath = path.join(tempDir, 'input.mp4');
+    await writeFile(inputPath, Buffer.from('video'));
+    await writeFile(pagePath, `<!doctype html>
+        <input id="fileInput" type="file">
+        <select id="denoiseBackend"><option value="allenk-fdncnn-browser-spike">default</option></select>
+        <input id="adaptiveAlpha" type="checkbox">
+        <input id="allowLowConfidence" type="checkbox">
+        <input id="alphaGain" type="number">
+        <input id="edgeDenoiseStrength" type="number">
+        <input id="residualCleanup" type="number">
+        <input id="videoBitrateMbps" type="number" value="12">
+        <button id="processBtn">Process</button>
+        <div id="status" data-tone="">Ready</div>
+        <div id="progressBar" style="width: 0%"></div>
+        <div id="progressText">Ready</div>
+        <a id="downloadBtn" aria-disabled="true">Download</a>
+        <script>
+            document.getElementById('processBtn').addEventListener('click', () => {
+                globalThis.__gwrVideoCliProgress = {
+                    phase: 'export',
+                    progress: 1,
+                    processedFrames: 1,
+                    frameEstimate: 1,
+                    aiDenoiseFrames: 0,
+                    aiReuseFrames: 0
+                };
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('progressText').textContent = 'Done';
+                const status = document.getElementById('status');
+                status.dataset.tone = 'success';
+                status.textContent = 'Done';
+                const link = document.getElementById('downloadBtn');
+                link.href = URL.createObjectURL(new Blob([new Uint8Array([1, 2, 3])], { type: 'video/mp4' }));
+                link.setAttribute('aria-disabled', 'false');
+            });
+        </script>`, 'utf8');
+    const progressEvents = [];
+
+    const result = await removeVideoWatermarkFromFile(inputPath, {
+        pagePath,
+        onProgress(progress) {
+            progressEvents.push(progress);
+        }
+    });
+
+    assert.deepEqual([...result.buffer], [1, 2, 3]);
+    assert.deepEqual(progressEvents.map((progress) => progress.processedFrames), [1]);
 });
