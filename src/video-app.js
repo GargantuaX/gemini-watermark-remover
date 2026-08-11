@@ -625,8 +625,19 @@ async function runExport() {
             allenkFdncnnPadding,
             allenkFdncnnTemporalReuse,
             yieldToMainThread: yieldToBrowserFrame,
-            onProgress: ({ phase, progress, processedFrames, metadata, detection, aiDenoiseFrames, aiReuseFrames }) => {
+            onProgress: ({ phase, progress, processedFrames, frameEstimate, metadata, detection, aiDenoiseFrames, aiReuseFrames }) => {
                 if (jobId !== state.jobId) return;
+                const cliProgress = phase === 'detect'
+                    ? progress * 0.12
+                    : 0.12 + progress * 0.88;
+                window.__gwrVideoCliProgress = {
+                    phase,
+                    progress: cliProgress,
+                    processedFrames,
+                    frameEstimate,
+                    aiDenoiseFrames,
+                    aiReuseFrames
+                };
                 if (metadata) {
                     state.metadata = metadata;
                     renderMetadata(metadata);

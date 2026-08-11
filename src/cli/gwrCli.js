@@ -2,7 +2,7 @@ import { runRemoveCommand } from './gwrRemoveCommand.js';
 
 export async function main(argv, io) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
-    io.stdout.write('Usage: gwr remove <input> [--output <file> | --out-dir <dir>] [--overwrite] [--json] [--video-page <url-or-file>]\n');
+    io.stdout.write('Usage: gwr remove <input> [--output <file> | --out-dir <dir>] [--overwrite] [--json] [--video-page <url-or-file>] [--video-timeout-ms <ms>] [--video-bitrate-mbps <Mbps>]\n');
     return 0;
   }
 

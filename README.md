@@ -140,6 +140,17 @@ node bin/gwr.mjs remove <input> --output <file>
 gwr remove <input> [--output <file> | --out-dir <dir>] [--overwrite] [--json]
 ```
 
+Video exports default to the repository's calibrated 12 Mbps AVC profile. For a
+quality-sensitive source, request a higher encoder target explicitly:
+
+```bash
+gwr remove input.mp4 --output clean.mp4 --video-bitrate-mbps 20
+```
+
+The CLI reports video frame progress on stderr. `--video-timeout-ms` is an
+inactivity timeout: an export may run longer than that value as long as frames
+continue to advance.
+
 If you do not have `gwr` installed globally, use:
 
 ```bash

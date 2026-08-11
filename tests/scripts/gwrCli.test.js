@@ -71,6 +71,14 @@ function runCli(args, options = {}) {
   });
 }
 
+test('gwr help should list video timeout and bitrate controls', async () => {
+  const result = await runCli(['--help']);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /--video-timeout-ms <ms>/);
+  assert.match(result.stdout, /--video-bitrate-mbps <Mbps>/);
+});
+
 test('gwr remove should fail with exit code 2 when output target is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'gwr-cli-missing-output-'));
   const inputPath = path.join(tempDir, 'input.synthetic');
