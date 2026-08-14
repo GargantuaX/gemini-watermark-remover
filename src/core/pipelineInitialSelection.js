@@ -70,6 +70,7 @@ const EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS = [
 const EXACT_96_R192_SOURCE_WITNESS_MIN_GRADIENT = 0.02;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PROMINENCE = 0.2;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PERCENTILE = 0.5;
+const EXACT_96_R192_SOURCE_WITNESS_MIN_POSITIVE_SPATIAL_PERCENTILE = 0.5;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL = 0.1;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL_PERCENTILE = 0.5;
 const EXACT_96_R192_SOURCE_WITNESS_GAIN = 0.45;
@@ -350,7 +351,11 @@ function createExact96R192SourceWitnessRescueTrial({
     // structured-content exception only when a separate drifted dark trial
     // exists and the exact anchor still has strong localized spatial support;
     // otherwise unsigned edges alone can reproduce the Issue #123 dark hole.
-    const hasSupportedSpatialPolarity = spatialSignal > 0 || (
+    const hasSupportedSpatialPolarity = (
+        spatialSignal > 0 &&
+        spatialPercentile >=
+            EXACT_96_R192_SOURCE_WITNESS_MIN_POSITIVE_SPATIAL_PERCENTILE
+    ) || (
         hasDriftedDarkPolaritySelection &&
         Math.abs(spatialSignal) >=
             EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL &&
