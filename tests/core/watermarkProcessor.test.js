@@ -209,7 +209,7 @@ test('processWatermarkImageData should prefer a conservative exact source witnes
     assert.ok(contentDelta <= 25, `contentDelta=${contentDelta}, source=${result.meta.source}`);
 });
 
-test('processWatermarkImageData should not alter the weak positive R192 collision from issue142', async () => {
+test('processWatermarkImageData should keep issue142 best effort on the canonical anchor', async () => {
     const crop = await decodeImageDataInNode(path.resolve(
         'tests/fixtures/issue142-r192-weak-positive-collision.png'
     ));
@@ -225,6 +225,7 @@ test('processWatermarkImageData should not alter the weak positive R192 collisio
         );
     }
     const wrongR192Position = { x: 2464, y: 1248, width: 96, height: 96 };
+    const canonicalPosition = { x: 2592, y: 1376, width: 96, height: 96 };
 
     const result = removeWatermarkFromImageDataSync(original);
     const wrongRegionDelta = measureRegionMeanAbsoluteDelta(
@@ -232,8 +233,18 @@ test('processWatermarkImageData should not alter the weak positive R192 collisio
         original,
         wrongR192Position
     );
+    const canonicalRegionDelta = measureRegionMeanAbsoluteDelta(
+        result.imageData,
+        original,
+        canonicalPosition
+    );
 
+    assert.equal(result.meta.applied, true, `skipReason=${result.meta.skipReason}`);
+    assert.deepEqual(result.meta.position, canonicalPosition);
+    assert.equal(result.meta.presenceConfirmed, false);
+    assert.equal(result.meta.bestEffort, true);
     assert.equal(wrongRegionDelta, 0);
+    assert.ok(canonicalRegionDelta > 0);
 });
 
 test('processWatermarkImageData should repair expanded new-margin alpha edges on a flat background', () => {

@@ -70,7 +70,6 @@ const EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS = [
 const EXACT_96_R192_SOURCE_WITNESS_MIN_GRADIENT = 0.02;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PROMINENCE = 0.2;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_EDGE_PERCENTILE = 0.5;
-const EXACT_96_R192_SOURCE_WITNESS_MIN_POSITIVE_SPATIAL_PERCENTILE = 0.5;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL = 0.1;
 const EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL_PERCENTILE = 0.5;
 const EXACT_96_R192_SOURCE_WITNESS_GAIN = 0.45;
@@ -351,11 +350,7 @@ function createExact96R192SourceWitnessRescueTrial({
     // structured-content exception only when a separate drifted dark trial
     // exists and the exact anchor still has strong localized spatial support;
     // otherwise unsigned edges alone can reproduce the Issue #123 dark hole.
-    const hasSupportedSpatialPolarity = (
-        spatialSignal > 0 &&
-        spatialPercentile >=
-            EXACT_96_R192_SOURCE_WITNESS_MIN_POSITIVE_SPATIAL_PERCENTILE
-    ) || (
+    const hasSupportedSpatialPolarity = spatialSignal > 0 || (
         hasDriftedDarkPolaritySelection &&
         Math.abs(spatialSignal) >=
             EXACT_96_R192_SOURCE_WITNESS_MIN_INVERSE_SPATIAL &&
@@ -428,6 +423,78 @@ function createExact96R192SourceWitnessRescueTrial({
     ).repeatedTemplateCollision
         ? null
         : rescueTrial;
+}
+
+function getPositiveSourceEvidenceScore(trial) {
+    const spatial = Number(trial?.originalSpatialScore);
+    const gradient = Number(trial?.originalGradientScore);
+    return Math.max(
+        Number.isFinite(spatial) ? spatial : Number.NEGATIVE_INFINITY,
+        Number.isFinite(gradient) ? gradient : Number.NEGATIVE_INFINITY
+    );
+}
+
+function findCanonical96CatalogPriorTrial({
+    fixedSelection,
+    automaticSelection,
+    catalogPriorConfig
+}) {
+    if (
+        catalogPriorConfig?.logoSize !== 96 ||
+        catalogPriorConfig.marginRight !== 64 ||
+        catalogPriorConfig.marginBottom !== 64
+    ) {
+        return null;
+    }
+
+    const trials = [fixedSelection, automaticSelection]
+        .flatMap((selection) => [
+            ...(selection?.candidatePool ?? []),
+            selection?.selectedTrial
+        ])
+        .filter(Boolean);
+    const canonicalTrial = trials.find((trial) => (
+        trial.config?.logoSize === 96 &&
+        trial.config.marginRight === 64 &&
+        trial.config.marginBottom === 64 &&
+        !trial.config.alphaVariant &&
+        trial.provenance?.darkPolarity !== true &&
+        trial.alphaGain === 1
+    ));
+    if (!canonicalTrial) return null;
+
+    return {
+        ...canonicalTrial,
+        source: `${canonicalTrial.source ?? 'standard'}+catalog-prior-best-effort`,
+        provenance: {
+            ...canonicalTrial.provenance,
+            sourceWitnessRescue: true,
+            sourceWitnessReason: 'canonical-96-prior-over-weaker-r192',
+            catalogPriorBestEffort: true
+        }
+    };
+}
+
+function selectExact96SourceWitnessTrial({
+    r192Trial,
+    fixedSelection,
+    automaticSelection,
+    catalogPriorConfig
+}) {
+    if (!r192Trial) return null;
+    const canonicalTrial = findCanonical96CatalogPriorTrial({
+        fixedSelection,
+        automaticSelection,
+        catalogPriorConfig
+    });
+    if (
+        !canonicalTrial ||
+        getPositiveSourceEvidenceScore(canonicalTrial) <=
+            getPositiveSourceEvidenceScore(r192Trial)
+    ) {
+        return r192Trial;
+    }
+    return canonicalTrial;
 }
 
 function isSafeAggressiveFallbackSelection(selection) {
@@ -994,9 +1061,15 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 fixedSelection,
                 automaticSelection
             });
+    const exact96SourceWitnessTrial = selectExact96SourceWitnessTrial({
+        r192Trial: exact96R192SourceWitnessRescueTrial,
+        fixedSelection,
+        automaticSelection,
+        catalogPriorConfig: input.catalogPriorConfig
+    });
     const sourceWitnessRescueTrial =
         exact48R96SourceWitnessRescueTrial ??
-        exact96R192SourceWitnessRescueTrial;
+        exact96SourceWitnessTrial;
     const bestEffortSelections = presenceConfirmed ||
         sourceWitnessRescueTrial
         ? []
