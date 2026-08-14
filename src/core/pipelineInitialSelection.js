@@ -425,6 +425,78 @@ function createExact96R192SourceWitnessRescueTrial({
         : rescueTrial;
 }
 
+function getPositiveSourceEvidenceScore(trial) {
+    const spatial = Number(trial?.originalSpatialScore);
+    const gradient = Number(trial?.originalGradientScore);
+    return Math.max(
+        Number.isFinite(spatial) ? spatial : Number.NEGATIVE_INFINITY,
+        Number.isFinite(gradient) ? gradient : Number.NEGATIVE_INFINITY
+    );
+}
+
+function findCanonical96CatalogPriorTrial({
+    fixedSelection,
+    automaticSelection,
+    catalogPriorConfig
+}) {
+    if (
+        catalogPriorConfig?.logoSize !== 96 ||
+        catalogPriorConfig.marginRight !== 64 ||
+        catalogPriorConfig.marginBottom !== 64
+    ) {
+        return null;
+    }
+
+    const trials = [fixedSelection, automaticSelection]
+        .flatMap((selection) => [
+            ...(selection?.candidatePool ?? []),
+            selection?.selectedTrial
+        ])
+        .filter(Boolean);
+    const canonicalTrial = trials.find((trial) => (
+        trial.config?.logoSize === 96 &&
+        trial.config.marginRight === 64 &&
+        trial.config.marginBottom === 64 &&
+        !trial.config.alphaVariant &&
+        trial.provenance?.darkPolarity !== true &&
+        trial.alphaGain === 1
+    ));
+    if (!canonicalTrial) return null;
+
+    return {
+        ...canonicalTrial,
+        source: `${canonicalTrial.source ?? 'standard'}+catalog-prior-best-effort`,
+        provenance: {
+            ...canonicalTrial.provenance,
+            sourceWitnessRescue: true,
+            sourceWitnessReason: 'canonical-96-prior-over-weaker-r192',
+            catalogPriorBestEffort: true
+        }
+    };
+}
+
+function selectExact96SourceWitnessTrial({
+    r192Trial,
+    fixedSelection,
+    automaticSelection,
+    catalogPriorConfig
+}) {
+    if (!r192Trial) return null;
+    const canonicalTrial = findCanonical96CatalogPriorTrial({
+        fixedSelection,
+        automaticSelection,
+        catalogPriorConfig
+    });
+    if (
+        !canonicalTrial ||
+        getPositiveSourceEvidenceScore(canonicalTrial) <=
+            getPositiveSourceEvidenceScore(r192Trial)
+    ) {
+        return r192Trial;
+    }
+    return canonicalTrial;
+}
+
 function isSafeAggressiveFallbackSelection(selection) {
     const trial = selection?.selectedTrial;
     const spatial = Number(trial?.processedSpatialScore);
@@ -989,9 +1061,15 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 fixedSelection,
                 automaticSelection
             });
+    const exact96SourceWitnessTrial = selectExact96SourceWitnessTrial({
+        r192Trial: exact96R192SourceWitnessRescueTrial,
+        fixedSelection,
+        automaticSelection,
+        catalogPriorConfig: input.catalogPriorConfig
+    });
     const sourceWitnessRescueTrial =
         exact48R96SourceWitnessRescueTrial ??
-        exact96R192SourceWitnessRescueTrial;
+        exact96SourceWitnessTrial;
     const bestEffortSelections = presenceConfirmed ||
         sourceWitnessRescueTrial
         ? []
