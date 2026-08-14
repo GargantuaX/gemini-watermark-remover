@@ -28,15 +28,31 @@ async function loadReleasePackage(latestExtensionPath) {
     return { version: latest.version, file: latest.file, sha256, size: info.size };
 }
 
-function readVideoChangedFiles(baseTag) {
-    const output = execFileSync('git', [
+function readGitOutput(args, cwd) {
+    return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
+
+function resolvePreviousPackageReleaseRef(currentVersion, cwd) {
+    const commits = readGitOutput(['log', '--format=%H', '--', 'package.json'], cwd)
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    for (const commit of commits) {
+        const pkg = JSON.parse(readGitOutput(['show', commit + ':package.json'], cwd));
+        if (pkg.version && pkg.version !== currentVersion) return commit;
+    }
+    throw new Error('Unable to resolve the previous package release before ' + currentVersion);
+}
+
+function readVideoChangedFiles(baseRef, cwd) {
+    const output = readGitOutput([
         'diff',
         '--name-only',
-        baseTag,
+        baseRef,
         '--',
         'src/video',
         'src/video-app.js'
-    ], { cwd: process.cwd(), encoding: 'utf8' });
+    ], cwd);
     return output.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
 }
 
@@ -45,18 +61,23 @@ async function loadCurrentState({
     latestExtensionPath,
     sourcePaths,
     baseTag,
-    changedFiles
+    changedFiles,
+    cwd
 }) {
     const pkg = await readJson(packageJsonPath);
     const sourceHashes = new Map();
     for (const sourcePath of sourcePaths) {
-        sourceHashes.set(sourcePath, await sha256File(path.resolve(sourcePath)));
+        sourceHashes.set(sourcePath, await sha256File(path.resolve(cwd, sourcePath)));
     }
+    const outOfScopeChangedFiles = changedFiles ?? readVideoChangedFiles(
+        baseTag || resolvePreviousPackageReleaseRef(pkg.version, cwd),
+        cwd
+    );
     return {
         version: pkg.version,
         sourceHashes,
         releasePackage: await loadReleasePackage(latestExtensionPath),
-        outOfScopeChangedFiles: changedFiles ?? readVideoChangedFiles(baseTag)
+        outOfScopeChangedFiles
     };
 }
 
@@ -67,9 +88,10 @@ export async function checkImageReleaseEvidence({
     packageJsonPath = path.resolve('package.json'),
     latestExtensionPath = path.resolve('release/latest-extension.json'),
     sourcePaths = IMAGE_RELEASE_SOURCE_PATHS,
-    baseTag = 'v1.0.29',
+    baseTag = null,
     changedFiles = null,
-    quiet = false
+    quiet = false,
+    cwd = process.cwd()
 } = {}) {
     try {
         const pkg = current ? null : await readJson(packageJsonPath);
@@ -82,7 +104,8 @@ export async function checkImageReleaseEvidence({
             latestExtensionPath,
             sourcePaths,
             baseTag,
-            changedFiles
+            changedFiles,
+            cwd
         });
         const result = verifyImageReleaseEvidence(evidenceValue, currentValue);
         if (!quiet) {
