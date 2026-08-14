@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -289,6 +291,68 @@ test('checkImageReleaseEvidence reuses the pure contract for readiness and CLI c
     const result = await checkImageReleaseEvidence({
         evidence: validEvidence(),
         current: validCurrent(),
+        quiet: true
+    });
+
+    assert.deepEqual(result, { ok: true, blockers: [] });
+});
+
+test('checkImageReleaseEvidence compares video scope with the latest package release', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'gwr-image-release-git-'));
+    const git = (...args) => execFileSync('git', args, {
+        cwd: tempDir,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+    git('init');
+    git('config', 'user.name', 'Release Test');
+    git('config', 'user.email', 'release-test@example.com');
+
+    await writeJson(path.join(tempDir, 'package.json'), { version: '1.0.29' });
+    await mkdir(path.join(tempDir, 'src/video'), { recursive: true });
+    await writeFile(path.join(tempDir, 'src/video/runtime.js'), 'export const generation = 29;\n', 'utf8');
+    git('add', 'package.json', 'src/video/runtime.js');
+    git('commit', '-m', 'release 1.0.29');
+    git('tag', 'v1.0.29');
+
+    await writeJson(path.join(tempDir, 'package.json'), { version: '1.0.39' });
+    await writeFile(path.join(tempDir, 'src/video/runtime.js'), 'export const generation = 39;\n', 'utf8');
+    git('add', 'package.json', 'src/video/runtime.js');
+    git('commit', '-m', 'release 1.0.39');
+    await writeFile(path.join(tempDir, 'README.md'), 'image-only follow-up\n', 'utf8');
+    git('add', 'README.md');
+    git('commit', '-m', 'image-only follow-up');
+
+    await writeJson(path.join(tempDir, 'package.json'), { version: '1.0.40' });
+    const releaseDir = path.join(tempDir, 'release');
+    const zipPath = path.join(releaseDir, 'release.zip');
+    const zip = Buffer.from('release-1.0.40');
+    const sha256 = createHash('sha256').update(zip).digest('hex');
+    await mkdir(releaseDir, { recursive: true });
+    await writeFile(zipPath, zip);
+    await writeFile(`${zipPath}.sha256.txt`, `${sha256}  release.zip\n`, 'utf8');
+    const latestExtensionPath = await writeJson(path.join(releaseDir, 'latest-extension.json'), {
+        version: '1.0.40',
+        file: 'release.zip',
+        sha256,
+        size: zip.length
+    });
+    const evidence = validEvidence();
+    evidence.version = '1.0.40';
+    evidence.provenance.sourceFiles = [];
+    evidence.releasePackage = {
+        version: '1.0.40',
+        file: 'release.zip',
+        sha256,
+        size: zip.length
+    };
+
+    const result = await checkImageReleaseEvidence({
+        evidence,
+        packageJsonPath: path.join(tempDir, 'package.json'),
+        latestExtensionPath,
+        sourcePaths: [],
+        cwd: tempDir,
         quiet: true
     });
 

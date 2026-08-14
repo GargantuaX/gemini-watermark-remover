@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.40 - 2026-08-14
+
+### Watermark Candidate Selection
+
+- Keep best-effort processing when a weak exact 96px / 192px-margin rescue competes with the canonical 96px / 64px-margin Gemini candidate, and prefer the candidate with stronger positive source evidence.
+- Fix the wrong-location removal reported in issue #142 without adding a rejection threshold that could leave a visible watermark unchanged.
+- Preserve the established exact-R192 path for samples with stronger confirmed 192px-margin evidence.
+
+### Verification
+
+- Added a compact regression fixture derived from the public issue #142 attachment and verified that processing uses the canonical anchor while leaving the incorrect R192 region unchanged.
+- Revalidated the exact-R192 source-witness controls, issue #123 polarity protection, production build, complete automated test suite, and packed SDK consumer smoke tests.
+- Complete automated test result: 1,673 passed, 32 skipped, and 0 failed.
+
 ## 1.0.39 - 2026-08-11
 
 ### Animated Video Watermarks
