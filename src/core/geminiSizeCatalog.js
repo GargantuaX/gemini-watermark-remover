@@ -25,6 +25,10 @@ const GEMINI_3X_CURRENT_1K_LARGE_MARGIN_WATERMARK_CONFIG = Object.freeze({
     marginRight: 96,
     marginBottom: 96
 });
+const GEMINI_3X_CURRENT_2K_LARGE_MARGIN_SIZE_KEYS = new Set([
+    '2048x2048',
+    '2400x1792'
+]);
 const GEMINI_3X_V2_SMALL_WATERMARK_CONFIG = Object.freeze({
     logoSize: 36,
     marginRight: 96,
@@ -377,6 +381,31 @@ export function resolveOfficialGeminiSearchConfigEntries(
                     resolutionTier: match.resolutionTier,
                     aspectRatio: match.aspectRatio,
                     source: 'allenk-v2-small'
+                }));
+            }
+        }
+        if (
+            match?.modelFamily === 'gemini-3.x-image' &&
+            match.resolutionTier === '2k' &&
+            GEMINI_3X_CURRENT_2K_LARGE_MARGIN_SIZE_KEYS.has(
+                `${normalizedWidth}x${normalizedHeight}`
+            )
+        ) {
+            const currentLargeMarginVariant = createCurrentLargeMarginVariantConfig(
+                exactOfficialConfig,
+                normalizedWidth,
+                normalizedHeight,
+                { allowAnyBase: true }
+            );
+            if (currentLargeMarginVariant) {
+                entries.push(createCatalogEntry(currentLargeMarginVariant, {
+                    family: 'known-current-variant',
+                    sourcePriority: 1,
+                    evidenceGate: 'required',
+                    modelFamily: match.modelFamily,
+                    resolutionTier: match.resolutionTier,
+                    aspectRatio: match.aspectRatio,
+                    source: '202608-2k-large-margin'
                 }));
             }
         }

@@ -196,6 +196,54 @@ test('resolveOfficialGeminiSearchConfigs should prefer current 48px exact offici
     ]);
 });
 
+test('resolveOfficialGeminiSearchConfigEntries should add the evidence-gated 48px R96 candidate to exact Gemini 3.x 2K outputs', () => {
+    for (const [width, height] of [
+        [2048, 2048],
+        [2400, 1792]
+    ]) {
+        const entries = resolveOfficialGeminiSearchConfigEntries(width, height);
+        const entry = entries.find((candidate) => (
+            candidate.config.logoSize === 48 &&
+            candidate.config.marginRight === 96 &&
+            candidate.config.marginBottom === 96 &&
+            candidate.config.alphaVariant == null
+        ));
+
+        assert.deepEqual(entry, {
+            config: { logoSize: 48, marginRight: 96, marginBottom: 96 },
+            metadata: {
+                family: 'known-current-variant',
+                sourcePriority: 1,
+                evidenceGate: 'required',
+                modelFamily: 'gemini-3.x-image',
+                resolutionTier: '2k',
+                aspectRatio: width === height ? '1:1' : '4:3',
+                source: '202608-2k-large-margin'
+            }
+        });
+    }
+});
+
+test('resolveOfficialGeminiSearchConfigEntries should not generalize the 48px R96 candidate to exact Gemini 3.x 4K outputs', () => {
+    const entries = resolveOfficialGeminiSearchConfigEntries(4096, 4096);
+
+    assert.equal(entries.some((entry) => (
+        entry.config.logoSize === 48 &&
+        entry.config.marginRight === 96 &&
+        entry.config.marginBottom === 96
+    )), false);
+});
+
+test('resolveOfficialGeminiSearchConfigEntries should not generalize the 48px R96 candidate to unconfirmed exact Gemini 3.x 2K outputs', () => {
+    const entries = resolveOfficialGeminiSearchConfigEntries(2752, 1536);
+
+    assert.equal(entries.some((entry) => (
+        entry.config.logoSize === 48 &&
+        entry.config.marginRight === 96 &&
+        entry.config.marginBottom === 96
+    )), false);
+});
+
 test('resolveOfficialGeminiSearchConfigEntries should expose explicit catalog family and priority metadata', () => {
     const entries = resolveOfficialGeminiSearchConfigEntries(768, 1376);
 
