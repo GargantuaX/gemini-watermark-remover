@@ -5,6 +5,7 @@ import path from 'node:path';
 const EXTENSION_DIR = path.resolve('dist/extension');
 const RELEASE_DIR = path.resolve('release');
 const PACKAGE_BASE_NAME = 'gemini-watermark-remover-extension';
+const WEB_STORE_PACKAGE_BASE_NAME = `${PACKAGE_BASE_NAME}-web-store`;
 const ZIP_ENTRY_TIMESTAMP = new Date(1980, 0, 1, 0, 0, 0);
 
 const crcTable = new Uint32Array(256);
@@ -181,7 +182,9 @@ function packageExtensionRelease({
   extensionDir,
   packageBaseName,
   latestFile,
-  source
+  source,
+  archiveRoot = packageBaseName,
+  includeInstallDocs = true
 }) {
   if (!existsSync(extensionDir)) {
     throw new Error(`${source} does not exist. Run pnpm build first.`);
@@ -195,20 +198,21 @@ function packageExtensionRelease({
   }
   const officialManifest = createOfficialManifest(manifest);
 
-  const packageRoot = packageBaseName;
   const fileEntries = listFiles(extensionDir).map((file) => ({
-    name: `${packageRoot}/${file.relativePath}`,
+    name: archiveRoot ? `${archiveRoot}/${file.relativePath}` : file.relativePath,
     data:
       file.relativePath === 'manifest.json'
         ? Buffer.from(`${JSON.stringify(officialManifest, null, 2)}\n`)
         : readFileSync(file.absolutePath)
   }));
 
-  const installDocs = createInstallDocs(version, { packageBaseName });
-  fileEntries.push(
-    { name: `${packageRoot}/INSTALL.md`, data: Buffer.from(installDocs.english) },
-    { name: `${packageRoot}/INSTALL_zh.md`, data: Buffer.from(installDocs.chinese) }
-  );
+  if (includeInstallDocs) {
+    const installDocs = createInstallDocs(version, { packageBaseName });
+    fileEntries.push(
+      { name: `${archiveRoot}/INSTALL.md`, data: Buffer.from(installDocs.english) },
+      { name: `${archiveRoot}/INSTALL_zh.md`, data: Buffer.from(installDocs.chinese) }
+    );
+  }
 
   const zipName = `${packageBaseName}-v${version}.zip`;
   const zipPath = path.join(RELEASE_DIR, zipName);
@@ -226,7 +230,9 @@ function packageExtensionRelease({
     size: statSync(zipPath).size,
     source
   };
-  writeFileSync(path.join(RELEASE_DIR, latestFile), `${JSON.stringify(latest, null, 2)}\n`);
+  if (latestFile) {
+    writeFileSync(path.join(RELEASE_DIR, latestFile), `${JSON.stringify(latest, null, 2)}\n`);
+  }
 
   console.log(`Packaged ${zipName}`);
   console.log(`sha256 ${sha256}`);
@@ -241,4 +247,12 @@ packageExtensionRelease({
   packageBaseName: PACKAGE_BASE_NAME,
   latestFile: 'latest-extension.json',
   source: 'dist/extension'
+});
+
+packageExtensionRelease({
+  extensionDir: EXTENSION_DIR,
+  packageBaseName: WEB_STORE_PACKAGE_BASE_NAME,
+  source: 'dist/extension',
+  archiveRoot: '',
+  includeInstallDocs: false
 });
