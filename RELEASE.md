@@ -7,7 +7,7 @@ This repository currently ships four release surfaces:
 - website build in `dist/`
 - userscript bundle in `dist/userscript/gemini-watermark-remover.user.js`
 - package/sdk source and metadata from `package.json`, `src/core/`, and `src/sdk/`
-- Chrome Web Store listing plus fallback package in `release/gemini-watermark-remover-extension-v<version>.zip`
+- Chrome Web Store listing plus its root-manifest upload package in `release/gemini-watermark-remover-extension-web-store-v<version>.zip`, and the manual fallback package in `release/gemini-watermark-remover-extension-v<version>.zip`
 
 ## Preflight
 
@@ -27,7 +27,7 @@ Expected result:
 - `dist/userscript/gemini-watermark-remover.user.js` is regenerated
 - package/sdk entrypoints in `package.json` still match the published source layout
 - generated userscript metadata uses the current `package.json` version
-- Chrome extension release zip, sha256 file, and `latest-extension.json` are regenerated in `release/` for GitHub Release and manual fallback installs
+- Chrome Web Store upload zip, manual fallback zip, their sha256 files, and `latest-extension.json` are regenerated in `release/`
 - the image evidence gate is current; the internal comparison gate may keep broad V2/video claims blocked without blocking the scoped image release
 - `pnpm release:preflight` runs `pnpm build`, `pnpm test`, `pnpm package:extension`, `pnpm release:quality-gate`, `pnpm release:goal-audit -- --fail-on-incomplete`, and `pnpm release:ci-check` in order
 - `pnpm release:quality-gate` verifies pinned image evidence, runs the internal comparison gate as a claim audit, then runs scoped readiness
@@ -69,7 +69,7 @@ Expected result:
 - create a git tag matching the package version, for example `v1.0.1`
 - create a GitHub Release from that tag and upload the built userscript from `dist/userscript/gemini-watermark-remover.user.js`
 - upload `release/gemini-watermark-remover-extension-v<version>.zip`, its `.sha256.txt` file, and `latest-extension.json` to GitHub Release as the manual fallback package
-- submit the Chrome extension package to Chrome Web Store, or confirm the already-approved listing is serving the intended version
+- submit `release/gemini-watermark-remover-extension-web-store-v<version>.zip` to Chrome Web Store; its `manifest.json` is at the archive root as required by the store
 - publish the sdk package only if this release includes package-facing changes
 
 ## Downstream Dependency Sync

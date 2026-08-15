@@ -7,7 +7,7 @@
 - 网站构建产物：`dist/`
 - 油猴脚本产物：`dist/userscript/gemini-watermark-remover.user.js`
 - `package.json`、`src/core/`、`src/sdk/` 对应的 package/sdk 源码与元数据
-- Chrome Web Store 商店页，以及备用安装包：`release/gemini-watermark-remover-extension-v<version>.zip`
+- Chrome Web Store 商店页及其根目录 manifest 上传包：`release/gemini-watermark-remover-extension-web-store-v<version>.zip`，以及手动安装备用包：`release/gemini-watermark-remover-extension-v<version>.zip`
 
 ## 发布前检查
 
@@ -27,7 +27,7 @@ pnpm release:preflight
 - `dist/userscript/gemini-watermark-remover.user.js` 已重新生成
 - `package.json` 中的 package/sdk 入口仍与实际发布源码布局一致
 - 生成后的 userscript 元数据使用当前 `package.json` 版本号
-- `release/` 下已重新生成 Chrome 插件 zip、sha256 文件和 `latest-extension.json`，用于 GitHub Release 和手动安装备用入口
+- `release/` 下已重新生成 Chrome Web Store 上传 zip、手动安装备用 zip、对应 sha256 文件和 `latest-extension.json`
 - 内部对比 gate 输出 `current-gap-known`
 - `pnpm release:preflight` 会依次运行 `pnpm build`、`pnpm test`、`pnpm package:extension`、`pnpm release:quality-gate`、`pnpm release:goal-audit -- --fail-on-incomplete` 和 `pnpm release:ci-check`
 - `pnpm release:quality-gate` 会先运行内部对比 gate，再运行 `pnpm release:readiness -- --fail-on-not-ready`
@@ -69,7 +69,7 @@ pnpm release:preflight
 - 创建与版本号一致的 git tag，例如 `v1.0.1`
 - 基于该 tag 创建 GitHub Release，并上传 `dist/userscript/gemini-watermark-remover.user.js`
 - 上传 `release/gemini-watermark-remover-extension-v<version>.zip`、对应 `.sha256.txt` 和 `latest-extension.json` 到 GitHub Release，作为手动安装备用包
-- 将 Chrome 插件包提交到 Chrome Web Store，或确认已审核通过的商店页正在提供目标版本
+- 将 `release/gemini-watermark-remover-extension-web-store-v<version>.zip` 提交到 Chrome Web Store；该包按商店要求把 `manifest.json` 放在归档根目录
 - 只有本次涉及 package 对外接口时，才同步发布 sdk/package
 
 ## 下游依赖同步

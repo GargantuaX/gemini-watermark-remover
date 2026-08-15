@@ -20,6 +20,28 @@ async function readBinary(relativePath) {
   return readFile(new URL(`../../${relativePath}`, import.meta.url));
 }
 
+function readStoredZipEntries(zipBuffer) {
+  const entries = new Map();
+  let offset = 0;
+
+  while (offset + 4 <= zipBuffer.length && zipBuffer.readUInt32LE(offset) === 0x04034b50) {
+    const compressionMethod = zipBuffer.readUInt16LE(offset + 8);
+    const compressedSize = zipBuffer.readUInt32LE(offset + 18);
+    const fileNameLength = zipBuffer.readUInt16LE(offset + 26);
+    const extraLength = zipBuffer.readUInt16LE(offset + 28);
+    const fileNameStart = offset + 30;
+    const dataStart = fileNameStart + fileNameLength + extraLength;
+    const dataEnd = dataStart + compressedSize;
+    const fileName = zipBuffer.toString('utf8', fileNameStart, dataStart - extraLength);
+
+    assert.equal(compressionMethod, 0, `test helper only supports stored ZIP entries: ${fileName}`);
+    entries.set(fileName, zipBuffer.subarray(dataStart, dataEnd));
+    offset = dataEnd;
+  }
+
+  return entries;
+}
+
 async function createPackagedExtensionFixture() {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'gwr-extension-package-official-'));
   await mkdir(path.join(tempDir, 'dist'), { recursive: true });
@@ -137,6 +159,44 @@ test('extension package should replace the local debug manifest with the officia
     releaseBefore,
     'packaging tests must not overwrite repository release metadata'
   );
+});
+
+test('Chrome Web Store package should place the official manifest at archive root', async () => {
+  const tempDir = await createPackagedExtensionFixture();
+  try {
+    const sourceManifest = JSON.parse(
+      await readFile(path.join(tempDir, 'dist', 'extension', 'manifest.json'), 'utf8')
+    );
+    const webStoreZipPath = path.join(
+      tempDir,
+      'release',
+      `gemini-watermark-remover-extension-web-store-v${sourceManifest.version}.zip`
+    );
+
+    assert.equal(
+      existsSync(webStoreZipPath),
+      true,
+      'packaging should emit a dedicated Chrome Web Store upload archive'
+    );
+
+    const entries = readStoredZipEntries(await readFile(webStoreZipPath));
+    assert.equal(entries.has('manifest.json'), true);
+    assert.equal(entries.has('content-main.js'), true);
+    assert.equal(
+      [...entries.keys()].some((entryName) => entryName.endsWith('/manifest.json')),
+      false,
+      'manifest.json must not be nested under a package folder'
+    );
+    assert.equal(entries.has('INSTALL.md'), false);
+    assert.equal(entries.has('INSTALL_zh.md'), false);
+
+    const manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
+    assert.equal(manifest.name, 'Gemini Watermark Remover');
+    assert.equal(manifest.short_name, 'GWR');
+    assert.equal(manifest.version_name, undefined);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('extension package should be deterministic across repeated runs', async () => {
