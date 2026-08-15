@@ -1438,6 +1438,27 @@ test('collectInitialWatermarkCandidates should derive the exact source witness i
     }
 });
 
+test('collectInitialWatermarkCandidates should rescue the exact 48px R96 source witness on exact Gemini 3.x 2K dimensions', () => {
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const imageData = createFlatImageData(2048, 2048, 72);
+    const trial = createExact48R96Trial(imageData, alpha48);
+    applyWhiteWatermark(imageData, alpha48, trial.position);
+
+    const input = createExact48R96CollectionInput(imageData, alpha48, null);
+    input.config = { logoSize: 96, marginRight: 64, marginBottom: 64 };
+    input.catalogPriorConfig = input.config;
+    const result = collectInitialWatermarkCandidates(input);
+
+    assert.equal(result.bestEffortFallback, true);
+    assert.equal(result.bestEffortReason, 'exact-48-r96-source-witness');
+    assert.equal(result.hypotheses.length, 1);
+    assert.deepEqual(result.hypotheses[0].trial.config, {
+        logoSize: 48,
+        marginRight: 96,
+        marginBottom: 96
+    });
+});
+
 test('collectInitialWatermarkCandidates should reject an alpha mismatch or a geometry absent from the current catalog', () => {
     const alpha48 = getEmbeddedAlphaMap(48);
     const imageData = createFlatImageData(320, 320, 72);
@@ -1454,7 +1475,7 @@ test('collectInitialWatermarkCandidates should reject an alpha mismatch or a geo
     assert.equal(alphaMismatch.bestEffortFallback, false);
     assert.equal(alphaMismatch.hypotheses.length, 0);
 
-    const catalogAbsentImage = createFlatImageData(2048, 2048, 72);
+    const catalogAbsentImage = createFlatImageData(4096, 4096, 72);
     const catalogAbsentTrial = createExact48R96Trial(
         catalogAbsentImage,
         alpha48
