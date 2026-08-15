@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.41 - 2026-08-15
+
+### 2K Image Watermark Removal
+
+- Recognize the new Gemini 2K watermark layout found on exact `2048x2048` and `2400x1792` outputs: a `48x48` watermark with `96px` right and bottom margins.
+- Keep the existing canonical candidates first for other image sizes, and require candidate validation before the new secondary layout is selected.
+- Preserve best-effort processing without adding a rejection threshold, changing alpha strength, or enabling broader cleanup behavior.
+
+### Verification
+
+- Reprocessed all 12 public issue #101 samples: processing was applied to all 12, 11 passed the residual gate, and every sample selected the reported `48x48` / `96px` anchor. One sample retains a mild edge residual instead of being skipped.
+- Added deterministic regressions for both confirmed 2K dimensions and a negative control that keeps the existing `2752x1536` canonical `96x96` layout unchanged.
+- Revalidated the production build and complete automated test suite: 1,677 passed, 32 skipped, and 0 failed.
+
 ## 1.0.40 - 2026-08-14
 
 ### Watermark Candidate Selection
