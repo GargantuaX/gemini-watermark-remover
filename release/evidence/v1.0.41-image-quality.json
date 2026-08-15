@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "releaseScope": "image-defaults",
+  "version": "1.0.41",
+  "generatedAt": "2026-08-15T10:44:48.842Z",
+  "provenance": {
+    "sourceFiles": [
+      {
+        "path": "src/core/adaptiveDetector.js",
+        "sha256": "04d250d95bf259af33fce8cc3f8686a854242972f64ac75e34c4d52dd0fa0129"
+      },
+      {
+        "path": "src/core/candidateEvaluation.js",
+        "sha256": "e74248ac64957e90c49b434a3284d71f404247ef871a50260bf237e726c3f676"
+      },
+      {
+        "path": "src/core/candidateSelector.js",
+        "sha256": "b6e3c8d50c73a978bc8a485db09fd286eed3d44c8c941ab706c43bc2cd891c1a"
+      },
+      {
+        "path": "src/core/darkOutlineContourRepair.js",
+        "sha256": "397697e636e7964265f87312b82055e63f81b128292278e52094f935ec94f88a"
+      },
+      {
+        "path": "src/core/embeddedAlphaMaps.js",
+        "sha256": "3bd046e9ad2eac0f1ff707d56be9ae2901262e586b915824cfaad3310dcaca42"
+      },
+      {
+        "path": "src/core/embeddedDarkOutlineAlphaMap.js",
+        "sha256": "ad5eb4e41d4d51c172155ebf5076010c9c21869cabeacd6871dd77c6e69d3564"
+      },
+      {
+        "path": "src/core/embeddedOutlineAlphaMap.js",
+        "sha256": "9ce279b0f0676d2efbd5562860065afddcf04b14f31d4798c33eaee8303d278c"
+      },
+      {
+        "path": "src/core/geminiSizeCatalog.js",
+        "sha256": "89779b1a8e24a4e5088ee3bfcf4b11a88e0044f398215ff67d545b370be83e5a"
+      },
+      {
+        "path": "src/core/imageWatermarkPipeline.js",
+        "sha256": "da7f4dafca79e3aba4784c435c4472a733352f5d438cca8231e37e939d5fd2be"
+      },
+      {
+        "path": "src/core/pipelineAcceptedExecutor.js",
+        "sha256": "e0f61c5989ff20f5264309657dbc279b56688eddc783f22f3b97d64d490b5f97"
+      },
+      {
+        "path": "src/core/pipelineAlphaStageSpecs.js",
+        "sha256": "5a8d7f35c2dd27186afc48e423538d6b61382b86430a769c7fdd3c9a2d2d84e5"
+      },
+      {
+        "path": "src/core/pipelineAlphaTraceContract.js",
+        "sha256": "e70fb2c2a4144dabb012f8ffa22d9dc7a31f98936106f91282471cc0f1665ee6"
+      },
+      {
+        "path": "src/core/pipelineAlphaTrial.js",
+        "sha256": "218911c2af37cc29e26722c62b75907438b13cdc3945908761a92c76e9053134"
+      },
+      {
+        "path": "src/core/pipelineCandidatePool.js",
+        "sha256": "4453ce4732824ccd4a461b7a22536202c4eac4f04cafde0e3c5ba733336a6492"
+      },
+      {
+        "path": "src/core/pipelineCandidateQuality.js",
+        "sha256": "64c3f6ba3ba8418f530aa85619634ff0c718cbe59d51f1c178286776c7db52bc"
+      },
+      {
+        "path": "src/core/pipelineCandidateRunner.js",
+        "sha256": "e11611c216e17e42363652836bd57ed8487bd7b779e03b998207a112d99fa608"
+      },
+      {
+        "path": "src/core/pipelineFinalization.js",
+        "sha256": "18f7f8583da2537c39bfe494e19db13aff49792441b796a9516c3748e5045fbe"
+      },
+      {
+        "path": "src/core/pipelineInitialSelection.js",
+        "sha256": "73691211472166991e74bd4164406a1912467e2c74c31da38e62fb3a7a299b89"
+      },
+      {
+        "path": "src/core/pipelineMeta.js",
+        "sha256": "d0d3380507e47242dd0f01be517ad8573e65efd277406bda7420f95929bc4ffb"
+      },
+      {
+        "path": "src/core/pipelineRepairGates.js",
+        "sha256": "4dbcdada811c4d45fd51f6126103ab075d73a4303193d7718aa66574cf659141"
+      },
+      {
+        "path": "src/core/pipelineRepairStageSpecs.js",
+        "sha256": "482f81d75939eb817eb24e1113cc3066055740d6babcb5401cb37730a6ade79b"
+      },
+      {
+        "path": "src/core/pipelineResult.js",
+        "sha256": "1032238dbebc5058b77e9fbb4dac0e4434a0257b41352839267601b610d2f10f"
+      },
+      {
+        "path": "src/core/pipelineRuntime.js",
+        "sha256": "0c0c97b600f86ea5ccb4ecf876cd6bb2d474a8a7aee3f41b2821b05b22cf6264"
+      },
+      {
+        "path": "src/core/previewAlphaCalibration.js",
+        "sha256": "e8fa1f11a3ddd50df23df43048f385b9b35766fd8211389278e9710caf29330f"
+      },
+      {
+        "path": "src/core/restorationMetrics.js",
+        "sha256": "d9a3e6b9add0b3c441a832187e44daa6d5df9042252d0c42fdc47ef72e7987dd"
+      },
+      {
+        "path": "src/core/watermarkEngine.js",
+        "sha256": "119a1681c3f613a525aa22885b67eb99a489e6f8f7f6d4ea81d69c6eaba50920"
+      },
+      {
+        "path": "src/core/watermarkProcessor.js",
+        "sha256": "64f736e8af4e6075318b13ad46f8b4638785302466f7a93548078fb0f67b5248"
+      },
+      {
+        "path": "src/sdk/image-data.js",
+        "sha256": "deea5aa99660b9c8ce69495210485bfabae4ef9b9c50d13d2bfa3138ce6c19dc"
+      }
+    ],
+    "inputArtifacts": [
+      {
+        "id": "contrast",
+        "path": ".artifacts/top-n-candidate-selection/contrast-report.json",
+        "sha256": "488a0ddda52fe41a2f1df9dafe78ddeb4d72cabddfb3d7a58c7741e16116cbbb"
+      },
+      {
+        "id": "curatedBefore",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-424-report.json",
+        "sha256": "f2431739a8423e94e9c4431eac7c988499c10aa8147aaf5482f9b8ab8e0ba6e5"
+      },
+      {
+        "id": "curatedAfter",
+        "path": ".artifacts/expanded-sample-validation/curated-top-n/combined-report.json",
+        "sha256": "bf9ae14cc7b62108515a60fb0a5b9d9f12584095ebef355d9d342ae73b977260"
+      },
+      {
+        "id": "manualReport",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-review/report.json",
+        "sha256": "6b485e01a998f0f097f0dfe657ceeeee9cbb15147dd4abb7d36997c45a9d8e46"
+      },
+      {
+        "id": "manualDecisions",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-review/review.json",
+        "sha256": "c3e150e386dc35df1b7318839c76d42f8d2f02275bb049954f29d30a6a647810"
+      },
+      {
+        "id": "automated",
+        "path": ".artifacts/release-image-quality/automated-results.json",
+        "sha256": "ae7e70cdd17ae5dda49e3d6686f35e0e8066c4bad4b8395a6c008a1618eff10a"
+      }
+    ]
+  },
+  "validation": {
+    "contrast": {
+      "total": 36,
+      "catastrophicBlocks": 0,
+      "retryRecommended": 0,
+      "recoveredClean": 15,
+      "recoveredCleanTotal": 16
+    },
+    "curated": {
+      "total": 424,
+      "candidateChangeCount": 10,
+      "changedFileNames": [
+        "pilio_2077234004251119616_2077233917252866048_source.png",
+        "pilio_2077236427086630912_2077236398955433985_source.png",
+        "pilio_2077238422543536128_2077238400150147072_source.png",
+        "pilio_2077242467173797888_2077242458374148096_source.jpg",
+        "pilio_2077258103761408000_2077258083444199424_source.png",
+        "pilio_2077272340680413184_2077272328164610048_source.png",
+        "pilio_2077276545621168128_2077276512217731072_source.png",
+        "pilio_2077281234504912896_2077281158885806080_source.png",
+        "pilio_2077289726372483072_2077289706969632768_source.png",
+        "pilio_2077292207219412992_2077292185018961920_source.png"
+      ],
+      "outOfScopeChangeCount": 0,
+      "positionChangeCount": 0,
+      "qualityStatusChangeCount": 0,
+      "missingBeforeCount": 0,
+      "missingAfterCount": 0,
+      "errors": 0,
+      "catastrophicBlocks": 0,
+      "retryRecommended": 0
+    },
+    "manualExact96": {
+      "total": 10,
+      "alternativeBetter": 7,
+      "tie": 3,
+      "currentBetter": 0,
+      "unclear": 0
+    },
+    "automated": {
+      "generatedAt": "2026-08-15T10:39:10.656Z",
+      "fullTest": {
+        "ok": true,
+        "total": 1709,
+        "passed": 1677,
+        "failed": 0,
+        "skipped": 32
+      },
+      "sdkSmoke": {
+        "ok": true,
+        "total": 8,
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0
+      },
+      "build": {
+        "ok": true
+      },
+      "extensionPackage": {
+        "ok": true
+      }
+    }
+  },
+  "releasePackage": {
+    "version": "1.0.41",
+    "file": "gemini-watermark-remover-extension-v1.0.41.zip",
+    "sha256": "c83236b3166053e38a7d6b0d977981f04889acd7a08f2f4910ce43dff8fe892f",
+    "size": 1364595
+  }
+}
