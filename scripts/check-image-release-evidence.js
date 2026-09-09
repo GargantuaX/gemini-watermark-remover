@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -62,22 +63,49 @@ async function loadCurrentState({
     sourcePaths,
     baseTag,
     changedFiles,
-    cwd
+    cwd,
+    evidence
 }) {
     const pkg = await readJson(packageJsonPath);
+    if (evidence?.schemaVersion === 2) {
+        sourcePaths = (await readdir(path.resolve(cwd, 'src'), { recursive: true }))
+            .filter(name => name.endsWith('.js')).map(name => `src/${name.replaceAll('\\', '/')}`).sort();
+    }
     const sourceHashes = new Map();
     for (const sourcePath of sourcePaths) {
-        sourceHashes.set(sourcePath, await sha256File(path.resolve(cwd, sourcePath)));
+        const sourceFile = path.resolve(cwd, sourcePath);
+        sourceHashes.set(sourcePath, evidence?.schemaVersion === 2
+            ? createHash('sha256').update((await readFile(sourceFile, 'utf8')).replaceAll('\r\n', '\n')).digest('hex')
+            : await sha256File(sourceFile));
     }
     const outOfScopeChangedFiles = changedFiles ?? readVideoChangedFiles(
         baseTag || resolvePreviousPackageReleaseRef(pkg.version, cwd),
         cwd
     );
+    let comparisonState = {};
+    if (evidence?.schemaVersion === 2) {
+        const inventoryPath = path.resolve(cwd, `release/evidence/v${pkg.version}-image-inventory.json`);
+        const ref = evidence.provenance?.baseline?.ref;
+        if (!/^v\d+\.\d+\.\d+$/.test(ref ?? '')) throw new Error('Invalid published baseline tag');
+        const commit = readGitOutput(['rev-parse', `${ref}^{commit}`], cwd).trim();
+        const baselinePackage = JSON.parse(readGitOutput(['show', `${ref}:package.json`], cwd));
+        const baselineHashes = new Map();
+        for (const sourcePath of sourcePaths) {
+            const bytes = execFileSync('git', ['show', `${ref}:${sourcePath}`], { cwd });
+            baselineHashes.set(sourcePath, createHash('sha256').update(bytes).digest('hex'));
+        }
+        comparisonState = {
+            inventory: await readJson(inventoryPath),
+            inventorySha256: createHash('sha256').update((await readFile(inventoryPath, 'utf8')).replaceAll('\r\n', '\n')).digest('hex'),
+            baseline: { commit, version: baselinePackage.version, sourceHashes: baselineHashes }
+        };
+    }
     return {
         version: pkg.version,
         sourceHashes,
         releasePackage: await loadReleasePackage(latestExtensionPath),
-        outOfScopeChangedFiles
+        outOfScopeChangedFiles,
+        ...comparisonState
     };
 }
 
@@ -105,12 +133,14 @@ export async function checkImageReleaseEvidence({
             sourcePaths,
             baseTag,
             changedFiles,
-            cwd
+            cwd,
+            evidence: evidenceValue
         });
         const result = verifyImageReleaseEvidence(evidenceValue, currentValue);
         if (!quiet) {
             console.log(`image release quality gate: ${result.ok ? 'pass' : 'fail'}`);
             for (const blocker of result.blockers) console.error(`- ${blocker}`);
+            if (result.observations?.length) console.log(`Retained historical observations: ${result.observations.length} (not counted as fixed or verified originals)`);
         }
         return result;
     } catch (error) {

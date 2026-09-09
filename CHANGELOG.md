@@ -1,10 +1,12 @@
 # Changelog
 
-## 1.0.42 - 2026-09-09
+## 1.0.42 - 2026-09-10
 
 - Fix issue #153: recognize the confirmed 48px watermark with 89px right/bottom margins on 2752×1536 images, instead of modifying a different background area.
 - Require strong positive source evidence for this additional layout, preserving canonical watermark selection and best-effort output.
-- Verified the reported JPEG and twelve unchanged-output controls. Full tests passed: 1,680 passed, 33 skipped, 0 failed; all eight SDK smoke tests passed.
+- Retain validated exact-48 candidates when a displaced or unrelated candidate wins initial selection, without evicting conservative trials or bypassing calibration.
+- Avoid two demonstrated content collisions that created a black hole or a new star artifact in the background.
+- Compared all 424 frozen uploads against 1.0.41: 418 outputs unchanged, six changed outputs favored in randomized visual review. Faint residuals and unknown-source historical observations remain documented; this is not a claim that every input is clean.
 - This image update does not resolve the video issues tracked in #150 and #152.
 
 ## 1.0.41 - 2026-08-15

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { verifyReleaseComparisons } from './image-release-comparisons.js';
 
 export const IMAGE_RELEASE_SOURCE_PATHS = Object.freeze([
     'src/core/adaptiveDetector.js',
@@ -163,10 +164,27 @@ export async function buildImageReleaseEvidence({
 
 export function verifyImageReleaseEvidence(evidence, current) {
     const blockers = [];
-    if (evidence?.schemaVersion !== 1) blockers.push('image-evidence-schema-unsupported');
+    let comparisons = null;
+    if (![1, 2].includes(evidence?.schemaVersion)) blockers.push('image-evidence-schema-unsupported');
     if (evidence?.releaseScope !== 'image-defaults') blockers.push('image-evidence-scope-mismatch');
     if (evidence?.version !== current?.version) blockers.push('image-evidence-version-mismatch');
 
+    if (evidence?.schemaVersion === 2) {
+        comparisons = verifyReleaseComparisons(evidence.validation, current?.inventory);
+        blockers.push(...comparisons.blockers);
+        if (evidence.provenance?.inventorySha256 !== current?.inventorySha256) blockers.push('image-evidence-inventory-hash-mismatch');
+        const baseline = evidence.provenance?.baseline;
+        if (!baseline?.version || baseline.version === current?.version || baseline.ref !== `v${baseline.version}` ||
+            baseline.commit !== current?.baseline?.commit || baseline.version !== current?.baseline?.version) {
+            blockers.push('image-evidence-published-baseline-mismatch');
+        }
+        const sources = new Map((evidence.provenance?.sourceFiles ?? []).map(source => [source.path, source.sha256]));
+        const baselineSources = new Map((baseline?.sourceFiles ?? []).map(source => [source.path, source.sha256]));
+        for (const sourcePath of new Set([...IMAGE_RELEASE_SOURCE_PATHS, ...(current?.sourceHashes?.keys() ?? [])])) {
+            if (!sources.has(sourcePath)) blockers.push(`image-evidence-source-missing:${sourcePath}`);
+            if (!baselineSources.has(sourcePath) || baselineSources.get(sourcePath) !== current?.baseline?.sourceHashes?.get(sourcePath)) blockers.push(`image-evidence-baseline-source-mismatch:${sourcePath}`);
+        }
+    } else {
     const contrast = evidence?.validation?.contrast;
     if (contrast?.total !== 36) blockers.push('image-evidence-contrast-total-mismatch');
     if (contrast?.catastrophicBlocks !== 0) blockers.push('image-evidence-contrast-catastrophic');
@@ -201,10 +219,15 @@ export function verifyImageReleaseEvidence(evidence, current) {
     ) {
         blockers.push('image-evidence-manual-exact96-verdict-mismatch');
     }
+    }
 
     for (const key of ['fullTest', 'sdkSmoke', 'build', 'extensionPackage']) {
         if (evidence?.validation?.automated?.[key]?.ok !== true) {
             blockers.push(`image-evidence-${key}-not-passing`);
+        }
+        if (evidence?.schemaVersion === 2 && ['fullTest', 'sdkSmoke'].includes(key)) {
+            const tests = evidence.validation?.automated?.[key];
+            if (!(tests?.passed > 0) || tests.failed !== 0) blockers.push(`image-evidence-${key}-results-incomplete`);
         }
     }
 
@@ -227,5 +250,5 @@ export function verifyImageReleaseEvidence(evidence, current) {
         blockers.push('image-evidence-package-size-mismatch');
     }
 
-    return { ok: blockers.length === 0, blockers };
+    return { ok: blockers.length === 0, blockers, ...(comparisons ? { observations: comparisons.observations } : {}) };
 }
