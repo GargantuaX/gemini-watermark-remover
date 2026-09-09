@@ -314,6 +314,48 @@ test('processWatermarkImageData should recover the legacy star instead of a disj
     }
 });
 
+test('processWatermarkImageData should preserve telescope and plush content without localized watermark evidence', async () => {
+    for (const { name, width, height } of [
+        { name: 'telescope', width: 2730, height: 1536 },
+        { name: 'plush', width: 1024, height: 1004 }
+    ]) {
+        const crop = await decodeImageDataInNode(path.resolve(
+            `tests/fixtures/content-collision-${name}.png`
+        ));
+        const original = createSolidImageData(width, height, [80, 70, 60]);
+        for (let y = 0; y < crop.height; y++) {
+            original.data.set(
+                crop.data.subarray(y * crop.width * 4, (y + 1) * crop.width * 4),
+                ((height - crop.height + y) * width + width - crop.width) * 4
+            );
+        }
+        const result = removeWatermarkFromImageDataSync(original);
+        assert.equal(result.meta.applied, false, name);
+        assert.equal(result.meta.skipReason, 'no-watermark-detected', name);
+        assert.deepEqual(result.imageData.data, original.data, name);
+
+        // The same content must still be processed when it actually contains
+        // a known white watermark; skipping the whole image class is not a fix.
+        const size = name === 'telescope' ? 96 : 48;
+        const margin = name === 'telescope' ? 64 : 96;
+        const position = {
+            x: width - margin - size, y: height - margin - size,
+            width: size, height: size
+        };
+        const watermarked = {
+            width, height, data: new Uint8ClampedArray(original.data)
+        };
+        applySyntheticWatermark(watermarked, getEmbeddedAlphaMap(size), position, 1);
+        const restored = removeWatermarkFromImageDataSync(watermarked);
+        assert.equal(restored.meta.applied, true, `real watermark: ${name}`);
+        assert.ok(
+            measureRegionMeanAbsoluteDelta(restored.imageData, original, position) <
+            measureRegionMeanAbsoluteDelta(watermarked, original, position),
+            `real watermark must be reduced: ${name}`
+        );
+    }
+});
+
 test('processWatermarkImageData should repair expanded new-margin alpha edges on a flat background', () => {
     const position = { x: 2464, y: 1248, width: 96, height: 96 };
     const alphaMap = getEmbeddedAlphaMap('96-20260520');
