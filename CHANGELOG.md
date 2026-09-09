@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.42 - 2026-09-09
+
+- Fix issue #153: recognize the confirmed 48px watermark with 89px right/bottom margins on 2752×1536 images, instead of modifying a different background area.
+- Require strong positive source evidence for this additional layout, preserving canonical watermark selection and best-effort output.
+- Verified the reported JPEG and twelve unchanged-output controls. Full tests passed: 1,680 passed, 33 skipped, 0 failed; all eight SDK smoke tests passed.
+- This image update does not resolve the video issues tracked in #150 and #152.
+
 ## 1.0.41 - 2026-08-15
 
 ### 2K Image Watermark Removal

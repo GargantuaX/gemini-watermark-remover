@@ -1,0 +1,350 @@
+{
+  "schemaVersion": 1,
+  "releaseScope": "image-defaults",
+  "version": "1.0.42",
+  "generatedAt": "2026-09-09T15:03:49.473Z",
+  "provenance": {
+    "sourceFiles": [
+      {
+        "path": "src/core/adaptiveDetector.js",
+        "sha256": "04d250d95bf259af33fce8cc3f8686a854242972f64ac75e34c4d52dd0fa0129"
+      },
+      {
+        "path": "src/core/candidateEvaluation.js",
+        "sha256": "e74248ac64957e90c49b434a3284d71f404247ef871a50260bf237e726c3f676"
+      },
+      {
+        "path": "src/core/candidateSelector.js",
+        "sha256": "03029c8861f2d823d036d449aab8af08f24be941b4cb37412adef47e22effc12"
+      },
+      {
+        "path": "src/core/darkOutlineContourRepair.js",
+        "sha256": "397697e636e7964265f87312b82055e63f81b128292278e52094f935ec94f88a"
+      },
+      {
+        "path": "src/core/embeddedAlphaMaps.js",
+        "sha256": "3bd046e9ad2eac0f1ff707d56be9ae2901262e586b915824cfaad3310dcaca42"
+      },
+      {
+        "path": "src/core/embeddedDarkOutlineAlphaMap.js",
+        "sha256": "ad5eb4e41d4d51c172155ebf5076010c9c21869cabeacd6871dd77c6e69d3564"
+      },
+      {
+        "path": "src/core/embeddedOutlineAlphaMap.js",
+        "sha256": "9ce279b0f0676d2efbd5562860065afddcf04b14f31d4798c33eaee8303d278c"
+      },
+      {
+        "path": "src/core/geminiSizeCatalog.js",
+        "sha256": "f6f4e12ac89f2cc6a6bf02dd42f8aaafc3ae26f1e79be471c2a23bce1a3c9886"
+      },
+      {
+        "path": "src/core/imageWatermarkPipeline.js",
+        "sha256": "da7f4dafca79e3aba4784c435c4472a733352f5d438cca8231e37e939d5fd2be"
+      },
+      {
+        "path": "src/core/pipelineAcceptedExecutor.js",
+        "sha256": "e0f61c5989ff20f5264309657dbc279b56688eddc783f22f3b97d64d490b5f97"
+      },
+      {
+        "path": "src/core/pipelineAlphaStageSpecs.js",
+        "sha256": "5a8d7f35c2dd27186afc48e423538d6b61382b86430a769c7fdd3c9a2d2d84e5"
+      },
+      {
+        "path": "src/core/pipelineAlphaTraceContract.js",
+        "sha256": "e70fb2c2a4144dabb012f8ffa22d9dc7a31f98936106f91282471cc0f1665ee6"
+      },
+      {
+        "path": "src/core/pipelineAlphaTrial.js",
+        "sha256": "218911c2af37cc29e26722c62b75907438b13cdc3945908761a92c76e9053134"
+      },
+      {
+        "path": "src/core/pipelineCandidatePool.js",
+        "sha256": "4453ce4732824ccd4a461b7a22536202c4eac4f04cafde0e3c5ba733336a6492"
+      },
+      {
+        "path": "src/core/pipelineCandidateQuality.js",
+        "sha256": "64c3f6ba3ba8418f530aa85619634ff0c718cbe59d51f1c178286776c7db52bc"
+      },
+      {
+        "path": "src/core/pipelineCandidateRunner.js",
+        "sha256": "e11611c216e17e42363652836bd57ed8487bd7b779e03b998207a112d99fa608"
+      },
+      {
+        "path": "src/core/pipelineFinalization.js",
+        "sha256": "18f7f8583da2537c39bfe494e19db13aff49792441b796a9516c3748e5045fbe"
+      },
+      {
+        "path": "src/core/pipelineInitialSelection.js",
+        "sha256": "73691211472166991e74bd4164406a1912467e2c74c31da38e62fb3a7a299b89"
+      },
+      {
+        "path": "src/core/pipelineMeta.js",
+        "sha256": "d0d3380507e47242dd0f01be517ad8573e65efd277406bda7420f95929bc4ffb"
+      },
+      {
+        "path": "src/core/pipelineRepairGates.js",
+        "sha256": "4dbcdada811c4d45fd51f6126103ab075d73a4303193d7718aa66574cf659141"
+      },
+      {
+        "path": "src/core/pipelineRepairStageSpecs.js",
+        "sha256": "482f81d75939eb817eb24e1113cc3066055740d6babcb5401cb37730a6ade79b"
+      },
+      {
+        "path": "src/core/pipelineResult.js",
+        "sha256": "1032238dbebc5058b77e9fbb4dac0e4434a0257b41352839267601b610d2f10f"
+      },
+      {
+        "path": "src/core/pipelineRuntime.js",
+        "sha256": "0c0c97b600f86ea5ccb4ecf876cd6bb2d474a8a7aee3f41b2821b05b22cf6264"
+      },
+      {
+        "path": "src/core/previewAlphaCalibration.js",
+        "sha256": "e8fa1f11a3ddd50df23df43048f385b9b35766fd8211389278e9710caf29330f"
+      },
+      {
+        "path": "src/core/restorationMetrics.js",
+        "sha256": "d9a3e6b9add0b3c441a832187e44daa6d5df9042252d0c42fdc47ef72e7987dd"
+      },
+      {
+        "path": "src/core/watermarkEngine.js",
+        "sha256": "119a1681c3f613a525aa22885b67eb99a489e6f8f7f6d4ea81d69c6eaba50920"
+      },
+      {
+        "path": "src/core/watermarkProcessor.js",
+        "sha256": "64f736e8af4e6075318b13ad46f8b4638785302466f7a93548078fb0f67b5248"
+      },
+      {
+        "path": "src/sdk/image-data.js",
+        "sha256": "deea5aa99660b9c8ce69495210485bfabae4ef9b9c50d13d2bfa3138ce6c19dc"
+      }
+    ],
+    "inputArtifacts": [
+      {
+        "id": "contrast",
+        "path": ".artifacts/feedback-20260909/contrast-fresh.json",
+        "sha256": "d7083dc3ae742282131920497c07f5465c02dbfb896edc799c46704b33ac15b3"
+      },
+      {
+        "id": "curatedBefore",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-424-report.json",
+        "sha256": "f2431739a8423e94e9c4431eac7c988499c10aa8147aaf5482f9b8ab8e0ba6e5"
+      },
+      {
+        "id": "curatedAfter",
+        "path": ".artifacts/feedback-20260909/curated-fresh-compact.json",
+        "sha256": "b08341f0a6595415879fb51991aa0636e20e1c25bc14a3989eb2b81e1b2f38de"
+      },
+      {
+        "id": "manualReport",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-review/report.json",
+        "sha256": "6b485e01a998f0f097f0dfe657ceeeee9cbb15147dd4abb7d36997c45a9d8e46"
+      },
+      {
+        "id": "manualDecisions",
+        "path": ".artifacts/same-anchor-96-imperfection-preference/before-review/review.json",
+        "sha256": "c3e150e386dc35df1b7318839c76d42f8d2f02275bb049954f29d30a6a647810"
+      },
+      {
+        "id": "automated",
+        "path": ".artifacts/feedback-20260909/automated-results.json",
+        "sha256": "7465227293e8fa4273b093283b3964d3ef2b67f1a7c62cbacbc5ec260c85f465"
+      }
+    ]
+  },
+  "validation": {
+    "contrast": {
+      "total": 36,
+      "catastrophicBlocks": 0,
+      "retryRecommended": 0,
+      "recoveredClean": 9,
+      "recoveredCleanTotal": 16
+    },
+    "curated": {
+      "total": 424,
+      "candidateChangeCount": 132,
+      "changedFileNames": [
+        "pilio_2077226984328400896_2077226977214861312_source.jpg",
+        "pilio_2077226992570208256_2077226975910432768_source.png",
+        "pilio_2077227042658586624_2077227026586013696_source.png",
+        "pilio_2077227118772621312_2077227089458630656_source.png",
+        "pilio_2077227805002698752_2077227781485236224_source.png",
+        "pilio_2077227851727245312_2077227821075271680_source.png",
+        "pilio_2077228828542898176_2077228794388680704_source.png",
+        "pilio_2077230149455056896_2077230132606537728_source.png",
+        "pilio_2077230394222055424_2077230386856857600_source.png",
+        "pilio_2077231246554959872_2077231231325442048_source.jpg",
+        "pilio_2077232431538114560_2077232417004851200_source.png",
+        "pilio_2077233270352777216_2077233256461242368_source.png",
+        "pilio_2077233300723732480_2077233294398722048_source.png",
+        "pilio_2077233365290848256_2077233359230078976_source.png",
+        "pilio_2077234004251119616_2077233917252866048_source.png",
+        "pilio_2077234582016495616_2077234554963234816_source.png",
+        "pilio_2077235727116013568_2077235714218528768_source.png",
+        "pilio_2077236261801693184_2077236248132456448_source.png",
+        "pilio_2077236427086630912_2077236398955433985_source.png",
+        "pilio_2077236427615113216_2077236398955433984_source.png",
+        "pilio_2077236431796834304_2077236398955433986_source.png",
+        "pilio_2077238235364331520_2077238224673050624_source.png",
+        "pilio_2077238422543536128_2077238400150147072_source.png",
+        "pilio_2077238570967371776_2077238559315595264_source.png",
+        "pilio_2077239087386857472_2077239068982251520_source.png",
+        "pilio_2077239404644012032_2077239390257549312_source.png",
+        "pilio_2077241377405538304_2077241359244201984_source.png",
+        "pilio_2077241642468773888_2077241595484180480_source.png",
+        "pilio_2077242458751635456_2077242444109320192_source.png",
+        "pilio_2077242467173797888_2077242458374148096_source.jpg",
+        "pilio_2077242902748073984_2077242896565669888_source.png",
+        "pilio_2077243595999416320_2077243589548576768_source.jpg",
+        "pilio_2077244021645774848_2077244013315887104_source.png",
+        "pilio_2077244204223827968_2077244190705586176_source.png",
+        "pilio_2077244453688446976_2077244424244432896_source.png",
+        "pilio_2077245550381502464_2077245533449097216_source.png",
+        "pilio_2077248618066087936_2077248610235322368_source.png",
+        "pilio_2077248751465926656_2077248738346143744_source.png",
+        "pilio_2077249894908694528_2077249885823832064_source.png",
+        "pilio_2077250424821256192_2077250415543455744_source.png",
+        "pilio_2077251045439836160_2077251038775087104_source.png",
+        "pilio_2077251814708744192_2077251763915722752_source.png",
+        "pilio_2077255960673390592_2077255952867790848_source.png",
+        "pilio_2077256084896092160_2077256079787429888_source.png",
+        "pilio_2077256393357791232_2077256388630810624_source.png",
+        "pilio_2077256672094457856_2077256652947460096_source.png",
+        "pilio_2077258103761408000_2077258083444199424_source.png",
+        "pilio_2077258230286782464_2077258222682509312_source.png",
+        "pilio_2077258925404590080_2077258917980672000_source.jpg",
+        "pilio_2077260622130581504_2077260615096733696_source.jpg",
+        "pilio_2077262420253872128_2077262391531278336_source.png",
+        "pilio_2077262481264218112_2077262465170673664_source.png",
+        "pilio_2077262851487043584_2077262835590631424_source.png",
+        "pilio_2077264159535271936_2077264135933923328_source.png",
+        "pilio_2077264474133237760_2077264454591975424_source.png",
+        "pilio_2077264801775489024_2077264776580304896_source.png",
+        "pilio_2077265240591962112_2077265221679845376_source.jpg",
+        "pilio_2077265433945182208_2077265389263261696_source.png",
+        "pilio_2077265437099298816_2077265389263261697_source.png",
+        "pilio_2077266049639649280_2077266040529620992_source.png",
+        "pilio_2077266246658691072_2077266234654593024_source.png",
+        "pilio_2077267733686259712_2077267708717568000_source.png",
+        "pilio_2077267760617885696_2077267744599838720_source.png",
+        "pilio_2077268298684174336_2077268268334190592_source.png",
+        "pilio_2077269635073314816_2077269615389446144_source.png",
+        "pilio_2077270216026361856_2077270207797137408_source.png",
+        "pilio_2077270795171663872_2077270784740429824_source.png",
+        "pilio_2077271313386311680_2077271296638455808_source.png",
+        "pilio_2077272312570187776_2077272298980642816_source.png",
+        "pilio_2077272340680413184_2077272328164610048_source.png",
+        "pilio_2077272447341563904_2077272435501043712_source.png",
+        "pilio_2077272461606391808_2077272450877362176_source.png",
+        "pilio_2077273541597728768_2077273517790859264_source.png",
+        "pilio_2077274025209368576_2077274007375187968_source.png",
+        "pilio_2077274642631888896_2077274629419831296_source.png",
+        "pilio_2077276360790773760_2077276349944303618_source.png",
+        "pilio_2077276545621168128_2077276512217731072_source.png",
+        "pilio_2077279849499594752_2077279751524847616_source.png",
+        "pilio_2077281074135699456_2077281040912617472_source.png",
+        "pilio_2077281174635417600_2077281156507635712_source.png",
+        "pilio_2077281234504912896_2077281158885806080_source.png",
+        "pilio_2077281330839687168_2077281324355293184_source.png",
+        "pilio_2077281772747362304_2077281756507017216_source.png",
+        "pilio_2077282821533077504_2077282643103191042_source.png",
+        "pilio_2077282843867746304_2077282643103191041_source.png",
+        "pilio_2077282898771185664_2077282643103191040_source.png",
+        "pilio_2077283436300603392_2077282643103191043_source.png",
+        "pilio_2077283577610899456_2077283567854948352_source.jpg",
+        "pilio_2077283796150915072_2077283778446757888_source.png",
+        "pilio_2077284098002391040_2077284062476636160_source.png",
+        "pilio_2077284492975804416_2077284485237313536_source.jpg",
+        "pilio_2077284720999141376_2077284712610533376_source.jpg",
+        "pilio_2077286036152520704_2077286029294833664_source.png",
+        "pilio_2077287813308485632_2077287792764784640_source.png",
+        "pilio_2077287849371111424_2077287843276787712_source.jpg",
+        "pilio_2077289726372483072_2077289706969632768_source.png",
+        "pilio_2077289977477074944_2077289956065153024_source.jpg",
+        "pilio_2077289981042233344_2077289959319932928_source.png",
+        "pilio_2077290091482451968_2077289997077057536_source.png",
+        "pilio_2077290440683425792_2077290363101384704_source.png",
+        "pilio_2077290902467907584_2077290847203758080_source.png",
+        "pilio_2077290962035412992_2077290907874365441_source.png",
+        "pilio_2077290962085744640_2077290907874365440_source.png",
+        "pilio_2077290962379345920_2077290907874365442_source.png",
+        "pilio_2077291767144648704_2077291742222094336_source.png",
+        "pilio_2077291882647392256_2077291863429091328_source.png",
+        "pilio_2077291904495521792_2077291877794582528_source.png",
+        "pilio_2077292047785529344_2077292040630046720_source.jpg",
+        "pilio_2077292074771681280_2077292056882974720_source.png",
+        "pilio_2077292086461206528_2077292077040799744_source.png",
+        "pilio_2077292207219412992_2077292185018961920_source.png",
+        "pilio_2077292601282662400_2077292592378155008_source.jpg",
+        "pilio_2077292741666017280_2077292717355831296_source.png",
+        "pilio_2077292793453088768_2077292747668066306_source.png",
+        "pilio_2077292798704357376_2077292747668066304_source.png",
+        "pilio_2077292842799075328_2077292747668066309_source.png",
+        "pilio_2077292859848921088_2077292747668066313_source.png",
+        "pilio_2077293931132882944_2077293921330794496_source.jpg",
+        "pilio_2077293964397907968_2077293957838016512_source.jpg",
+        "pilio_2077294294418329600_2077294194124132352_source.png",
+        "pilio_2077294622882664448_2077294615337111552_source.jpg",
+        "pilio_2077295128715726848_2077295118515179520_source.png",
+        "pilio_2077295191793864704_2077295184650964992_source.jpg",
+        "pilio_2077296279213314048_2077296272787640320_source.png",
+        "pilio_2077296461178998784_2077296451330772992_source.png",
+        "pilio_2077296999438225408_2077296983990603776_source.png",
+        "pilio_2077297263163478016_2077297217810468864_source.png",
+        "pilio_2077297937020358656_2077297923846049792_source.png",
+        "pilio_2077299567778336768_2077299546693570560_source.png",
+        "pilio_2077300955929382912_2077300943841398784_source.jpg",
+        "pilio_2077372683003105280_2077372649213792256_source.png",
+        "pilio_2077417581005770752_2077417521161441280_source.png"
+      ],
+      "outOfScopeChangeCount": 122,
+      "positionChangeCount": 61,
+      "qualityStatusChangeCount": 88,
+      "missingBeforeCount": 0,
+      "missingAfterCount": 0,
+      "errors": 0,
+      "catastrophicBlocks": 0,
+      "retryRecommended": 0
+    },
+    "manualExact96": {
+      "total": 10,
+      "alternativeBetter": 7,
+      "tie": 3,
+      "currentBetter": 0,
+      "unclear": 0
+    },
+    "automated": {
+      "generatedAt": "2026-09-09T14:51:28.589Z",
+      "fullTest": {
+        "ok": true,
+        "total": 1713,
+        "passed": 1680,
+        "failed": 0,
+        "skipped": 33
+      },
+      "sdkSmoke": {
+        "ok": true,
+        "total": 8,
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0
+      },
+      "build": {
+        "ok": true
+      },
+      "extensionPackage": {
+        "ok": true
+      },
+      "provenance": {
+        "host": "de-ci",
+        "fullTestCommit": "10433ec654b095b86e52be53ced44f9a9d902544",
+        "notes": "Full tests ran on the source-identical pre-merge fix. Version 1.0.42 metadata was then rebuilt, packed, and validated with SDK smoke tests."
+      }
+    }
+  },
+  "releasePackage": {
+    "version": "1.0.42",
+    "file": "gemini-watermark-remover-extension-v1.0.42.zip",
+    "sha256": "192df633191971208a9a22b1b535420eff675f4509712293c943326d3d2b0075",
+    "size": 1365886
+  }
+}
