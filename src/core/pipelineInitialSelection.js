@@ -494,7 +494,12 @@ function selectExact96SourceWitnessTrial({
     ) {
         return r192Trial;
     }
-    return canonicalTrial;
+    // A larger spatial score on unrelated content is not enough to replace
+    // the R192 witness. Require positive source-edge agreement at the new
+    // anchor; otherwise neither candidate has won this ambiguous rescue.
+    return Number(canonicalTrial.originalGradientScore) > 0
+        ? canonicalTrial
+        : null;
 }
 
 function isSafeAggressiveFallbackSelection(selection) {
@@ -655,6 +660,23 @@ function hasNonlocalizedSpatialCollision(trial, originalImageData) {
     );
 }
 
+function hasLocalizedPreviewRefinement(trial, originalImageData) {
+    const witness = measureOutputResidualLocalization({
+        imageData: originalImageData,
+        alphaMap: trial.alphaMap,
+        position: trial.position,
+        decoyShifts: [
+            [-4, 0], [4, 0], [0, -4], [0, 4],
+            [-4, -4], [4, 4], [-4, 4], [4, -4]
+        ]
+    });
+    // A refinement selected by restoration scores must still center the
+    // source pattern. Nearby template shifts distinguish a centered mark
+    // from broad content such as a face, before any inverse removal.
+    return witness.gradientSignedTarget > 0 &&
+        witness.gradientPercentile === 1;
+}
+
 function isSafeSelectorBestEffortSelection(selection, originalImageData) {
     const trial = selection?.selectedTrial;
     const isSmallV2 =
@@ -675,7 +697,11 @@ function isSafeSelectorBestEffortSelection(selection, originalImageData) {
         catalogScopeAllowed &&
         !hasNonlocalizedSpatialCollision(trial, originalImageData) &&
         hasMeasurableRestorationEffect(trial) &&
-        hasCompleteBestEffortTrial(trial, originalImageData)
+        hasCompleteBestEffortTrial(trial, originalImageData) &&
+        (
+            trial.provenance?.previewAnchorLocalRefine !== true ||
+            hasLocalizedPreviewRefinement(trial, originalImageData)
+        )
     );
 }
 
@@ -1039,10 +1065,22 @@ export function collectInitialWatermarkCandidates(input = {}) {
             automaticSelection,
             input.originalImageData
         );
-    const presenceConfirmed = Boolean(
+    let presenceConfirmed = Boolean(
         normalPresenceConfirmed || confirmedV2MediumRescueTrial
     );
-    const exact48R96SourceWitnessRescueTrial = presenceConfirmed
+    // A weak V2 match on disjoint content can otherwise prevent the exact
+    // legacy anchor from being checked. Reuse its independent signed-source
+    // and decoy gates; an accepted processed V2 score is not presence truth.
+    const possibleV2Collision = presenceConfirmed &&
+        !fixedSelection?.selectedTrial &&
+        automaticSelection?.selectedTrial?.config?.logoSize === 36 &&
+        automaticSelection.selectedTrial.config.alphaVariant === 'v2';
+    const displacedStrongExact48 = presenceConfirmed &&
+        geometryLockWitness?.position?.width === 48 &&
+        geometryLockWitness.position.x === input.originalImageData.width - 144 &&
+        geometryLockWitness.position.y === input.originalImageData.height - 144 &&
+        fixedSelection?.selectedTrial?.position?.width !== 48;
+    let exact48R96SourceWitnessRescueTrial = presenceConfirmed && !possibleV2Collision && !displacedStrongExact48
         ? null
         : createExact48R96SourceWitnessRescueTrial({
             originalImageData: input.originalImageData,
@@ -1050,6 +1088,22 @@ export function collectInitialWatermarkCandidates(input = {}) {
             config: input.config,
             catalogPriorConfig: input.catalogPriorConfig
         });
+    if (possibleV2Collision && exact48R96SourceWitnessRescueTrial) {
+        if (
+            isGeometryCompatibleWithLock(
+                exact48R96SourceWitnessRescueTrial,
+                geometryLockWitness
+            ) &&
+            !isGeometryCompatibleWithLock(
+                automaticSelection.selectedTrial,
+                exact48R96SourceWitnessRescueTrial
+            )
+        ) {
+            presenceConfirmed = false;
+        } else {
+            exact48R96SourceWitnessRescueTrial = null;
+        }
+    }
     const exact96R192SourceWitnessRescueTrial =
         exact48R96SourceWitnessRescueTrial
             ? null
@@ -1257,6 +1311,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 : null,
             1005
         );
+    const hasSupplementalSourceWitness = Boolean(
+        displacedStrongExact48 && sourceWitnessRescueHypothesis
+    );
     const preferredHypotheses = [
         fixedSelectedHypothesis,
         automaticSelectedHypothesis,
@@ -1275,8 +1332,30 @@ export function collectInitialWatermarkCandidates(input = {}) {
         .filter((hypothesis) => !preferredHypotheses.some((preferred) => (
             sameTrialIdentity(preferred.trial, hypothesis.trial)
         )))
-        .slice(0, Math.max(0, 5 - preferredHypotheses.length));
+        // Adding a witness must not evict an established conservative trial.
+        .slice(0, Math.max(0, (hasSupplementalSourceWitness ? 6 : 5) - preferredHypotheses.length));
     const hypotheses = [...preferredHypotheses, ...retainedAlternatives]
+        .map(hypothesis => {
+            const trial = hypothesis.trial;
+            const rescue = exact48R96SourceWitnessRescueTrial;
+            if (!displacedStrongExact48 || !rescue || trial?.alphaGain !== 1 ||
+                trial.alphaMap !== rescue.alphaMap ||
+                trial.position?.x !== rescue.position.x || trial.position?.y !== rescue.position.y ||
+                trial.position?.width !== 48 || trial.position?.height !== 48) return hypothesis;
+            // Source evidence confirms geometry, not strength. Preserve the
+            // full-strength candidate's calibration instead of freezing it.
+            return {
+                ...hypothesis,
+                trial: {
+                    ...trial,
+                    provenance: {
+                        ...trial.provenance,
+                        sourceWitnessGeometry: true,
+                        sourceWitnessGate: rescue.provenance.sourceWitnessGate
+                    }
+                }
+            };
+        })
         .map((hypothesis) => ({
             ...hypothesis,
             presenceStatus: !presenceConfirmed && sourceWitnessRescueTrial
@@ -1285,7 +1364,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 ? 'selector-only'
                 : 'confirmed',
             discoveryRole:
-                hypothesis.trial?.provenance?.sourceWitnessRescue === true
+                hypothesis.trial?.provenance?.sourceWitnessGeometry === true
+                ? 'confirmed-rescue'
+                : hypothesis.trial?.provenance?.sourceWitnessRescue === true
                 ? 'source-witness-rescue'
                 : bestEffortFallback &&
                 hypothesis.trial?.provenance?.topNConservative !== true
@@ -1305,6 +1386,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
 
     return {
         hypotheses,
+        hasSupplementalSourceWitness,
         presenceConfirmed,
         bestEffortFallback,
         bestEffortReason: bestEffortFallback && sourceWitnessRescueTrial

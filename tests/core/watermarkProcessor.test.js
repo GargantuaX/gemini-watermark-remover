@@ -288,6 +288,74 @@ test('processWatermarkImageData should remove issue153 at the actual star withou
     }
 });
 
+test('processWatermarkImageData should recover the legacy star instead of a disjoint V2 content collision', async () => {
+    for (const sample of ['04', '05']) {
+        const crop = await decodeImageDataInNode(path.resolve(
+            `tests/fixtures/legacy48-v2-collision-${sample}.png`
+        ));
+        const original = createSolidImageData(1024, 1024, [60, 50, 40]);
+        for (let row = 0; row < crop.height; row++) {
+            original.data.set(
+                crop.data.subarray(row * crop.width * 4, (row + 1) * crop.width * 4),
+                ((1024 - crop.height + row) * 1024 + 1024 - crop.width) * 4
+            );
+        }
+        const result = removeWatermarkFromImageDataSync(original);
+        assert.equal(result.meta.applied, true, sample);
+        assert.deepEqual(result.meta.position, {
+            x: 880, y: 880, width: 48, height: 48
+        }, sample);
+        assert.equal(measureRegionMeanAbsoluteDelta(result.imageData, original, {
+            x: 929, y: 929, width: 36, height: 36
+        }), 0, `background detail must remain unchanged: ${sample}`);
+        assert.ok(measureRegionMeanAbsoluteDelta(result.imageData, original, {
+            x: 892, y: 892, width: 24, height: 24
+        }) > 20, `visible source star must be reduced: ${sample}`);
+    }
+});
+
+test('processWatermarkImageData should preserve telescope and plush content without localized watermark evidence', async () => {
+    for (const { name, width, height } of [
+        { name: 'telescope', width: 2730, height: 1536 },
+        { name: 'plush', width: 1024, height: 1004 }
+    ]) {
+        const crop = await decodeImageDataInNode(path.resolve(
+            `tests/fixtures/content-collision-${name}.png`
+        ));
+        const original = createSolidImageData(width, height, [80, 70, 60]);
+        for (let y = 0; y < crop.height; y++) {
+            original.data.set(
+                crop.data.subarray(y * crop.width * 4, (y + 1) * crop.width * 4),
+                ((height - crop.height + y) * width + width - crop.width) * 4
+            );
+        }
+        const result = removeWatermarkFromImageDataSync(original);
+        assert.equal(result.meta.applied, false, name);
+        assert.equal(result.meta.skipReason, 'no-watermark-detected', name);
+        assert.deepEqual(result.imageData.data, original.data, name);
+
+        // The same content must still be processed when it actually contains
+        // a known white watermark; skipping the whole image class is not a fix.
+        const size = name === 'telescope' ? 96 : 48;
+        const margin = name === 'telescope' ? 64 : 96;
+        const position = {
+            x: width - margin - size, y: height - margin - size,
+            width: size, height: size
+        };
+        const watermarked = {
+            width, height, data: new Uint8ClampedArray(original.data)
+        };
+        applySyntheticWatermark(watermarked, getEmbeddedAlphaMap(size), position, 1);
+        const restored = removeWatermarkFromImageDataSync(watermarked);
+        assert.equal(restored.meta.applied, true, `real watermark: ${name}`);
+        assert.ok(
+            measureRegionMeanAbsoluteDelta(restored.imageData, original, position) <
+            measureRegionMeanAbsoluteDelta(watermarked, original, position),
+            `real watermark must be reduced: ${name}`
+        );
+    }
+});
+
 test('processWatermarkImageData should repair expanded new-margin alpha edges on a flat background', () => {
     const position = { x: 2464, y: 1248, width: 96, height: 96 };
     const alphaMap = getEmbeddedAlphaMap('96-20260520');
