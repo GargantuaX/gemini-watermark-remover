@@ -1058,10 +1058,16 @@ export function collectInitialWatermarkCandidates(input = {}) {
             catalogPriorConfig: input.catalogPriorConfig
         });
     if (possibleV2Collision && exact48R96SourceWitnessRescueTrial) {
-        if (!isGeometryCompatibleWithLock(
-            automaticSelection.selectedTrial,
-            exact48R96SourceWitnessRescueTrial
-        )) {
+        if (
+            isGeometryCompatibleWithLock(
+                exact48R96SourceWitnessRescueTrial,
+                geometryLockWitness
+            ) &&
+            !isGeometryCompatibleWithLock(
+                automaticSelection.selectedTrial,
+                exact48R96SourceWitnessRescueTrial
+            )
+        ) {
             presenceConfirmed = false;
         } else {
             exact48R96SourceWitnessRescueTrial = null;

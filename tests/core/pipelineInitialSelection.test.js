@@ -1366,13 +1366,18 @@ test('collectInitialWatermarkCandidates should reject an exact48 edge witness wi
     assert.equal(result.hypotheses.length, 0);
 });
 
-test('collectInitialWatermarkCandidates should retain a V2 target when the legacy anchor is blank or dark', () => {
+test('collectInitialWatermarkCandidates should retain a V2 target without a compatible legacy rescue', () => {
     const alpha48 = getEmbeddedAlphaMap(48);
     const alphaV2 = getEmbeddedAlphaMap('36-v2');
-    for (const darkLegacy of [false, true]) {
+    for (const legacy of ['blank', 'dark', 'white-with-v2-lock']) {
         const imageData = createFlatImageData(1024, 1024, 160);
-        if (darkLegacy) {
+        if (legacy === 'dark') {
             applyBlackWatermark(imageData, alpha48, {
+                x: 880, y: 880, width: 48, height: 48
+            });
+        }
+        if (legacy === 'white-with-v2-lock') {
+            applyWhiteWatermark(imageData, alpha48, {
                 x: 880, y: 880, width: 48, height: 48
             });
         }
@@ -1384,8 +1389,8 @@ test('collectInitialWatermarkCandidates should retain a V2 target when the legac
             alphaGain: 1,
             accepted: true,
             evaluation: { eligible: true },
-            originalSpatialScore: 0.2,
-            originalGradientScore: 0.1,
+            originalSpatialScore: legacy === 'white-with-v2-lock' ? 0.99 : 0.2,
+            originalGradientScore: legacy === 'white-with-v2-lock' ? 0.99 : 0.1,
             processedSpatialScore: 0.02,
             processedGradientScore: 0.03,
             residual: { cleared: true },
