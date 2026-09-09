@@ -34,6 +34,38 @@ function createPaleFlatImageData(width, height) {
     return { width, height, data };
 }
 
+test('strong catalog evidence should reject blank and dark-star controls while admitting a white star', () => {
+    const alpha = getEmbeddedAlphaMap(48);
+    const position = { x: 183, y: 183, width: 48, height: 48 };
+    for (const polarity of ['blank', 'dark', 'white']) {
+        const original = createPaleFlatImageData(320, 320);
+        if (polarity === 'white') applySyntheticWatermark(original, alpha, position);
+        if (polarity === 'dark') {
+            for (let y = 0; y < 48; y++) {
+                for (let x = 0; x < 48; x++) {
+                    const offset = ((position.y + y) * original.width + position.x + x) * 4;
+                    for (let channel = 0; channel < 3; channel++) {
+                        original.data[offset + channel] *= 1 - alpha[y * 48 + x];
+                    }
+                }
+            }
+        }
+        const result = evaluateRestorationCandidate({
+            originalImageData: original,
+            alphaMap: polarity === 'dark' ? Float32Array.from(alpha, (value) => -value) : alpha,
+            position,
+            source: 'standard+catalog',
+            config: { logoSize: 48, marginRight: 89, marginBottom: 89 },
+            baselineNearBlackRatio: calculateNearBlackRatio(original, position),
+            alphaGain: 1,
+            provenance: { catalogVariant: true, catalogEvidenceGate: 'strong', darkPolarity: polarity === 'dark' },
+            includeImageData: false
+        });
+        assert.equal(result.evaluation.gates.catalogEvidenceAllowed, polarity === 'white', polarity);
+        if (polarity !== 'white') assert.equal(result.accepted, false, polarity);
+    }
+});
+
 test('size-jitter alpha resolution should interpolate the seed variant instead of the default profile', async () => {
     const candidateSelector = await import('../../src/core/candidateSelector.js');
     assert.equal(typeof candidateSelector.resolveSizeJitterAlphaMap, 'function');

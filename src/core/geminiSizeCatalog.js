@@ -36,6 +36,10 @@ const GEMINI_3X_V2_SMALL_WATERMARK_CONFIG = Object.freeze({
     alphaVariant: 'v2'
 });
 const KNOWN_FIXED_GEMINI_WATERMARK_CONFIGS_BY_SIZE = Object.freeze({
+    // Issue #153: retain the existing template at the measured JPEG anchor.
+    '2752x1536': Object.freeze([
+        Object.freeze({ logoSize: 48, marginRight: 89, marginBottom: 89, fixedVariant: true })
+    ]),
     '1408x768': Object.freeze([
         Object.freeze({ logoSize: 46, marginRight: 32, marginBottom: 32, fixedVariant: true })
     ])
@@ -305,7 +309,9 @@ function resolveKnownFixedGeminiWatermarkConfigEntries(width, height) {
         .map((config) => createCatalogEntry(config, {
             family: 'fixed-size-variant',
             sourcePriority: 5,
-            evidenceGate: 'required',
+            evidenceGate: config.logoSize === 48 && config.marginRight === 89
+                ? 'strong'
+                : 'required',
             source: 'known-fixed-size'
         }));
 }
