@@ -494,7 +494,12 @@ function selectExact96SourceWitnessTrial({
     ) {
         return r192Trial;
     }
-    return canonicalTrial;
+    // A larger spatial score on unrelated content is not enough to replace
+    // the R192 witness. Require positive source-edge agreement at the new
+    // anchor; otherwise neither candidate has won this ambiguous rescue.
+    return Number(canonicalTrial.originalGradientScore) > 0
+        ? canonicalTrial
+        : null;
 }
 
 function isSafeAggressiveFallbackSelection(selection) {
@@ -655,6 +660,23 @@ function hasNonlocalizedSpatialCollision(trial, originalImageData) {
     );
 }
 
+function hasLocalizedPreviewRefinement(trial, originalImageData) {
+    const witness = measureOutputResidualLocalization({
+        imageData: originalImageData,
+        alphaMap: trial.alphaMap,
+        position: trial.position,
+        decoyShifts: [
+            [-4, 0], [4, 0], [0, -4], [0, 4],
+            [-4, -4], [4, 4], [-4, 4], [4, -4]
+        ]
+    });
+    // A refinement selected by restoration scores must still center the
+    // source pattern. Nearby template shifts distinguish a centered mark
+    // from broad content such as a face, before any inverse removal.
+    return witness.gradientSignedTarget > 0 &&
+        witness.gradientPercentile === 1;
+}
+
 function isSafeSelectorBestEffortSelection(selection, originalImageData) {
     const trial = selection?.selectedTrial;
     const isSmallV2 =
@@ -675,7 +697,11 @@ function isSafeSelectorBestEffortSelection(selection, originalImageData) {
         catalogScopeAllowed &&
         !hasNonlocalizedSpatialCollision(trial, originalImageData) &&
         hasMeasurableRestorationEffect(trial) &&
-        hasCompleteBestEffortTrial(trial, originalImageData)
+        hasCompleteBestEffortTrial(trial, originalImageData) &&
+        (
+            trial.provenance?.previewAnchorLocalRefine !== true ||
+            hasLocalizedPreviewRefinement(trial, originalImageData)
+        )
     );
 }
 
