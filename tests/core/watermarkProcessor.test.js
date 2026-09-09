@@ -247,6 +247,47 @@ test('processWatermarkImageData should keep issue142 best effort on the canonica
     assert.ok(canonicalRegionDelta > 0);
 });
 
+test('processWatermarkImageData should remove issue153 at the actual star without changing the disjoint background', async () => {
+    const crop = await decodeImageDataInNode(path.resolve(
+        'tests/fixtures/issue153-2752x1536-r89.png'
+    ));
+    const original = createSolidImageData(2752, 1536, [20, 12, 8]);
+    for (let row = 0; row < crop.height; row++) {
+        original.data.set(
+            crop.data.subarray(row * crop.width * 4, (row + 1) * crop.width * 4),
+            ((original.height - crop.height + row) * original.width + original.width - crop.width) * 4
+        );
+    }
+    const result = removeWatermarkFromImageDataSync(original);
+    const position = { x: 2615, y: 1399, width: 48, height: 48 };
+    assert.equal(result.meta.applied, true);
+    assert.deepEqual(result.meta.position, position);
+    assert.equal(measureRegionMeanAbsoluteDelta(result.imageData, original, {
+        x: 2472, y: 1256, width: 88, height: 88
+    }), 0);
+    // Frozen source-star core and adjacent background, independent of selected metadata.
+    const regions = [
+        { image: result.imageData, x: 2633, y: 1417, width: 12, height: 12 },
+        { image: original, x: 2620, y: 1390, width: 36, height: 6 }
+    ];
+    const means = regions.map((region) => {
+        const sums = [0, 0, 0];
+        for (let y = region.y; y < region.y + region.height; y++) {
+            for (let x = region.x; x < region.x + region.width; x++) {
+                const offset = (y * original.width + x) * 4;
+                for (let channel = 0; channel < 3; channel++) {
+                    sums[channel] += region.image.data[offset + channel];
+                }
+            }
+        }
+        return sums.map((sum) => sum / (region.width * region.height));
+    });
+    for (let channel = 0; channel < 3; channel++) {
+        assert.ok(Math.abs(means[0][channel] - means[1][channel]) < 4,
+            `star core must match nearby background: ${JSON.stringify(means)}`);
+    }
+});
+
 test('processWatermarkImageData should repair expanded new-margin alpha edges on a flat background', () => {
     const position = { x: 2464, y: 1248, width: 96, height: 96 };
     const alphaMap = getEmbeddedAlphaMap('96-20260520');

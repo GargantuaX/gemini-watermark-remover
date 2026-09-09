@@ -1103,10 +1103,15 @@ export function evaluateRestorationCandidate({
         originalScores.spatialScore >= STANDARD_VALIDATION_MIN_ORIGINAL_SPATIAL_SCORE ||
         originalScores.gradientScore >= STANDARD_VALIDATION_MIN_ORIGINAL_GRADIENT_SCORE;
     const catalogEvidenceGate = provenance?.catalogEvidenceGate ?? null;
+    // The new fixed 48px anchor overlaps older 96px stars. Admit it only
+    // with near-perfect white source geometry, never from a dark-content fit.
     const catalogEvidenceAllowed =
-        catalogEvidenceGate !== 'medium' ||
-        originalScores.spatialScore >= 0.15 ||
-        originalScores.gradientScore >= 0.08;
+        catalogEvidenceGate === 'strong'
+            ? provenance?.darkPolarity !== true &&
+                originalScores.spatialScore >= 0.95 && originalScores.gradientScore >= 0.8
+            : catalogEvidenceGate !== 'medium' ||
+                originalScores.spatialScore >= 0.15 ||
+                originalScores.gradientScore >= 0.08;
     const strongDarkPolarityOriginalEvidence =
         originalScores.spatialScore >= DARK_POLARITY_CATALOG_MIN_ORIGINAL_SPATIAL ||
         originalScores.gradientScore >= DARK_POLARITY_CATALOG_MIN_ORIGINAL_GRADIENT;

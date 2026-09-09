@@ -244,6 +244,21 @@ test('resolveOfficialGeminiSearchConfigEntries should not generalize the 48px R9
     )), false);
 });
 
+test('resolveGeminiWatermarkSearchCatalogEntries should constrain issue153 geometry to its confirmed dimensions', () => {
+    const defaultConfig = { logoSize: 96, marginRight: 64, marginBottom: 64 };
+    const entries = resolveGeminiWatermarkSearchCatalogEntries(2752, 1536, defaultConfig);
+    assert.deepEqual(entries[0].config, defaultConfig);
+    const variant = entries.find(({ config }) => config.marginRight === 89);
+    assert.deepEqual(variant.config, {
+        logoSize: 48, marginRight: 89, marginBottom: 89, fixedVariant: true
+    });
+    assert.equal(variant.metadata.evidenceGate, 'strong');
+    for (const [width, height] of [[1536, 2752], [2816, 1536], [5504, 3072]]) {
+        assert.equal(resolveGeminiWatermarkSearchCatalogEntries(width, height, defaultConfig)
+            .some(({ config }) => config.logoSize === 48 && config.marginRight === 89), false);
+    }
+});
+
 test('resolveOfficialGeminiSearchConfigEntries should expose explicit catalog family and priority metadata', () => {
     const entries = resolveOfficialGeminiSearchConfigEntries(768, 1376);
 
