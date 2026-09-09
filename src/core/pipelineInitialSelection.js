@@ -1039,10 +1039,17 @@ export function collectInitialWatermarkCandidates(input = {}) {
             automaticSelection,
             input.originalImageData
         );
-    const presenceConfirmed = Boolean(
+    let presenceConfirmed = Boolean(
         normalPresenceConfirmed || confirmedV2MediumRescueTrial
     );
-    const exact48R96SourceWitnessRescueTrial = presenceConfirmed
+    // A weak V2 match on disjoint content can otherwise prevent the exact
+    // legacy anchor from being checked. Reuse its independent signed-source
+    // and decoy gates; an accepted processed V2 score is not presence truth.
+    const possibleV2Collision = presenceConfirmed &&
+        !fixedSelection?.selectedTrial &&
+        automaticSelection?.selectedTrial?.config?.logoSize === 36 &&
+        automaticSelection.selectedTrial.config.alphaVariant === 'v2';
+    let exact48R96SourceWitnessRescueTrial = presenceConfirmed && !possibleV2Collision
         ? null
         : createExact48R96SourceWitnessRescueTrial({
             originalImageData: input.originalImageData,
@@ -1050,6 +1057,16 @@ export function collectInitialWatermarkCandidates(input = {}) {
             config: input.config,
             catalogPriorConfig: input.catalogPriorConfig
         });
+    if (possibleV2Collision && exact48R96SourceWitnessRescueTrial) {
+        if (!isGeometryCompatibleWithLock(
+            automaticSelection.selectedTrial,
+            exact48R96SourceWitnessRescueTrial
+        )) {
+            presenceConfirmed = false;
+        } else {
+            exact48R96SourceWitnessRescueTrial = null;
+        }
+    }
     const exact96R192SourceWitnessRescueTrial =
         exact48R96SourceWitnessRescueTrial
             ? null

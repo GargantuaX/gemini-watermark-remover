@@ -288,6 +288,32 @@ test('processWatermarkImageData should remove issue153 at the actual star withou
     }
 });
 
+test('processWatermarkImageData should recover the legacy star instead of a disjoint V2 content collision', async () => {
+    for (const sample of ['04', '05']) {
+        const crop = await decodeImageDataInNode(path.resolve(
+            `tests/fixtures/legacy48-v2-collision-${sample}.png`
+        ));
+        const original = createSolidImageData(1024, 1024, [60, 50, 40]);
+        for (let row = 0; row < crop.height; row++) {
+            original.data.set(
+                crop.data.subarray(row * crop.width * 4, (row + 1) * crop.width * 4),
+                ((1024 - crop.height + row) * 1024 + 1024 - crop.width) * 4
+            );
+        }
+        const result = removeWatermarkFromImageDataSync(original);
+        assert.equal(result.meta.applied, true, sample);
+        assert.deepEqual(result.meta.position, {
+            x: 880, y: 880, width: 48, height: 48
+        }, sample);
+        assert.equal(measureRegionMeanAbsoluteDelta(result.imageData, original, {
+            x: 929, y: 929, width: 36, height: 36
+        }), 0, `background detail must remain unchanged: ${sample}`);
+        assert.ok(measureRegionMeanAbsoluteDelta(result.imageData, original, {
+            x: 892, y: 892, width: 24, height: 24
+        }) > 20, `visible source star must be reduced: ${sample}`);
+    }
+});
+
 test('processWatermarkImageData should repair expanded new-margin alpha edges on a flat background', () => {
     const position = { x: 2464, y: 1248, width: 96, height: 96 };
     const alphaMap = getEmbeddedAlphaMap('96-20260520');
