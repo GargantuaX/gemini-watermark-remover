@@ -1075,7 +1075,12 @@ export function collectInitialWatermarkCandidates(input = {}) {
         !fixedSelection?.selectedTrial &&
         automaticSelection?.selectedTrial?.config?.logoSize === 36 &&
         automaticSelection.selectedTrial.config.alphaVariant === 'v2';
-    let exact48R96SourceWitnessRescueTrial = presenceConfirmed && !possibleV2Collision
+    const displacedStrongExact48 = presenceConfirmed &&
+        geometryLockWitness?.position?.width === 48 &&
+        geometryLockWitness.position.x === input.originalImageData.width - 144 &&
+        geometryLockWitness.position.y === input.originalImageData.height - 144 &&
+        fixedSelection?.selectedTrial?.position?.width !== 48;
+    let exact48R96SourceWitnessRescueTrial = presenceConfirmed && !possibleV2Collision && !displacedStrongExact48
         ? null
         : createExact48R96SourceWitnessRescueTrial({
             originalImageData: input.originalImageData,
@@ -1306,6 +1311,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 : null,
             1005
         );
+    const hasSupplementalSourceWitness = Boolean(
+        displacedStrongExact48 && sourceWitnessRescueHypothesis
+    );
     const preferredHypotheses = [
         fixedSelectedHypothesis,
         automaticSelectedHypothesis,
@@ -1324,8 +1332,30 @@ export function collectInitialWatermarkCandidates(input = {}) {
         .filter((hypothesis) => !preferredHypotheses.some((preferred) => (
             sameTrialIdentity(preferred.trial, hypothesis.trial)
         )))
-        .slice(0, Math.max(0, 5 - preferredHypotheses.length));
+        // Adding a witness must not evict an established conservative trial.
+        .slice(0, Math.max(0, (hasSupplementalSourceWitness ? 6 : 5) - preferredHypotheses.length));
     const hypotheses = [...preferredHypotheses, ...retainedAlternatives]
+        .map(hypothesis => {
+            const trial = hypothesis.trial;
+            const rescue = exact48R96SourceWitnessRescueTrial;
+            if (!displacedStrongExact48 || !rescue || trial?.alphaGain !== 1 ||
+                trial.alphaMap !== rescue.alphaMap ||
+                trial.position?.x !== rescue.position.x || trial.position?.y !== rescue.position.y ||
+                trial.position?.width !== 48 || trial.position?.height !== 48) return hypothesis;
+            // Source evidence confirms geometry, not strength. Preserve the
+            // full-strength candidate's calibration instead of freezing it.
+            return {
+                ...hypothesis,
+                trial: {
+                    ...trial,
+                    provenance: {
+                        ...trial.provenance,
+                        sourceWitnessGeometry: true,
+                        sourceWitnessGate: rescue.provenance.sourceWitnessGate
+                    }
+                }
+            };
+        })
         .map((hypothesis) => ({
             ...hypothesis,
             presenceStatus: !presenceConfirmed && sourceWitnessRescueTrial
@@ -1334,7 +1364,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 ? 'selector-only'
                 : 'confirmed',
             discoveryRole:
-                hypothesis.trial?.provenance?.sourceWitnessRescue === true
+                hypothesis.trial?.provenance?.sourceWitnessGeometry === true
+                ? 'confirmed-rescue'
+                : hypothesis.trial?.provenance?.sourceWitnessRescue === true
                 ? 'source-witness-rescue'
                 : bestEffortFallback &&
                 hypothesis.trial?.provenance?.topNConservative !== true
@@ -1354,6 +1386,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
 
     return {
         hypotheses,
+        hasSupplementalSourceWitness,
         presenceConfirmed,
         bestEffortFallback,
         bestEffortReason: bestEffortFallback && sourceWitnessRescueTrial
