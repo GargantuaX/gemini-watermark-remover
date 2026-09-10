@@ -15,6 +15,7 @@ import { resolveGeminiWatermarkSearchCatalogEntries } from './geminiSizeCatalog.
 import { measureOutputResidualLocalization } from './outputResidualLocalization.js';
 import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
 import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.js';
+import { measureRowAlphaEvidence, supportsRowAlphaGain } from './rowAlphaEvidence.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
 const AGGRESSIVE_FALLBACK_MAX_NEAR_BLACK_INCREASE = 0.05;
@@ -1080,7 +1081,17 @@ export function collectInitialWatermarkCandidates(input = {}) {
         geometryLockWitness.position.x === input.originalImageData.width - 144 &&
         geometryLockWitness.position.y === input.originalImageData.height - 144 &&
         fixedSelection?.selectedTrial?.position?.width !== 48;
-    let exact48R96SourceWitnessRescueTrial = presenceConfirmed && !possibleV2Collision && !displacedStrongExact48
+    const rowAlphaTrial = [fixedSelection?.selectedTrial, automaticSelection?.selectedTrial]
+        .find(trial => trial?.position?.width === 48 &&
+            trial.position.x === input.originalImageData.width - 144 &&
+            trial.position.y === input.originalImageData.height - 144 &&
+            trial.alphaGain < 0.6 && !trial.config?.alphaVariant &&
+            trial.provenance?.darkPolarity !== true);
+    const rowAlphaEvidence = rowAlphaTrial
+        ? measureRowAlphaEvidence(input.originalImageData, rowAlphaTrial.position, input.alpha48)
+        : null;
+    const supportedRowAlpha = supportsRowAlphaGain(rowAlphaEvidence);
+    let exact48R96SourceWitnessRescueTrial = presenceConfirmed && !possibleV2Collision && !displacedStrongExact48 && !supportedRowAlpha
         ? null
         : createExact48R96SourceWitnessRescueTrial({
             originalImageData: input.originalImageData,
@@ -1088,6 +1099,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
             config: input.config,
             catalogPriorConfig: input.catalogPriorConfig
         });
+    if (supportedRowAlpha && exact48R96SourceWitnessRescueTrial) {
+        exact48R96SourceWitnessRescueTrial.provenance.rowAlphaEvidence = rowAlphaEvidence;
+    }
     if (possibleV2Collision && exact48R96SourceWitnessRescueTrial) {
         if (
             isGeometryCompatibleWithLock(
@@ -1312,7 +1326,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
             1005
         );
     const hasSupplementalSourceWitness = Boolean(
-        displacedStrongExact48 && sourceWitnessRescueHypothesis
+        (displacedStrongExact48 || supportedRowAlpha) && sourceWitnessRescueHypothesis
     );
     const preferredHypotheses = [
         fixedSelectedHypothesis,
