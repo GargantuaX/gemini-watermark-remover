@@ -23,6 +23,12 @@ import {
     applyVideoBitrateDebugOverride
 } from './video/videoDebugControlOverrides.js';
 import {
+    createBatchQueue,
+    enqueueBatchFiles,
+    processBatchQueue,
+    startBatchSelection
+} from './video/videoBatchQueue.js';
+import {
     consumeDebugFileHandoff,
     getDebugFileKind,
     pickDebugUploadFile,
@@ -56,6 +62,7 @@ const allenkFdncnnRuntimePromises = new Map();
 const els = {
     dropzone: $('dropzone'),
     fileInput: $('fileInput'),
+    batchQueue: $('batchQueue'),
     comparePlayer: $('comparePlayer'),
     afterBadge: $('afterBadge'),
     playPauseBtn: $('playPauseBtn'),
@@ -686,8 +693,112 @@ async function runExport() {
     }
 }
 
+// --- Batch processing (multiple videos, one at a time) ---
+// Video decode/encode is CPU/GPU-bound, so sequential processing through the
+// existing single-file pipeline is the correct design, not a compromise.
+const batch = createBatchQueue();
+
+function batchStatusLabel(status) {
+    switch (status) {
+        case 'pending': return '排队中';
+        case 'processing': return '处理中…';
+        case 'done': return '已完成 ✓';
+        case 'error': return '失败 ✗';
+        case 'skipped': return '已跳过';
+        default: return '';
+    }
+}
+
+function renderBatchQueue() {
+    const box = els.batchQueue;
+    if (!box) return;
+    if (batch.items.length === 0) {
+        box.hidden = true;
+        box.replaceChildren();
+        return;
+    }
+    box.hidden = false;
+    box.replaceChildren(...batch.items.map((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'batch-item';
+        row.dataset.status = item.status;
+        const name = document.createElement('span');
+        name.className = 'batch-name';
+        name.textContent = `${index + 1}. ${item.file.name}`;
+        const stateLabel = document.createElement('span');
+        stateLabel.className = 'batch-state';
+        stateLabel.textContent = batchStatusLabel(item.status);
+        row.append(name, stateLabel);
+        return row;
+    }));
+}
+
+function triggerDownload(href, filename) {
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+}
+
+async function exportQueuedVideo(file) {
+    await setFile(file);
+    if (getDebugFileKind(file) !== 'video' || !state.file) return { skipped: true };
+
+    await runExport();
+    const href = els.downloadBtn.getAttribute('href');
+    if (!state.processedUrl || !href) return { ok: false };
+
+    return {
+        ok: true,
+        href,
+        filename: els.downloadBtn.getAttribute('download') || `${file.name}.mp4`
+    };
+}
+
+async function runBatch() {
+    const summary = await processBatchQueue(batch, {
+        processFile: exportQueuedVideo,
+        downloadResult: ({ href, filename }) => triggerDownload(href, filename),
+        onChange: renderBatchQueue,
+        onError: (error) => console.error(error)
+    });
+    if (!summary) return;
+
+    setStatus(
+        `批量处理完成：成功 ${summary.done}/${summary.total}，结果已自动下载。`,
+        summary.done ? 'success' : 'warn'
+    );
+}
+
+function handleIncomingFiles(fileList) {
+    const list = Array.from(fileList || []).filter(Boolean);
+    const videoFiles = list.filter((file) => getDebugFileKind(file) === 'video');
+
+    // Drop a finished queue before anything else, so completed rows never leak
+    // into the next selection — batch or single-file.
+    startBatchSelection(batch);
+
+    if (videoFiles.length > 1) {
+        enqueueBatchFiles(batch, videoFiles);
+        renderBatchQueue();
+        runBatch();
+        return;
+    }
+
+    // Single video (or an image handoff): keep the original single-file behavior
+    // so preset tuning and manual export still work. Rendering the now-empty
+    // queue hides any stale batch UI.
+    renderBatchQueue();
+    const file = pickDebugUploadFile(fileList);
+    if (file) setFile(file);
+}
+
 function reset() {
     state.jobId++;
+    startBatchSelection(batch);
+    renderBatchQueue();
     cleanupUrls();
     state.file = null;
     state.metadata = null;
@@ -801,8 +912,7 @@ function setupEvents() {
         }
     });
     els.fileInput.addEventListener('change', (event) => {
-        const file = pickDebugUploadFile(event.target.files);
-        if (file) setFile(file);
+        handleIncomingFiles(event.target.files);
     });
 
     for (const eventName of ['dragenter', 'dragover']) {
@@ -818,8 +928,7 @@ function setupEvents() {
         });
     }
     els.dropzone.addEventListener('drop', (event) => {
-        const file = pickDebugUploadFile(event.dataTransfer?.files);
-        if (file) setFile(file);
+        handleIncomingFiles(event.dataTransfer?.files);
     });
 
     els.alphaGain.addEventListener('input', () => {

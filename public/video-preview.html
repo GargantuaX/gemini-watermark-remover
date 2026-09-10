@@ -287,6 +287,32 @@
       gap: 20px;
     }
 
+    /* Batch queue (multiple videos) */
+    .batch-queue {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .batch-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(148, 163, 184, 0.12);
+    }
+    .batch-item .batch-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .batch-item .batch-state { flex: none; opacity: 0.85; }
+    .batch-item[data-status="processing"] .batch-state { color: #2563eb; }
+    .batch-item[data-status="done"] .batch-state { color: #16a34a; }
+    .batch-item[data-status="error"] .batch-state { color: #dc2626; }
+
     /* Dropzone */
     .dropzone {
       border: 2px dashed #cbd5e1;
@@ -505,8 +531,9 @@
         <div id="dropzone" class="dropzone" data-dragging="false" role="button" tabindex="0">
           <strong>选择文件</strong>
           <span class="muted">视频会在本页处理，图片会回到单图对比页。10 秒 1080p MP4 样例最适合当前 MVP。</span>
-          <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,video/*" hidden>
+          <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,video/*" multiple hidden>
         </div>
+        <div id="batchQueue" class="batch-queue" aria-label="批量队列" hidden></div>
 
         <div class="panel">
           <div class="panel-head">自动处理</div>
