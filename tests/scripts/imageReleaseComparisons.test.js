@@ -113,6 +113,15 @@ test('schema two requires complete source, baseline, inventory, package and auto
     const value = {schemaVersion:2,releaseScope:'image-defaults',version:'1.0.42',provenance:{sourceFiles,baseline,inventorySha256:sha('inventory')},releasePackage,validation:{...evidence(),automated:{fullTest:{ok:true,passed:100,failed:0},sdkSmoke:{ok:true,passed:8,failed:0},build:{ok:true},extensionPackage:{ok:true}}}};
     const current = {version:'1.0.42',sourceHashes:new Map(sourceFiles.map(row=>[row.path,row.sha256])),baseline:{...baseline,sourceHashes:new Map(sourceFiles.map(row=>[row.path,row.sha256]))},inventory:inventory(),inventorySha256:sha('inventory'),releasePackage,outOfScopeChangedFiles:[]};
     assert.equal(verifyImageReleaseEvidence(value,current).ok,true);
+    const added = structuredClone(value);
+    added.provenance.sourceFiles = [...added.provenance.sourceFiles];
+    added.provenance.baseline.sourceFiles = [...added.provenance.baseline.sourceFiles];
+    added.provenance.sourceFiles.push({path:'src/core/newEvidence.js',sha256:sha('new source')});
+    added.provenance.baseline.sourceFiles.push({path:'src/core/newEvidence.js',sha256:null});
+    const withAdded = {...current,sourceHashes:new Map([...current.sourceHashes,['src/core/newEvidence.js',sha('new source')]]),baseline:{...current.baseline,sourceHashes:new Map([...current.baseline.sourceHashes,['src/core/newEvidence.js',null]])}};
+    assert.equal(verifyImageReleaseEvidence(added,withAdded).ok,true);
+    withAdded.baseline.sourceHashes.set('src/core/newEvidence.js',sha('existing source'));
+    assert.ok(verifyImageReleaseEvidence(added,withAdded).blockers.includes('image-evidence-baseline-source-mismatch:src/core/newEvidence.js'));
     const missing = structuredClone(value);
     missing.provenance.sourceFiles=[];
     assert.equal(verifyImageReleaseEvidence(missing,current).ok,false);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.43 - 2026-09-10
+
+- Fix skipped or misplaced watermark removal on supported 2752×1536 Gemini images with flat illustrated backgrounds.
+- Reduce the visible watermark left on a supported cabinet image while preserving its wood grain and horizontal boundary.
+- Keep existing content protection and best-effort output behavior. Fine watermark contours may remain on some images.
+
 ## 1.0.42 - 2026-09-10
 
 - Fix issue #153: recognize the confirmed 48px watermark with 89px right/bottom margins on 2752×1536 images, instead of modifying a different background area.
