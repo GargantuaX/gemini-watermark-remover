@@ -90,7 +90,13 @@ async function loadCurrentState({
         const commit = readGitOutput(['rev-parse', `${ref}^{commit}`], cwd).trim();
         const baselinePackage = JSON.parse(readGitOutput(['show', `${ref}:package.json`], cwd));
         const baselineHashes = new Map();
+        const baselineFiles = new Set(readGitOutput(['ls-tree', '-r', '--name-only', ref], cwd).trim().split(/\r?\n/));
         for (const sourcePath of sourcePaths) {
+            if (!baselineFiles.has(sourcePath)) {
+                // Explicit absence is checked against the published tree, not inferred from a failed read.
+                baselineHashes.set(sourcePath, null);
+                continue;
+            }
             const bytes = execFileSync('git', ['show', `${ref}:${sourcePath}`], { cwd });
             baselineHashes.set(sourcePath, createHash('sha256').update(bytes).digest('hex'));
         }
