@@ -13,6 +13,7 @@ import {
 } from './previewAlphaCalibration.js';
 import { compareRankingKey } from './watermarkScoring.js';
 import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.js';
+import { measureRowAlphaEvidence, supportsRowAlphaGain } from './rowAlphaEvidence.js';
 
 export const FINAL_EVIDENCE_WEIGHT = 0.35;
 export const FINAL_RESIDUAL_WEIGHT = 0.40;
@@ -779,7 +780,21 @@ export function rankCompletedCandidates(completed = []) {
     }
     scored.sort(compareRankedCandidates);
     const imperfectionPreferred = applySameAnchor96ImperfectionPreference(scored);
-    const preferred = applyFullStrengthNewMarginPreference(imperfectionPreferred);
+    let preferred = applyFullStrengthNewMarginPreference(imperfectionPreferred);
+    const incumbent = preferred[0];
+    const rowSupported = preferred.find(candidate => {
+        const trial = candidate.hypothesis?.trial;
+        if (candidate === incumbent || !supportsRowAlphaGain(trial?.provenance?.rowAlphaEvidence) ||
+            candidate.result?.meta?.alphaGain !== 0.6 ||
+            !hasSameCandidateAnchor(candidate, incumbent)) return false;
+        const before = measureRowAlphaEvidence(incumbent.result?.imageData, trial.position, trial.alphaMap);
+        const after = measureRowAlphaEvidence(candidate.result?.imageData, trial.position, trial.alphaMap);
+        // Existing cleanup can leave a nonuniform residual. Require positive
+        // evidence in every quadrant, but validate the proposed output's fit.
+        return before?.gain > 0.15 &&
+            before.quadrants.every(value => value > 0.1) && supportsRowAlphaGain(after, 0);
+    });
+    if (rowSupported) preferred = [rowSupported, ...preferred.filter(candidate => candidate !== rowSupported)];
 
     const first = preferred[0];
     const second = preferred[1];
