@@ -162,7 +162,7 @@ https://github.com/GargantuaX/gemini-watermark-remover/issues/165#issuecomment-5
 
 ## 7. 本地证据导航
 
-本地仓库路径 `D:\Project\gemini-watermark-remover`。以下 `.artifacts` 都被 Git 忽略，**另一台机器 clone 不会得到它们**。agy 在本机可直接读取；跨机器需单独转交必要样本和脚本，勿误以为已推送。
+本地仓库根目录 `${WORKSPACE_ROOT}`。以下 `.artifacts` 都被 Git 忽略，**另一台机器 clone 不会得到它们**。agy 在本机可直接读取；跨机器需单独转交必要样本和脚本，勿误以为已推送。
 
 | 路径 | 内容 |
 | --- | --- |
@@ -183,7 +183,7 @@ https://github.com/GargantuaX/gemini-watermark-remover/issues/165#issuecomment-5
 
 ## 8. 操作环境与交付要求
 
-- 包管理使用 pnpm。shell 按本机 `C:\Users\garga\.codex\RTK.md` 使用 rtk。
+- 包管理使用 pnpm。shell 按本机 `~/.codex/RTK.md` 使用 rtk。
 - gh 使用已登录的用户 PowerShell Profile；不要因沙盒 keyring 报错让用户重新登录或提取 token。
 - 重负载使用 de-ci；de-dev 已停用。本地开发服务由用户管理，不自行另起/重启。
 - 官网仓库路径、allenk 上游本地路径从本地配置解析，不要提交机器绝对路径到产品配置。
