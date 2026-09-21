@@ -2,9 +2,8 @@
 
 ## 1.0.44 - 2026-09-22
 
-- Fix issue #150: preserve unanimous primary video watermark tracks during multi-frame voting, preventing spurious 24px candidate flips (such as frames 0 and 50 on 720×1280 portrait Veo outputs) and ensuring stable single-track 48px tracking.
-- Preserve multi-track detection for genuine mixed-track and alternating video watermark cases (issues #136a, #136b).
-- Keep existing content protection and best-effort output behavior; this update does not alter image watermark algorithms or issue #165 candidate retention, and makes no broad video GA assertion.
+- Fix a video export issue where a background candidate could replace the watermark selected by every detection sample, leaving the watermark visible and creating a dark dot (#150).
+- Preserve existing mixed-track detection and best-effort output behavior. This targeted video fix does not change image-processing algorithms or resolve all video cleanup artifacts.
 
 ## 1.0.43 - 2026-09-10
 
