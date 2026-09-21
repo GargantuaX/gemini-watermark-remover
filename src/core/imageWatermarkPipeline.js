@@ -176,7 +176,7 @@ export function runImageWatermarkPipeline({
         selectCandidate
     });
     const hypotheses = Array.isArray(collection?.hypotheses)
-        ? collection.hypotheses.slice(0, 5)
+        ? collection.hypotheses.slice(0, collection.hasSupplementalSourceWitness ? 6 : 5)
         : [];
     if (debugTimingsEnabled) {
         debugTimings.candidateDiscoveryMs = nowMs() - discoveryStartedAt;

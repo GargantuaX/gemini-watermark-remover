@@ -1366,6 +1366,55 @@ test('collectInitialWatermarkCandidates should reject an exact48 edge witness wi
     assert.equal(result.hypotheses.length, 0);
 });
 
+test('collectInitialWatermarkCandidates should retain a V2 target without a compatible legacy rescue', () => {
+    const alpha48 = getEmbeddedAlphaMap(48);
+    const alphaV2 = getEmbeddedAlphaMap('36-v2');
+    for (const legacy of ['blank', 'dark', 'white-with-v2-lock']) {
+        const imageData = createFlatImageData(1024, 1024, 160);
+        if (legacy === 'dark') {
+            applyBlackWatermark(imageData, alpha48, {
+                x: 880, y: 880, width: 48, height: 48
+            });
+        }
+        if (legacy === 'white-with-v2-lock') {
+            applyWhiteWatermark(imageData, alpha48, {
+                x: 880, y: 880, width: 48, height: 48
+            });
+        }
+        const trial = {
+            source: 'standard+catalog+validated',
+            config: { logoSize: 36, marginRight: 71, marginBottom: 71, alphaVariant: 'v2' },
+            position: { x: 929, y: 929, width: 36, height: 36 },
+            alphaMap: alphaV2,
+            alphaGain: 1,
+            accepted: true,
+            evaluation: { eligible: true },
+            originalSpatialScore: legacy === 'white-with-v2-lock' ? 0.99 : 0.2,
+            originalGradientScore: legacy === 'white-with-v2-lock' ? 0.99 : 0.1,
+            processedSpatialScore: 0.02,
+            processedGradientScore: 0.03,
+            residual: { cleared: true },
+            damage: { safe: true },
+            rankingKey: [0, 0, 0, 0, 0, 0],
+            provenance: { alphaVariant: 'v2', catalogFamily: 'gemini-v2-small' }
+        };
+        applyWhiteWatermark(imageData, alphaV2, trial.position);
+        const input = createExact48R96CollectionInput(imageData, alpha48, null);
+        input.allowAdaptiveSearch = true;
+        input.selectCandidate = ({ allowAutomaticSearch }) => ({
+            selectedTrial: allowAutomaticSearch ? trial : null,
+            candidatePool: [],
+            source: allowAutomaticSearch ? trial.source : 'skipped',
+            decisionTier: allowAutomaticSearch ? 'validated-match' : 'insufficient'
+        });
+        const result = collectInitialWatermarkCandidates(input);
+        assert.equal(result.presenceConfirmed, true);
+        assert.equal(result.bestEffortFallback, false);
+        assert.ok(result.hypotheses.some((h) => h.trial === trial));
+        assert.ok(result.hypotheses.every((h) => !h.trial.provenance?.sourceWitnessRescue));
+    }
+});
+
 test('collectInitialWatermarkCandidates should reject an issue123 weak inverse-polarity edge collision', () => {
     const imageData = createFlatImageData(2754, 1536, 128);
     const alpha96 = getEmbeddedAlphaMap('96-20260520');

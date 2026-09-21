@@ -10,6 +10,13 @@
 
 ## Debug Workflow
 
+### Supported Sample Scope
+
+- Quality fixes target original Gemini outputs. Inputs with repeated watermarking, screenshots, or subsequent image edits are outside the required support scope; do not add special processing solely to accommodate them.
+- Classify sample provenance separately from processing quality. Keep confirmed edited exports as observations, with the evidence for exclusion; retain unknown provenance as unknown. Neither unusual dimensions, missing metadata, nor poor removal quality establishes editing history.
+- An unknown-source upload can motivate an investigation, but does not by itself establish a defect in supported original outputs. Reproduce the suspected issue on a verified original or a controlled fixture before promoting a fix. Do not silently relabel unresolved samples as passing or edited to satisfy a release gate.
+- This scope is an investigation and acceptance rule, not a new runtime rejection rule. Preserve existing best-effort behavior and content-damage regression controls.
+
 ### Allenk Upstream Reference
 
 - The local fork of allenk/GeminiWatermarkTool is at `${GWR_ALLENK_ROOT}`.
