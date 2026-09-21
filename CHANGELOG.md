@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.44 - 2026-09-22
+
+- Fix issue #150: preserve unanimous primary video watermark tracks during multi-frame voting, preventing spurious 24px candidate flips (such as frames 0 and 50 on 720×1280 portrait Veo outputs) and ensuring stable single-track 48px tracking.
+- Preserve multi-track detection for genuine mixed-track and alternating video watermark cases (issues #136a, #136b).
+- Keep existing content protection and best-effort output behavior; this update does not alter image watermark algorithms or issue #165 candidate retention, and makes no broad video GA assertion.
+
 ## 1.0.43 - 2026-09-10
 
 - Fix skipped or misplaced watermark removal on supported 2752×1536 Gemini images with flat illustrated backgrounds.

@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -51,3 +52,18 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Package release candidate tarball
+        run: |
+          mkdir -p .artifacts/release-candidate
+          pnpm pack --pack-destination .artifacts/release-candidate/
+
+      - name: Upload release candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-artifacts
+          path: |
+            .artifacts/release-candidate/*.tgz
+            dist/
+          if-no-files-found: error
+          retention-days: 7
