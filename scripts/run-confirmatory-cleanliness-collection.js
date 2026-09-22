@@ -7,6 +7,9 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { loadLocalEnv } from './local-env.js';
+
+loadLocalEnv();
 
 const PROXY_ENV_KEYS = [
     'HTTP_PROXY',
@@ -87,8 +90,9 @@ function parseArgs(argv) {
         preregistrationPath: path.resolve(
             '.artifacts/prospective-online-samples-20260728-evaluation/next-time-slice-preregistration.json'
         ),
-        collectorPath:
-            'D:\\Project\\sample-files\\scripts\\fetch_recent_online_samples.py',
+        collectorPath: path.resolve(
+            process.env.GWR_SAMPLE_COLLECTOR || 'external/sample-files/scripts/fetch_recent_online_samples.py'
+        ),
         pythonExecutable: 'python',
         outputRoot: path.resolve(
             '.artifacts/prospective-online-samples-confirmatory-after-20260728T015050Z'

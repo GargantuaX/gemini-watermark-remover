@@ -29,8 +29,8 @@ function goalReport(overrides = {}) {
         complete: false,
         nextAction: 'collect-human-review-acceptance',
         blockers: ['human-review-acceptance-missing'],
-        outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-goal-status\\latest-report.json',
-        markdownPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-goal-status\\latest-report.md',
+        outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-goal-status\\latest-report.json',
+        markdownPath: 'Z:\\fixtures\\project\\.artifacts\\video-goal-status\\latest-report.md',
         requirements: [
             { id: 'viewable-review-artifacts', satisfied: true },
             { id: 'human-acceptance-recorded', satisfied: false }
@@ -46,8 +46,8 @@ function goalReport(overrides = {}) {
 
 function dashboardReport(overrides = {}) {
     return {
-        outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.html',
-        reportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.json',
+        outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.html',
+        reportPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.json',
         lanes: 3,
         readyLanes: 3,
         missingAssets: 0,
@@ -64,9 +64,9 @@ function dashboardDetail(overrides = {}) {
                 reviewStatus: 'needs-polish',
                 checklist: { total: 5, checked: 1, unchecked: 4, allChecked: false },
                 assets: [
-                    { name: 'reviewHtml', path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.html' },
-                    { name: 'decisionReport', path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.md' },
-                    { name: 'decisionJson', path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.json' }
+                    { name: 'reviewHtml', path: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.html' },
+                    { name: 'decisionReport', path: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.md' },
+                    { name: 'decisionJson', path: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.json' }
                 ]
             }
         ],
@@ -83,8 +83,8 @@ test('createVideoDeliveryBundleSummary should surface incomplete human acceptanc
             goalReport: goalReport(),
             dashboardDetail: dashboardDetail(),
             dashboardScreenshot: {
-                outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.png',
-                reportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard-screenshot.json',
+                outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.png',
+                reportPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard-screenshot.json',
                 generatedAt: '2026-06-11T16:25:47.992Z'
             }
         })
@@ -135,9 +135,9 @@ test('createVideoDeliveryBundleSummary should suggest alpha policy review decisi
                     reviewStatus: 'pending',
                     checklist: { total: 5, checked: 0, unchecked: 5, allChecked: false },
                     assets: [
-                        { name: 'reviewHtml', path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-review-index.html' },
-                        { name: 'decisionReport', path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.md' },
-                        { name: 'decisionJson', path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.json' }
+                        { name: 'reviewHtml', path: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-review-index.html' },
+                        { name: 'decisionReport', path: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.md' },
+                        { name: 'decisionJson', path: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.json' }
                     ]
                 }
             ]

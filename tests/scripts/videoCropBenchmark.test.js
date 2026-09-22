@@ -51,6 +51,21 @@ test('normalizeVideoBenchmarkCase should resolve project-relative manifest paths
     assert.deepEqual(normalized.tags, ['1080p']);
 });
 
+test('video sample filenames use the configured root while explicit paths keep priority', () => {
+    const sampleRoot = path.resolve('.artifacts/test-video-samples');
+    const options = { sampleRoot, manifestDir: path.resolve('scripts') };
+    assert.equal(
+        normalizeVideoBenchmarkCase({ id: 'sample', originalFile: 'sample.mp4' }, options).originalPath,
+        path.join(sampleRoot, 'sample.mp4')
+    );
+    assert.equal(
+        normalizeVideoBenchmarkCase({
+            id: 'sample', originalFile: 'sample.mp4', originalPath: '.artifacts/override.mp4'
+        }, options).originalPath,
+        path.resolve('.artifacts/override.mp4')
+    );
+});
+
 test('calculateRawDiffMetrics should summarize RGB absolute deltas', () => {
     const left = new Uint8ClampedArray([
         10, 20, 30, 255,

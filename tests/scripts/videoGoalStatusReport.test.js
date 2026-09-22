@@ -31,7 +31,7 @@ function lane(overrides = {}) {
 function dashboard(overrides = {}) {
     return {
         generatedAt: '2026-06-11T00:00:00.000Z',
-        outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.html',
+        outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.html',
         lanes: [
             lane(),
             lane({
@@ -147,8 +147,8 @@ test('createVideoGoalStatusSummary should record verified delivery bundle eviden
     const report = createVideoGoalStatusSummary(dashboard(), {
         verification: {
             status: 'ready-for-human-review',
-            outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-bundle\\latest-verification-report.json',
-            markdownPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-bundle\\latest-verification-report.md',
+            outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-bundle\\latest-verification-report.json',
+            markdownPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-bundle\\latest-verification-report.md',
             summary: {
                 checks: 51,
                 passed: 51,

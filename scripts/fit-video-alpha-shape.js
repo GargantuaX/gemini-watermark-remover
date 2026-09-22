@@ -4,6 +4,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 import sharp from 'sharp';
+import { loadLocalEnv } from './local-env.js';
 
 import { removeWatermark } from '../src/core/blendModes.js';
 import { getEmbeddedAlphaMap } from '../src/core/embeddedAlphaMaps.js';
@@ -12,13 +13,16 @@ import {
     resizeAlphaMapArea
 } from '../src/video/videoWatermarkDetector.js';
 
+loadLocalEnv();
+
 const DEFAULT_OUTPUT_DIR = path.resolve('.artifacts/video-alpha-shape-fit');
 const VIDEO_ALPHA_PROFILE = '96-20260520';
 const LOGO_VALUE = 255;
+const VIDEO_SAMPLE_ROOT = path.resolve(process.env.GWR_VIDEO_SAMPLE_ROOT || 'src/assets/video-samples');
 
 const USER_FLAW_CASE_TEMPLATES = Object.freeze({
     'deaee69b-headlight': {
-        originalPath: 'D:\\Project\\sample-files\\gemini-video-watermark\\deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4',
+        originalPath: path.join(VIDEO_SAMPLE_ROOT, 'deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4'),
         referencePath: '.artifacts\\allenk-video\\deaee69b-allenk-v062.mp4',
         candidate: {
             x: 1704,
@@ -35,7 +39,7 @@ const USER_FLAW_CASE_TEMPLATES = Object.freeze({
         }
     },
     'e1997e6e-rail': {
-        originalPath: 'D:\\Project\\sample-files\\gemini-video-watermark\\e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4',
+        originalPath: path.join(VIDEO_SAMPLE_ROOT, 'e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4'),
         referencePath: '.artifacts\\allenk-video\\e1997e6e-allenk-v062.mp4',
         candidate: {
             x: 1704,

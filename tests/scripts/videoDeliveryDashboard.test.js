@@ -11,19 +11,19 @@ import {
 test('renderVideoDeliveryDashboardHtml should render lanes links and temporal rows', () => {
     const html = renderVideoDeliveryDashboardHtml({
         generatedAt: '2026-06-11T00:00:00.000Z',
-        outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.html',
+        outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-dashboard\\latest-video-dashboard.html',
         lanes: [
             {
                 id: 'current025',
                 title: 'Current Candidate 0.25',
                 subtitle: 'Default visual-review candidate',
-                reviewHtmlPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.html',
-                screenshotPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.png',
-                reviewPackPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-pack.json',
-                deliveryReportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\delivery-gate\\latest-delivery-report.json',
-                decisionTemplatePath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-delivery-bundle\\decision-templates\\current025.decision.template.json',
-                decisionReportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.md',
-                decisionJsonPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.json',
+                reviewHtmlPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.html',
+                screenshotPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.png',
+                reviewPackPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-pack.json',
+                deliveryReportPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\delivery-gate\\latest-delivery-report.json',
+                decisionTemplatePath: 'Z:\\fixtures\\project\\.artifacts\\video-delivery-bundle\\decision-templates\\current025.decision.template.json',
+                decisionReportPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.md',
+                decisionJsonPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-decision-report.json',
                 primaryAction: 'Accept current preset only after checklist is fully checked.',
                 summary: {
                     status: 'ready-for-visual-review',
@@ -62,10 +62,10 @@ test('renderVideoDeliveryDashboardHtml should render lanes links and temporal ro
                 id: 'sweep018022',
                 title: 'Strength Sweep',
                 subtitle: 'Compare 0.18, 0.20, 0.22, and 0.25',
-                reviewHtmlPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-light-polish-sweep018022\\review-pack\\latest-sweep-review-index.html',
-                reviewPackPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-light-polish-sweep018022\\review-pack\\latest-sweep-review-pack.json',
-                gateReportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-light-polish-sweep018022\\gate\\latest-report.md',
-                decisionReportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-light-polish-sweep018022\\review-pack\\latest-sweep-review-decision-report.md',
+                reviewHtmlPath: 'Z:\\fixtures\\project\\.artifacts\\video-light-polish-sweep018022\\review-pack\\latest-sweep-review-index.html',
+                reviewPackPath: 'Z:\\fixtures\\project\\.artifacts\\video-light-polish-sweep018022\\review-pack\\latest-sweep-review-pack.json',
+                gateReportPath: 'Z:\\fixtures\\project\\.artifacts\\video-light-polish-sweep018022\\gate\\latest-report.md',
+                decisionReportPath: 'Z:\\fixtures\\project\\.artifacts\\video-light-polish-sweep018022\\review-pack\\latest-sweep-review-decision-report.md',
                 primaryAction: 'Promote 0.18 or 0.22 only if the sweep page is clearly better by eye.',
                 summary: {
                     status: 'review-only',
@@ -93,20 +93,20 @@ test('renderVideoDeliveryDashboardHtml should render lanes links and temporal ro
                 id: 'alphaPolicy035',
                 title: 'Alpha Policy 0.35',
                 subtitle: 'Candidate-aware alpha edge policy review',
-                reviewHtmlPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-review-index.html',
-                reviewPackPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-review-pack.json',
-                gateReportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy-evidence\\latest-report.md',
-                decisionReportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.md',
-                decisionJsonPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.json',
+                reviewHtmlPath: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-review-index.html',
+                reviewPackPath: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-review-pack.json',
+                gateReportPath: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy-evidence\\latest-report.md',
+                decisionReportPath: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.md',
+                decisionJsonPath: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy035-review\\review-pack\\latest-alpha-policy-review-decision-report.json',
                 primaryAction: 'Use only if it is visibly cleaner than current 0.25.',
                 diagnosticLinks: [
                     {
                         label: 'Known flaw diagnostics',
-                        path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-policy035-default-review\\user-flaw-diagnostics\\latest.json'
+                        path: 'Z:\\fixtures\\project\\.artifacts\\video-policy035-default-review\\user-flaw-diagnostics\\latest.json'
                     },
                     {
                         label: 'Rejected shape gate',
-                        path: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-shape-candidate-gate\\manual-shape-validated\\latest-report.md'
+                        path: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-shape-candidate-gate\\manual-shape-validated\\latest-report.md'
                     }
                 ],
                 summary: {
@@ -115,7 +115,7 @@ test('renderVideoDeliveryDashboardHtml should render lanes links and temporal ro
                     bestCandidate: 'alphaEdgePolicy=standard045-inset035',
                     candidateDecision: 'candidate-aware-human-review',
                     candidateEvidence: {
-                        reportPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-alpha-policy-evidence\\latest-report.json',
+                        reportPath: 'Z:\\fixtures\\project\\.artifacts\\video-alpha-policy-evidence\\latest-report.json',
                         reports: 6,
                         comparedCases: 18,
                         improvedCases: 12,
