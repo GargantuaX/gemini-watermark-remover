@@ -1,0 +1,15 @@
+{
+  "source": "f3d1a957d10ef56322d8dda8923069666307afe7",
+  "ciRun": 35713094072,
+  "testedSha256": "454d5fe56ef8daf873708d719a62e33db8e118689c900f822b5ab5918b24beb1",
+  "ciSha256": "3dc6d2a491241aae434e6ec585e0dd562534331eb303f54050205b2ec6ea7968",
+  "files": 130,
+  "differences": [
+    {
+      "file": "package/dist/video-app.js",
+      "tested": "06c5a60ed026941ec006e5d07169ba6d6e4b1e99d87da59feee88277f37f7763",
+      "ci": "6413207ba4bbde31820e1d9407a1422ce6e835dd4f5eb5a239176c7c71e3a3f1"
+    }
+  ],
+  "equivalence": "Only the build SHA in the opening license banner differs: tested 8a64766 vs CI merge 38f46bd; all executable bytes and all other files are identical."
+}
