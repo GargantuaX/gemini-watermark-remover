@@ -251,5 +251,25 @@ function getExplicitCandidates(width, height) {
         }), width, height)).filter(isCandidateInBounds);
     }
 
+    if (width === 3840 && height === 2160) {
+        return [
+            {
+                id: 'veo-3840x2160-davinci-160',
+                label: '3840x2160 160px, margin 198/265',
+                size: 160,
+                marginRight: 198,
+                marginBottom: 265,
+                sourcePriority: 0
+            }
+        ].map((candidate) => withVideoBounds(buildCandidate(candidate, width, height, 1, {
+            referenceSize: false,
+            scaledFromReference: false,
+            sourceCandidateId: null,
+            sourceFamily: 'exact-size-exception',
+            evidenceGate: 'standard',
+            exactSizeVariant: true
+        }), width, height)).filter(isCandidateInBounds);
+    }
+
     return [];
 }

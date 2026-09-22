@@ -97,7 +97,8 @@ test('resolveAllenkFdncnnRuntimeProfile should cover every video catalog positio
             height: 2160,
             expected: {
                 'veo-1080p-standard': { profileId: 'allenk-fdncnn-200', size: 144, padding: 28 },
-                'veo-1080p-inset': { profileId: 'allenk-fdncnn-200', size: 144, padding: 28 }
+                'veo-1080p-inset': { profileId: 'allenk-fdncnn-200', size: 144, padding: 28 },
+                'veo-3840x2160-davinci-160': { profileId: 'allenk-fdncnn-200', size: 160, padding: 20 }
             }
         },
         {
