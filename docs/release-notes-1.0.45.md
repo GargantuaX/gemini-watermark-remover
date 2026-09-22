@@ -26,3 +26,21 @@ AI inference. Processing can be CPU- and memory-intensive. Performance on 4K,
 long videos, large queues, and mobile devices has not been validated.
 
 Thanks to @kavyp12 for the batch-video contribution in #109.
+
+## Release verification
+
+- Released from commit `112505cfb093eb385d6aa906294654b3b642a3f4` via #170.
+- Final candidate CI: [35741605580](https://github.com/GargantuaX/gemini-watermark-remover/actions/runs/35741605580), passed.
+- npm publication: [35742178936](https://github.com/GargantuaX/gemini-watermark-remover/actions/runs/35742178936), passed. The public `latest` tag was verified as `1.0.45`.
+- The public npm integrity matches the accepted tarball; its SHA256 is
+  `3dc6d2a491241aae434e6ec585e0dd562534331eb303f54050205b2ec6ea7968`.
+  A fresh registry installation passed CLI help and image-data SDK smoke checks.
+- The GitHub release contains the package, userscript, both extension ZIPs,
+  checksums, and extension version metadata. The latest extension download
+  metadata was verified as `1.0.45`.
+- The website was not deployed and remains pinned to SDK `1.0.44`. No Chrome Web
+  Store submission was made. These separate distribution steps are not claimed
+  complete by this release.
+- The reviewed local-path cleanup was integrated before publishing. Unaccepted
+  image-quality experiments were excluded. Existing 4K, long-video, mobile, and
+  watermark-quality limitations remain separate follow-up work.
