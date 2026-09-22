@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    CLEANUP_BUSY_TEXTURE_RMS,
+    CLEANUP_FLAT_TEXTURE_RMS,
     DEFAULT_DENOISE_BACKEND,
     DEFAULT_EDGE_DENOISE_STRENGTH,
     DEFAULT_HIGH_QUALITY_CLEANUP,
@@ -18,7 +20,9 @@ import {
     buildGradientWeightMap,
     buildLumaStructureGuard,
     buildTextureRepairWeightMap,
-    normalizeVideoCleanupOptions
+    measureSurroundingTextureRms,
+    normalizeVideoCleanupOptions,
+    resolveContentTextureGate
 } from '../../src/video/videoCleanupBackends.js';
 import { resolveAllenkFdncnnRuntimeProfile } from '../../src/video/videoDenoiseRuntimePolicy.js';
 import { resolveVideoWatermarkCandidates } from '../../src/video/videoWatermarkCatalog.js';
@@ -1101,4 +1105,83 @@ test('applyVideoResidualCleanup should route canvas footprint polish backend', (
 
     assert.equal(result.denoiseBackend, VIDEO_DENOISE_BACKENDS.CANVAS_FOOTPRINT_POLISH);
     assert.equal(putCalls, 1);
+});
+
+function createSoftCleanupCtx(fillPixel) {
+    let putCalls = 0;
+    const ctx = {
+        canvas: { width: 200, height: 200 },
+        getImageData(x, y, width, height) {
+            const data = new Uint8ClampedArray(width * height * 4);
+            for (let row = 0; row < height; row++) {
+                for (let col = 0; col < width; col++) {
+                    const idx = (row * width + col) * 4;
+                    const value = fillPixel(x + col, y + row);
+                    data[idx] = value;
+                    data[idx + 1] = value;
+                    data[idx + 2] = value;
+                    data[idx + 3] = 255;
+                }
+            }
+            return { width, height, data };
+        },
+        putImageData() {
+            putCalls++;
+        }
+    };
+    return { ctx, putCalls: () => putCalls };
+}
+
+function runSoftCleanup(fillPixel) {
+    const { ctx, putCalls } = createSoftCleanupCtx(fillPixel);
+    applyVideoResidualCleanup(ctx, {
+        x: 60,
+        y: 60,
+        width: 48,
+        height: 48
+    }, createDiamondAlphaMap(48, 48), {
+        residualCleanupStrength: DEFAULT_RESIDUAL_CLEANUP_STRENGTH
+    });
+    return putCalls();
+}
+
+test('resolveContentTextureGate should keep cleanup on flat content and drop it on detailed content', () => {
+    assert.equal(resolveContentTextureGate(0), 1);
+    assert.equal(resolveContentTextureGate(CLEANUP_FLAT_TEXTURE_RMS), 1);
+    assert.equal(resolveContentTextureGate(CLEANUP_BUSY_TEXTURE_RMS), 0);
+    assert.equal(resolveContentTextureGate(CLEANUP_BUSY_TEXTURE_RMS * 2), 0);
+    assert.equal(resolveContentTextureGate(Number.NaN), 1);
+
+    const midpoint = resolveContentTextureGate(
+        (CLEANUP_FLAT_TEXTURE_RMS + CLEANUP_BUSY_TEXTURE_RMS) / 2
+    );
+    assert.ok(midpoint > 0 && midpoint < 1);
+});
+
+test('measureSurroundingTextureRms should ignore pixels inside the watermark footprint', () => {
+    const pixelCount = 16;
+    const padded = { width: 4, height: 4, data: new Uint8ClampedArray(pixelCount * 4) };
+    const textureBase = new Uint8ClampedArray(pixelCount * 4);
+    const weights = new Float32Array(pixelCount);
+
+    for (let pixel = 0; pixel < pixelCount; pixel++) {
+        const inFootprint = pixel < 4;
+        const value = inFootprint ? 200 : 10;
+        weights[pixel] = inFootprint ? 1 : 0;
+        for (let c = 0; c < 3; c++) {
+            padded.data[pixel * 4 + c] = value;
+        }
+    }
+
+    assert.ok(Math.abs(measureSurroundingTextureRms(padded, textureBase, weights) - 10) < 0.01);
+});
+
+test('soft residual cleanup should still run over a flat background', () => {
+    assert.equal(runSoftCleanup(() => 128), 1);
+});
+
+test('soft residual cleanup should be skipped over a detailed background', () => {
+    // Sharp stripes: smoothing here would wipe real texture that the reverse
+    // alpha blend already recovered, and the residual it hides is masked anyway.
+    assert.equal(runSoftCleanup((x, y) => (Math.floor(y / 2) % 2 === 0 ? 20 : 230)), 0);
 });
