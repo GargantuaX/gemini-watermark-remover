@@ -5,7 +5,7 @@
     {
       "id": "4d420881",
       "label": "1080p standard, current edgeboost045 cleanup150 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\4d420881-c144-497f-9a6e-43beda086580.mp4",
+      "originalFile": "4d420881-c144-497f-9a6e-43beda086580.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\4d420881-gwr-video-mvp-edgeboost045-cleanup150.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -38,7 +38,7 @@
     {
       "id": "4d420881-edge-denoise",
       "label": "1080p standard, canvas-edge-denoise vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\4d420881-c144-497f-9a6e-43beda086580.mp4",
+      "originalFile": "4d420881-c144-497f-9a6e-43beda086580.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\4d420881-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-denoise.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -72,7 +72,7 @@
     {
       "id": "4d420881-edge-denoise100",
       "label": "1080p standard, canvas-edge-denoise strength 1.0 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\4d420881-c144-497f-9a6e-43beda086580.mp4",
+      "originalFile": "4d420881-c144-497f-9a6e-43beda086580.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\4d420881-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-denoise100.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -106,7 +106,7 @@
     {
       "id": "4d420881-edge-band-denoise080",
       "label": "1080p standard, canvas-edge-band-denoise strength 0.8 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\4d420881-c144-497f-9a6e-43beda086580.mp4",
+      "originalFile": "4d420881-c144-497f-9a6e-43beda086580.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\4d420881-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-band-denoise080.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -140,7 +140,7 @@
     {
       "id": "4d420881-edge-band-denoise050",
       "label": "1080p standard, canvas-edge-band-denoise strength 0.5 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\4d420881-c144-497f-9a6e-43beda086580.mp4",
+      "originalFile": "4d420881-c144-497f-9a6e-43beda086580.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\4d420881-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-band-denoise050.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -174,7 +174,7 @@
     {
       "id": "095eddb6",
       "label": "low-visible/intermittent sample, current cleanup150 export",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\095eddb6-4846-4dab-996c-ce93e42fd3af.mp4",
+      "originalFile": "095eddb6-4846-4dab-996c-ce93e42fd3af.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\095eddb6-gwr-video-mvp-edgeboost045-cleanup150.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -191,7 +191,7 @@
     {
       "id": "deaee69b",
       "label": "relocated negative/gray polarity sample, current cleanup150 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
+      "originalFile": "deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\deaee69b-gwr-video-mvp-edgeboost045-cleanup150.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -225,7 +225,7 @@
     {
       "id": "deaee69b-edge-denoise",
       "label": "relocated negative/gray polarity sample, canvas-edge-denoise vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
+      "originalFile": "deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\deaee69b-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-denoise.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -260,7 +260,7 @@
     {
       "id": "deaee69b-edge-denoise100",
       "label": "relocated negative/gray polarity sample, canvas-edge-denoise strength 1.0 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
+      "originalFile": "deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\deaee69b-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-denoise100.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -295,7 +295,7 @@
     {
       "id": "deaee69b-edge-band-denoise080",
       "label": "relocated negative/gray polarity sample, canvas-edge-band-denoise strength 0.8 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
+      "originalFile": "deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\deaee69b-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-band-denoise080.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -330,7 +330,7 @@
     {
       "id": "deaee69b-edge-band-denoise050",
       "label": "relocated negative/gray polarity sample, canvas-edge-band-denoise strength 0.5 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
+      "originalFile": "deaee69b-bd2f-481d-ba4d-bca20a1b4c8e.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\deaee69b-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-band-denoise050.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -365,7 +365,7 @@
     {
       "id": "e1997e6e",
       "label": "relocated negative/gray polarity sample, current cleanup150 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
+      "originalFile": "e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\e1997e6e-gwr-video-mvp-edgeboost045-cleanup150.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -399,7 +399,7 @@
     {
       "id": "e1997e6e-edge-denoise",
       "label": "relocated negative/gray polarity sample, canvas-edge-denoise vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
+      "originalFile": "e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\e1997e6e-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-denoise.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -434,7 +434,7 @@
     {
       "id": "e1997e6e-edge-denoise100",
       "label": "relocated negative/gray polarity sample, canvas-edge-denoise strength 1.0 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
+      "originalFile": "e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\e1997e6e-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-denoise100.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -469,7 +469,7 @@
     {
       "id": "e1997e6e-edge-band-denoise080",
       "label": "relocated negative/gray polarity sample, canvas-edge-band-denoise strength 0.8 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
+      "originalFile": "e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\e1997e6e-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-band-denoise080.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",
@@ -504,7 +504,7 @@
     {
       "id": "e1997e6e-edge-band-denoise050",
       "label": "relocated negative/gray polarity sample, canvas-edge-band-denoise strength 0.5 vs allenk v0.6.2",
-      "originalPath": "D:\\Project\\sample-files\\gemini-video-watermark\\e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
+      "originalFile": "e1997e6e-45d5-4895-ae81-a7361c05bc37.mp4",
       "currentPath": ".artifacts\\video-alpha-research\\e1997e6e-gwr-video-mvp-edgeboost045-cleanup150-canvas-edge-band-denoise050.mp4",
       "currentProfile": {
         "algorithm": "gwr-video-mvp",

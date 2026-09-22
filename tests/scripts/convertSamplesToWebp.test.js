@@ -13,8 +13,8 @@ const TINY_PNG_BASE64 =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0b8AAAAASUVORK5CYII=';
 
 test('buildWebpOutputPath should write into a sibling webp directory with a webp extension', () => {
-    const output = buildWebpOutputPath('D:\\Project\\gemini-watermark-remover\\src\\assets\\samples\\16-9.png');
-    assert.equal(output, 'D:\\Project\\gemini-watermark-remover\\src\\assets\\samples\\webp\\16-9.webp');
+    const output = buildWebpOutputPath('Z:\\fixtures\\project\\src\\assets\\samples\\16-9.png');
+    assert.equal(output, 'Z:\\fixtures\\project\\src\\assets\\samples\\webp\\16-9.webp');
 });
 
 test('convertDirectoryToWebp should generate webp copies without deleting the source files', async () => {

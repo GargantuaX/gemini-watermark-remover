@@ -140,11 +140,15 @@ test('collection CLI defaults to report-only without creating the output directo
             '--output-root',
             outputRoot
         ],
-        { encoding: 'utf8' }
+        {
+            encoding: 'utf8',
+            env: { ...process.env, GWR_SAMPLE_COLLECTOR: fakeCollectorPath }
+        }
     );
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).readiness.action, 'report-only');
+    assert.equal(JSON.parse(result.stdout).command.args[0], fakeCollectorPath);
     assert.equal(existsSync(outputRoot), false);
 });
 

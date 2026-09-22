@@ -11,7 +11,7 @@ import {
 
 function report({ awareness = 'raw', material = 0, warning = 0, improved = 1 } = {}) {
     return {
-        path: `D:\\Project\\gemini-watermark-remover\\.artifacts\\video-crop-benchmark-alpha-policy035-standard${awareness === 'raw' ? '' : `-${awareness}`}\\latest-summary.json`,
+        path: `Z:\\fixtures\\project\\.artifacts\\video-crop-benchmark-alpha-policy035-standard${awareness === 'raw' ? '' : `-${awareness}`}\\latest-summary.json`,
         bitrate: 'standard',
         awareness,
         generatedAt: '2026-06-11T00:00:00.000Z',

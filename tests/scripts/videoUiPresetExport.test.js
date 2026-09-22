@@ -7,7 +7,7 @@ import { renderVideoUiPresetExportMarkdown } from '../../scripts/export-video-ui
 test('renderVideoUiPresetExportMarkdown records the real UI preset path', () => {
   const markdown = renderVideoUiPresetExportMarkdown({
     generatedAt: '2026-06-11T00:00:00.000Z',
-    pagePath: 'D:\\Project\\gemini-watermark-remover\\dist\\video-preview.html',
+    pagePath: 'Z:\\fixtures\\project\\dist\\video-preview.html',
     inputPath: 'D:\\sample.mp4',
     outputPath: 'D:\\out.mp4',
     bytes: 1234,

@@ -349,7 +349,7 @@ Why this exists:
 
 Do not re-enable the old active direct-download click hook in production.
 
-Confirmed real-page failure mode on `https://gemini.google.com/u/1/app/d3cd7d14852ecd3b?pageId=none`:
+Confirmed real-page failure mode on `https://gemini.google.com/app`:
 
 - When the userscript intercepts `下载完整尺寸的图片` at capture time and calls `preventDefault()/stopImmediatePropagation()`, Gemini's own download flow is blocked before it can issue its native `c8o8Fe` / `rd-gg-dl` chain.
 - In that state, the userscript only has the earlier history bootstrap bindings from `hNvQHb`.

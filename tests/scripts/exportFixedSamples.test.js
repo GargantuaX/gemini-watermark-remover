@@ -11,8 +11,8 @@ import {
 } from '../../scripts/export-fixed-samples.js';
 
 test('buildFixedOutputPath should place outputs under a sibling fix directory', () => {
-    const output = buildFixedOutputPath('D:\\Project\\gemini-watermark-remover\\src\\assets\\samples\\16-9.png');
-    assert.equal(output, 'D:\\Project\\gemini-watermark-remover\\src\\assets\\samples\\fix\\16-9.png');
+    const output = buildFixedOutputPath('Z:\\fixtures\\project\\src\\assets\\samples\\16-9.png');
+    assert.equal(output, 'Z:\\fixtures\\project\\src\\assets\\samples\\fix\\16-9.png');
 });
 
 test('buildFixedOutputPath should preserve extension case and nested dots', () => {
