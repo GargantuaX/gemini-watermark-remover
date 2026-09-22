@@ -113,9 +113,9 @@ function isLikelyJavascriptMime(contentType) {
         || mime.endsWith('+javascript');
 }
 
-async function preflightWebGpuRuntimeAssets(paths) {
+async function preflightWebGpuRuntimeAssets(paths, signal) {
     try {
-        const response = await fetch(paths.mjs, { cache: 'no-store' });
+        const response = await fetch(paths.mjs, { cache: 'no-store', signal });
         if (!response.ok) {
             return {
                 ok: false,
@@ -138,24 +138,28 @@ async function preflightWebGpuRuntimeAssets(paths) {
     }
 }
 
-async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRuntimeProfile()) {
+async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRuntimeProfile(), signal) {
+    signal?.throwIfAborted();
     const profile = runtimeProfile || resolveAllenkFdncnnRuntimeProfile();
     if (!allenkFdncnnRuntimePromises.has(profile.id)) {
         const runtimePromise = (async () => {
-            const response = await fetch(profile.modelUrl);
+            const response = await fetch(profile.modelUrl, { signal });
             if (!response.ok) {
                 throw new Error(`无法加载 AI 模型：${response.status}`);
             }
             const modelBytes = new Uint8Array(await response.arrayBuffer());
+            signal?.throwIfAborted();
             if (navigator.gpu && window.__gwrDisableWebGpuDenoise !== true) {
                 try {
-                    const preflight = await preflightWebGpuRuntimeAssets(ALLENK_FDNCNN_WEBGPU_WASM_PATHS);
+                    const preflight = await preflightWebGpuRuntimeAssets(ALLENK_FDNCNN_WEBGPU_WASM_PATHS, signal);
+                    signal?.throwIfAborted();
                     if (!preflight.ok) {
                         console.warn('WebGPU AI runtime skipped:', preflight.reason);
                         throw new Error(preflight.reason);
                     }
                     setStatus('正在启用 WebGPU AI 去水印...');
                     const webgpuOrt = await import('onnxruntime-web/webgpu');
+                    signal?.throwIfAborted();
                     return await createAllenkFdncnnOnnxRuntime({
                         ort: webgpuOrt,
                         modelBytes,
@@ -167,9 +171,11 @@ async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRunti
                         outputShape: profile.outputShape
                     });
                 } catch (error) {
+                    signal?.throwIfAborted();
                     console.warn('WebGPU AI runtime unavailable, falling back to WASM:', error);
                 }
             }
+            signal?.throwIfAborted();
             return createAllenkFdncnnOnnxRuntime({
                 modelBytes,
                 executionProvider: 'wasm',
@@ -190,12 +196,12 @@ async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRunti
     return allenkFdncnnRuntimePromises.get(profile.id);
 }
 
-async function resolveExportDenoiseRuntime(denoiseBackend, runtimeProfile = resolveAllenkFdncnnRuntimeProfile()) {
+async function resolveExportDenoiseRuntime(denoiseBackend, runtimeProfile = resolveAllenkFdncnnRuntimeProfile(), signal) {
     if (denoiseBackend !== VIDEO_DENOISE_BACKENDS.ALLENK_FDNCNN_BROWSER_SPIKE) {
         return null;
     }
     setStatus('正在加载 AI FDnCNN ONNX 模型，首次加载会稍慢...');
-    return loadAllenkFdncnnRuntime(runtimeProfile);
+    return loadAllenkFdncnnRuntime(runtimeProfile, signal);
 }
 
 function getAllenkFdncnnTemporalReuseConfig(runtime) {
@@ -625,7 +631,7 @@ async function runExport(signal) {
             detectionPayload?.detection,
             allenkFdncnnRuntimeProfile
         );
-        const allenkFdncnnRuntime = await resolveExportDenoiseRuntime(denoiseBackend, allenkFdncnnRuntimeProfile);
+        const allenkFdncnnRuntime = await resolveExportDenoiseRuntime(denoiseBackend, allenkFdncnnRuntimeProfile, signal);
         signal.throwIfAborted();
         const allenkFdncnnTemporalReuse = getAllenkFdncnnTemporalReuseConfig(allenkFdncnnRuntime);
         const debugAlphaOptions = getDebugAlphaOptions();
