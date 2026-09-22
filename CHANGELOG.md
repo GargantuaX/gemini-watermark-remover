@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.45 - Unreleased
+
+- Add sequential batch video processing with per-file status and automatic downloads in the standalone video interface (#109, thanks @kavyp12).
+- Append new videos to a running batch without replacing the current video; continue with remaining files after an individual failure. Idle single-file selection retains manual export.
+- Include ONNX Runtime 1.26.0's license and upstream third-party notices with redistributed runtime assets.
+- Image/video removal algorithms and SDK interfaces are unchanged. The separate public website requires its own batch UI integration.
+
 ## 1.0.44 - 2026-09-22
 
 - Fix a video export issue where a background candidate could replace the watermark selected by every detection sample, leaving the watermark visible and creating a dark dot (#150).
