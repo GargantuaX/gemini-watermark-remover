@@ -22,6 +22,51 @@ function exportStub(results) {
 
 const exported = (file) => ({ ok: true, href: `blob:${file.name}`, filename: `${file.name}.mp4` });
 
+test('cancellation suppresses an in-flight result and does not start pending files', async () => {
+    const queue = createBatchQueue();
+    enqueueBatchFiles(queue, [fileOf('active'), fileOf('pending')]);
+    const controller = new AbortController();
+    const calls = [], downloads = [];
+    let finish;
+    const running = processBatchQueue(queue, {
+        signal: controller.signal,
+        processFile: (file, signal) => {
+            assert.equal(signal, controller.signal);
+            calls.push(file.name);
+            return new Promise(resolve => { finish = resolve; });
+        },
+        downloadResult: result => downloads.push(result)
+    });
+    controller.abort();
+    assert.equal(queue.processing, true, 'do not unlock the queue before active cleanup settles');
+    enqueueBatchFiles(queue, [fileOf('late')]);
+    finish(exported(fileOf('active')));
+    await running;
+    assert.deepEqual(calls, ['active']);
+    assert.deepEqual(downloads, []);
+    assert.deepEqual(statusesOf(queue), ['cancelled', 'cancelled', 'cancelled']);
+    assert.equal(queue.processing, false);
+
+    startBatchSelection(queue);
+    enqueueBatchFiles(queue, [fileOf('new')]);
+    await processBatchQueue(queue, { processFile: async file => exported(file) });
+    assert.deepEqual(statusesOf(queue), ['done']);
+});
+
+test('an aborted processor is cancellation rather than a per-file error', async () => {
+    const queue = createBatchQueue();
+    enqueueBatchFiles(queue, [fileOf('active'), fileOf('pending')]);
+    const controller = new AbortController();
+    const errors = [];
+    await processBatchQueue(queue, {
+        signal: controller.signal,
+        processFile: async () => { controller.abort(); controller.signal.throwIfAborted(); },
+        onError: error => errors.push(error)
+    });
+    assert.deepEqual(statusesOf(queue), ['cancelled', 'cancelled']);
+    assert.deepEqual(errors, []);
+});
+
 test('a second batch replaces the completed queue instead of appending to it', async () => {
     const queue = createBatchQueue();
 

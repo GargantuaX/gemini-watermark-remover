@@ -4,6 +4,8 @@ Status: prepared for validation; not published.
 
 ## Changes since 1.0.44
 
+- Stop current detection/export and cancel pending videos. No partial result is
+  downloaded, and a new selection can be processed after cleanup completes.
 - Select or drop multiple videos in the standalone video interface. Videos are
   processed sequentially, with per-file status and automatic downloads.
 - Add videos to an active batch without replacing the video currently being
