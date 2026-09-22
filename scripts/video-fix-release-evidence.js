@@ -456,9 +456,7 @@ export async function verifyReleaseArtifacts({
         blockers.push(`video-fix-extension-read-error:${error?.message || error}`);
     }
 
-    const defaultTgz = existsSync(path.resolve(cwd, '../video-rc-ci/.artifacts/release-candidate/pilio-gemini-watermark-remover-1.0.44.tgz'))
-        ? path.resolve(cwd, '../video-rc-ci/.artifacts/release-candidate/pilio-gemini-watermark-remover-1.0.44.tgz')
-        : path.resolve(cwd, 'release/pilio-gemini-watermark-remover-1.0.44.tgz');
+    const defaultTgz = path.resolve(cwd, 'release/pilio-gemini-watermark-remover-1.0.44.tgz');
 
     const resolvedTgzPath = tgzPath ? path.resolve(cwd, tgzPath) : defaultTgz;
 
@@ -517,6 +515,25 @@ async function downloadCiArtifact(runId, directory, cwd) {
     if (!/^\d+$/.test(String(runId))) throw new Error('Invalid CI run id');
     await promisify(execFile)('gh', ['run', 'download', String(runId), '--name', 'release-candidate-artifacts', '--dir', directory],
         { cwd, maxBuffer: 1024 * 1024, timeout: 180000 });
+}
+
+// Release files are committed after a build. Reuse that build only when all
+// production inputs still match and GitHub confirms its recorded successful run.
+export async function resolveArtifactCi({ cwd, candidateCi, execFn = execFileSync, checkGithubCiFn = checkGithubCi }) {
+    const recordPath = path.join(cwd, 'release/evidence/v1.0.44-video-build.json');
+    if (!existsSync(recordPath)) return candidateCi;
+    const record = JSON.parse(await readFile(recordPath, 'utf8'));
+    if (!/^[a-f0-9]{40}$/.test(record.commit || '') || !/^\d+$/.test(String(record.runId))) {
+        throw new Error('Invalid recorded build identity');
+    }
+    const changedInputs = readGitOutput(['diff', '--name-only', record.commit, 'HEAD', '--',
+        ...PRODUCTION_BUILD_INPUT_PREFIXES, 'package.json'], cwd, execFn).trim();
+    if (changedInputs) throw new Error(`Recorded build inputs differ: ${changedInputs}`);
+    const ci = await checkGithubCiFn({ workflow: 'ci.yml', commitSha: record.commit, cwd });
+    if (!ci?.classification?.ok || ci.run?.headSha !== record.commit || String(ci.run.databaseId) !== String(record.runId)) {
+        throw new Error('Recorded build CI is not verified');
+    }
+    return { commitSha: record.commit, ciRun: ci.run, classification: ci.classification };
 }
 
 export async function verifyCandidateLiveCi({
@@ -654,7 +671,14 @@ export async function checkVideoFixReleaseEvidence({
     const historicalImage = await verifyHistoricalImageEvidence({ baseTag, cwd, execFn });
     const integration = await verifyCoreVideoIntegrationEvidence({ integrationDir, cwd });
     const candidateCi = await verifyCandidateLiveCi({ workflow, cwd, execFn, checkGithubCiFn });
-    const releaseArtifacts = await verifyReleaseArtifacts({ latestExtensionPath, tgzPath, cwd, candidateCi });
+    let releaseArtifacts;
+    try {
+        const artifactCi = await resolveArtifactCi({ cwd, candidateCi, execFn, checkGithubCiFn });
+        releaseArtifacts = await verifyReleaseArtifacts({ latestExtensionPath, tgzPath, cwd, candidateCi: artifactCi });
+        releaseArtifacts.buildCommit = artifactCi?.commitSha;
+    } catch (error) {
+        releaseArtifacts = { ok: false, blockers: [`video-fix-recorded-build-invalid:${error.message}`] };
+    }
 
     const allBlockers = [
         ...baseline.blockers,

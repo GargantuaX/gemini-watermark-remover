@@ -6,7 +6,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { resolvePublishedBaseline, EXPECTED_BASELINE_COMMIT, EXPECTED_INTEGRATION_SRC_TREE,
     verifyTrackedProductionAndManifest, verifyCoreVideoIntegrationEvidence,
-    verifyReleaseArtifacts, verifyCandidateLiveCi } from '../../scripts/video-fix-release-evidence.js';
+    verifyReleaseArtifacts, verifyCandidateLiveCi, resolveArtifactCi } from '../../scripts/video-fix-release-evidence.js';
 import { parseCliArgs } from '../../scripts/check-video-fix-release-evidence.js';
 const head = 'a'.repeat(40);
 const sha = text => createHash('sha256').update(text).digest('hex');
@@ -98,4 +98,15 @@ test('CLI rejects failure bypasses and unknown or incomplete arguments', () => {
     assert.throws(() => parseCliArgs(['--no-fail-closed']), /Unknown argument/);
     assert.throws(() => parseCliArgs(['--candidate-sha', head]), /Unknown argument/);
     assert.throws(() => parseCliArgs(['--tgz-path']), /Missing value/);
+});
+
+test('recorded build reuse requires identical inputs and verified CI run identity', async t => {
+    const cwd = await temp(t);
+    await mkdir(path.join(cwd, 'release/evidence'), { recursive: true });
+    await writeFile(path.join(cwd, 'release/evidence/v1.0.44-video-build.json'), JSON.stringify({ commit: head, runId: 123 }));
+    const args = { cwd, candidateCi, execFn: () => '', checkGithubCiFn: async () => ({ classification: { ok: true }, run }) };
+    assert.equal((await resolveArtifactCi(args)).ciRun.databaseId, 123);
+    await assert.rejects(resolveArtifactCi({ ...args, execFn: () => 'src/core/a.js' }), /inputs differ/);
+    await assert.rejects(resolveArtifactCi({ ...args, checkGithubCiFn: async () => ({ classification: { ok: true }, run: { ...run, databaseId: 456 } }) }), /not verified/);
+    await assert.rejects(resolveArtifactCi({ ...args, checkGithubCiFn: async () => null }), /not verified/);
 });

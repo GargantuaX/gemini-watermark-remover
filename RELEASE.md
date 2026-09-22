@@ -44,6 +44,8 @@ Use `pnpm release:video-fix-preflight` for the reviewed #157 candidate-selection
 
 This gate pins v1.0.43 and the reviewed source tree, reuses unchanged image evidence as historical evidence, verifies frozen video review/output hashes, and downloads the successful current-HEAD CI artifacts to compare package and extension bytes. Supply the preserved `ordinary-browser` evidence directory; missing evidence must fail. New code requires new successful CI and matching artifacts. Passing covers this scoped core candidate, not general video quality or the separate website deployment. Website browser checks, including WebKit, remain required for its release.
 
+When committing accepted release artifacts, preserve their build identity in `release/evidence/v1.0.44-video-build.json`. The video gate compares all production inputs and package metadata with that build commit, verifies its successful CI run, and downloads its original artifacts for comparison. It also requires successful CI for the final HEAD. This permits artifact-only release commits without pretending the bytes were rebuilt at that commit.
+
 ## Public Release Wording
 
 - Keep public notes focused on user-visible fixes, supported release surfaces, and scoped capability claims.
