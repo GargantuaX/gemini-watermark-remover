@@ -1,6 +1,6 @@
-# 1.0.45 release candidate
+# 1.0.45
 
-Status: prepared for validation; not published.
+Release date: 2026-09-22.
 
 ## Changes since 1.0.44
 

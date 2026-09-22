@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.45 - Unreleased
+## 1.0.45 - 2026-09-22
 
 - Stop an active detection/export and cancel the remaining video queue without downloading partial results; processing can resume with a new selection after cleanup.
 - Add sequential batch video processing with per-file status and automatic downloads in the standalone video interface (#109, thanks @kavyp12).
