@@ -38,6 +38,12 @@ pnpm release:preflight
 - 发布说明以 `Release Claim Matrix` 为边界：只描述 `allowed`、`allowed-scoped` 或 `allowed-safety-only` 行；`review-only`、`experiment-only` 和 `forbidden` 行不能写成公开能力声明
 - `dist/extension` 下的未打包插件是本地测试版；正式发布 manifest 只写入 `release/` 里的 zip
 
+## 1.0.44 视频专修验收
+
+`pnpm release:video-fix-preflight` 仅适用于已审查的 #157 候选选择修复，原图像门禁保持不变。构建及全量测试在 CI 执行；本地验收 CI 制品使用 `pnpm release:video-fix-gate -- --integration-dir <已审证据目录> --tgz-path <CI包.tgz> --latest-extension <CI版本元数据.json>`。
+
+此路径固定 v1.0.43 基准和已审源码树，将未变化的图像证据标注为历史复用，核验冻结的视频复审记录与输出哈希，并下载当前 HEAD 成功 CI 的制品逐字节比较。需要保留的 `ordinary-browser` 证据目录；缺失证据必须失败。新代码需要新 CI 及对应制品。通过只覆盖这次核心视频修复，不证明通用视频画质或官网已上线；官网发布仍须完成包括 WebKit 在内的独立浏览器验证。
+
 ## 公开发布口径
 
 - 公开说明只写用户可感知的修复、支持的发布面，以及已经通过 gate 的受限能力声明。

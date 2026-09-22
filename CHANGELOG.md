@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.44 - 2026-09-22
+
+- Fix a video export issue where a background candidate could replace the watermark selected by every detection sample, leaving the watermark visible and creating a dark dot (#150).
+- Preserve existing mixed-track detection and best-effort output behavior. This targeted video fix does not change image-processing algorithms or resolve all video cleanup artifacts.
+
 ## 1.0.43 - 2026-09-10
 
 - Fix skipped or misplaced watermark removal on supported 2752×1536 Gemini images with flat illustrated backgrounds.
