@@ -58,6 +58,9 @@ jobs:
           mkdir -p .artifacts/release-candidate
           pnpm pack --pack-destination .artifacts/release-candidate/
 
+      - name: Package release candidate extensions
+        run: pnpm package:extension
+
       - name: Upload release candidate artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -65,5 +68,9 @@ jobs:
           path: |
             .artifacts/release-candidate/*.tgz
             dist/
+            release/*v*.zip
+            release/*v*.zip.sha256.txt
+            release/latest-extension.json
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7

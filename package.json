@@ -106,6 +106,8 @@
     "release:goal-audit": "node scripts/create-release-goal-audit-report.js",
     "release:ci-check": "node scripts/check-github-ci.js --workflow ci.yml --commit HEAD --fail-closed",
     "release:distribution-check": "node scripts/check-release-distribution.js",
+    "release:video-fix-gate": "node scripts/check-video-fix-release-evidence.js",
+    "release:video-fix-preflight": "pnpm build && pnpm test && pnpm package:extension && pnpm release:video-fix-gate && pnpm release:ci-check",
     "release:preflight": "pnpm build && pnpm test && pnpm package:extension && pnpm release:quality-gate && pnpm release:goal-audit -- --fail-on-incomplete && pnpm release:ci-check",
     "visible-residual:loop": "node scripts/run-visible-residual-loop.js",
     "visible-residual:verify": "node scripts/verify-visible-residual-loop.js",

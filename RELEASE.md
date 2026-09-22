@@ -38,6 +38,12 @@ Expected result:
 - release notes follow the `Release Claim Matrix`: publish only `allowed`, `allowed-scoped`, or `allowed-safety-only` rows, and keep `review-only`, `experiment-only`, and `forbidden` rows out of public capability claims
 - the unpacked extension in `dist/extension` is a local test build; the official release manifest is written only into the zip in `release/`
 
+## Scoped 1.0.44 Video Fix
+
+Use `pnpm release:video-fix-preflight` for the reviewed #157 candidate-selection fix only. Keep the image-defaults gate unchanged. Run build/full tests on CI; for local acceptance of CI outputs use `pnpm release:video-fix-gate -- --integration-dir <reviewed-evidence-directory> --tgz-path <CI-package.tgz> --latest-extension <CI-latest-extension.json>`.
+
+This gate pins v1.0.43 and the reviewed source tree, reuses unchanged image evidence as historical evidence, verifies frozen video review/output hashes, and downloads the successful current-HEAD CI artifacts to compare package and extension bytes. Supply the preserved `ordinary-browser` evidence directory; missing evidence must fail. New code requires new successful CI and matching artifacts. Passing covers this scoped core candidate, not general video quality or the separate website deployment. Website browser checks, including WebKit, remain required for its release.
+
 ## Public Release Wording
 
 - Keep public notes focused on user-visible fixes, supported release surfaces, and scoped capability claims.
