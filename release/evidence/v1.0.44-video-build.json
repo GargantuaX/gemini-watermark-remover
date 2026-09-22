@@ -1,0 +1,5 @@
+{
+  "commit": "401a11d7cebafe5123b4f84b31d4dfd845121ec5",
+  "runId": 35684134222,
+  "note": "Preserved CI release artifacts. Production inputs must equal this build; current HEAD must independently pass CI."
+}
