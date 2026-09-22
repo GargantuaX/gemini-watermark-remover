@@ -10,8 +10,8 @@ import {
 
 test('resolveVideoUiPresetVerificationPaths should derive stable artifact paths from input video', () => {
     const paths = resolveVideoUiPresetVerificationPaths({
-        inputPath: 'D:\\Project\\gemini-watermark-remover\\src\\assets\\video-samples\\20260615-2.mp4',
-        outputDir: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-ui-preset-verification'
+        inputPath: 'Z:\\fixtures\\project\\src\\assets\\video-samples\\20260615-2.mp4',
+        outputDir: 'Z:\\fixtures\\project\\.artifacts\\video-ui-preset-verification'
     });
 
     assert.match(paths.outputPath, /20260615-2-ui-preset\.mp4$/);

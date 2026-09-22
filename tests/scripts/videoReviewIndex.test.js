@@ -9,7 +9,7 @@ import {
 } from '../../scripts/create-video-review-index.js';
 
 test('renderVideoReviewIndexHtml should embed review videos snapshots and temporal gate', () => {
-    const outputPath = 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.html';
+    const outputPath = 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-pack\\latest-review-index.html';
     const html = renderVideoReviewIndexHtml({
         outputPath,
         reviewPack: {
@@ -34,7 +34,7 @@ test('renderVideoReviewIndexHtml should embed review videos snapshots and tempor
                         meanMatchedJitter: 10.4506,
                         improvement: -1.0984,
                         worsenedRatio: 0.4274,
-                        sheetPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\temporal-residual\\deaee69b-auto-relocated-temporal-residual.png'
+                        sheetPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\temporal-residual\\deaee69b-auto-relocated-temporal-residual.png'
                     }
                 ]
             },
@@ -42,8 +42,8 @@ test('renderVideoReviewIndexHtml should embed review videos snapshots and tempor
                 {
                     caseId: 'deaee69b',
                     kind: 'roi',
-                    outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\comparison\\deaee69b-roi-4up.mp4',
-                    snapshotPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-boundary-gradient-auto\\review-snapshots\\deaee69b-roi-contact.png',
+                    outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\comparison\\deaee69b-roi-4up.mp4',
+                    snapshotPath: 'Z:\\fixtures\\project\\.artifacts\\video-boundary-gradient-auto\\review-snapshots\\deaee69b-roi-contact.png',
                     cropBox: { x: 1676, y: 836, width: 200, height: 200 },
                     probe: {
                         exists: true,
@@ -92,7 +92,7 @@ test('renderVideoReviewIndexHtml should embed review videos snapshots and tempor
 
 test('renderVideoReviewIndexHtml should support custom review title and decision labels', () => {
     const html = renderVideoReviewIndexHtml({
-        outputPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\video-light-polish-strength020\\review-pack\\latest-review-index.html',
+        outputPath: 'Z:\\fixtures\\project\\.artifacts\\video-light-polish-strength020\\review-pack\\latest-review-index.html',
         reviewPack: {
             title: 'Video Light Polish Review',
             subtitle: 'Compare current 0.25 with backup 0.20',

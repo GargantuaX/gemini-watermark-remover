@@ -3,6 +3,7 @@ import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 import sharp from 'sharp';
+import { loadLocalEnv } from './local-env.js';
 
 import {
     formatTimestampFileSuffix,
@@ -22,6 +23,8 @@ import {
     summarizeResidualFrames,
     summarizeWatermarkResidual
 } from './analyze-video-residual.js';
+
+loadLocalEnv();
 
 const DEFAULT_MANIFEST_PATH = path.resolve('scripts/video-crop-benchmark-manifest.json');
 const DEFAULT_OUTPUT_DIR = path.resolve('.artifacts/video-crop-benchmark');
@@ -73,7 +76,10 @@ export async function loadVideoCropBenchmarkManifest(manifestPath = DEFAULT_MANI
     };
 }
 
-export function normalizeVideoBenchmarkCase(caseItem, { manifestDir = process.cwd() } = {}) {
+export function normalizeVideoBenchmarkCase(caseItem, {
+    manifestDir = process.cwd(),
+    sampleRoot = process.env.GWR_VIDEO_SAMPLE_ROOT || 'src/assets/video-samples'
+} = {}) {
     if (!isObject(caseItem)) {
         throw new Error('视频 benchmark case 必须是对象');
     }
@@ -85,7 +91,9 @@ export function normalizeVideoBenchmarkCase(caseItem, { manifestDir = process.cw
     return {
         id,
         label: String(caseItem.label || id),
-        originalPath: resolveManifestPath(caseItem.originalPath, manifestDir),
+        originalPath: caseItem.originalPath
+            ? resolveManifestPath(caseItem.originalPath, manifestDir)
+            : (caseItem.originalFile ? path.resolve(sampleRoot, caseItem.originalFile) : null),
         currentPath: resolveManifestPath(caseItem.currentPath, manifestDir),
         referencePath: resolveManifestPath(caseItem.referencePath, manifestDir),
         expected: isObject(caseItem.expected) ? caseItem.expected : null,

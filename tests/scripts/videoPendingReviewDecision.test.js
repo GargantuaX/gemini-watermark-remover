@@ -35,7 +35,7 @@ function reviewPack() {
 test('createPendingReviewDecision should seed a pending review decision from a review pack', () => {
     const decision = createPendingReviewDecision({
         reviewPack: reviewPack(),
-        reviewHtmlPath: 'D:\\Project\\gemini-watermark-remover\\.artifacts\\alpha\\review.html',
+        reviewHtmlPath: 'Z:\\fixtures\\project\\.artifacts\\alpha\\review.html',
         decisionPath: '.artifacts/alpha/decision.pending.json'
     });
 

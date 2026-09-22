@@ -248,10 +248,16 @@ export async function inspectGeminiVideoFile(file) {
 }
 
 export async function detectGeminiVideoWatermark(file, options = {}) {
+    options.signal?.throwIfAborted();
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
-    const yieldToMainThread = typeof options.yieldToMainThread === 'function'
+    const yieldCallback = typeof options.yieldToMainThread === 'function'
         ? options.yieldToMainThread
         : async () => {};
+    const yieldToMainThread = async () => {
+        options.signal?.throwIfAborted();
+        await yieldCallback();
+        options.signal?.throwIfAborted();
+    };
     const { input, videoTrack } = await getVideoContext(file);
     try {
         const metadata = await resolveVideoMetadata(input, videoTrack);
@@ -275,6 +281,7 @@ export async function detectGeminiVideoWatermark(file, options = {}) {
 
         for await (const sample of sink.samples()) {
             try {
+                options.signal?.throwIfAborted();
                 if (targetIndex >= targets.length) break;
                 if (sample.timestamp < targets[targetIndex] && frames.length > 0) continue;
 
@@ -879,6 +886,7 @@ export async function processVideoWatermarkFrame(ctx, detection, trackStates = n
 }
 
 export async function removeGeminiVideoWatermark(file, options = {}) {
+    options.signal?.throwIfAborted();
     const requestedAlphaGain = Number.isFinite(options.alphaGain) && options.alphaGain > 0
         ? options.alphaGain
         : DEFAULT_ALPHA_GAIN;
@@ -899,6 +907,7 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
 
     onProgress({ phase: 'detect', progress: 0 });
     const detected = options.detection || await detectGeminiVideoWatermark(file, {
+        signal: options.signal,
         sampleCount: options.sampleCount,
         minConfidence: options.minConfidence,
         candidates: options.candidates,
@@ -913,6 +922,7 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
         yieldToMainThread: options.yieldToMainThread
     });
     const { metadata, detection } = detected;
+    options.signal?.throwIfAborted();
     const allenkFdncnnPadding = resolveExportAllenkFdncnnPadding(cleanupOptions, detection);
     const detectedSeedGain = detection?.alphaSeed?.seedGain;
     const alphaGain = (
@@ -955,13 +965,8 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
     output.addVideoTrack(source, {
         frameRate: metadata.frameRate
     });
-    const audioCopy = await prepareAudioPacketCopy({
-        input,
-        output,
-        format,
-        startTimestamp: metadata.firstTimestamp,
-        preserveAudio: options.preserveAudio
-    });
+    let audioCopyPromise;
+    let audioCopy;
 
     let processedFrames = 0;
     let skippedFrames = 0;
@@ -974,8 +979,17 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
     const fallbackDuration = metadata.frameRate > 0 ? 1 / metadata.frameRate : 1 / 30;
 
     try {
+        options.signal?.throwIfAborted();
+        audioCopy = await prepareAudioPacketCopy({
+            input, output, format,
+            startTimestamp: metadata.firstTimestamp,
+            preserveAudio: options.preserveAudio
+        });
         await output.start();
-        const audioCopyPromise = copyAudioPackets(audioCopy);
+        audioCopyPromise = copyAudioPackets(audioCopy);
+        // Audio runs alongside video; attach a handler immediately, then await
+        // the original promise below so failures still fail the export.
+        audioCopyPromise.catch(() => {});
         const sink = new VideoSampleSink(videoTrack);
 
         for await (const sample of sink.samples()) {
@@ -988,6 +1002,7 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
                 : fallbackDuration;
 
             try {
+                options.signal?.throwIfAborted();
                 sample.draw(ctx, 0, 0, metadata.width, metadata.height);
                 const frameResult = await processVideoWatermarkFrame(ctx, detection, trackStates, {
                     seedAlphaGain: alphaGain,
@@ -1022,6 +1037,7 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
                 sample.close();
             }
 
+            options.signal?.throwIfAborted();
             await source.add(timestamp, duration);
             lastTimestamp = timestamp;
             processedFrames++;
@@ -1050,7 +1066,9 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
 
         source.close();
         const audioResult = await audioCopyPromise;
+        options.signal?.throwIfAborted();
         await output.finalize();
+        options.signal?.throwIfAborted();
 
         if (!target.buffer) {
             throw new Error('视频导出失败，输出为空');
@@ -1089,6 +1107,7 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
         throw error;
     } finally {
         input.dispose();
+        await audioCopyPromise?.catch(() => {});
     }
 }
 

@@ -16,7 +16,7 @@ function setup(processing) {
     const selected = [];
     let runs = 0;
     const handle = runInNewContext(`${source.slice(start, end)}; handleIncomingFiles`, {
-        batch, startBatchSelection, enqueueBatchFiles,
+        batch, state: { running: processing, controller: null }, startBatchSelection, enqueueBatchFiles,
         getDebugFileKind: file => file.name.endsWith('.mp4') ? 'video' : 'image',
         pickDebugUploadFile: files => files?.[0],
         renderBatchQueue() {}, runBatch() { runs++; }, setFile(file) { selected.push(file); }

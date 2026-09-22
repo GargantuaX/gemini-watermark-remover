@@ -32,6 +32,7 @@ export function summarizeBatch(items) {
 }
 
 export async function processBatchQueue(queue, {
+    signal,
     processFile,
     downloadResult = () => {},
     onChange = () => {},
@@ -45,13 +46,19 @@ export async function processBatchQueue(queue, {
         for (let index = 0; index < queue.items.length; index += 1) {
             const item = queue.items[index];
             if (item.status !== 'pending') continue;
+            if (signal?.aborted) {
+                item.status = 'cancelled';
+                continue;
+            }
 
             item.status = 'processing';
             onChange(queue);
 
             try {
-                const outcome = await processFile(item.file);
-                if (outcome?.skipped) {
+                const outcome = await processFile(item.file, signal);
+                if (signal?.aborted) {
+                    item.status = 'cancelled';
+                } else if (outcome?.skipped) {
                     item.status = 'skipped';
                 } else if (outcome?.ok && outcome.href) {
                     item.status = 'done';
@@ -61,8 +68,12 @@ export async function processBatchQueue(queue, {
                 }
             } catch (error) {
                 // One bad file must not abort the rest of the batch.
-                onError(error, item.file);
-                item.status = 'error';
+                if (signal?.aborted) {
+                    item.status = 'cancelled';
+                } else {
+                    onError(error, item.file);
+                    item.status = 'error';
+                }
             }
 
             onChange(queue);

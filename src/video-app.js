@@ -53,6 +53,7 @@ const state = {
     metadata: null,
     detection: null,
     running: false,
+    controller: null,
     jobId: 0,
     syncingPlayback: false
 };
@@ -94,6 +95,7 @@ const els = {
     detectBtn: $('detectBtn'),
     downloadBtn: $('downloadBtn'),
     resetBtn: $('resetBtn'),
+    cancelBtn: $('cancelBtn'),
     relocatedReviewPresetBtn: $('relocatedReviewPresetBtn')
 };
 
@@ -111,9 +113,9 @@ function isLikelyJavascriptMime(contentType) {
         || mime.endsWith('+javascript');
 }
 
-async function preflightWebGpuRuntimeAssets(paths) {
+async function preflightWebGpuRuntimeAssets(paths, signal) {
     try {
-        const response = await fetch(paths.mjs, { cache: 'no-store' });
+        const response = await fetch(paths.mjs, { cache: 'no-store', signal });
         if (!response.ok) {
             return {
                 ok: false,
@@ -136,24 +138,28 @@ async function preflightWebGpuRuntimeAssets(paths) {
     }
 }
 
-async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRuntimeProfile()) {
+async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRuntimeProfile(), signal) {
+    signal?.throwIfAborted();
     const profile = runtimeProfile || resolveAllenkFdncnnRuntimeProfile();
     if (!allenkFdncnnRuntimePromises.has(profile.id)) {
         const runtimePromise = (async () => {
-            const response = await fetch(profile.modelUrl);
+            const response = await fetch(profile.modelUrl, { signal });
             if (!response.ok) {
                 throw new Error(`无法加载 AI 模型：${response.status}`);
             }
             const modelBytes = new Uint8Array(await response.arrayBuffer());
+            signal?.throwIfAborted();
             if (navigator.gpu && window.__gwrDisableWebGpuDenoise !== true) {
                 try {
-                    const preflight = await preflightWebGpuRuntimeAssets(ALLENK_FDNCNN_WEBGPU_WASM_PATHS);
+                    const preflight = await preflightWebGpuRuntimeAssets(ALLENK_FDNCNN_WEBGPU_WASM_PATHS, signal);
+                    signal?.throwIfAborted();
                     if (!preflight.ok) {
                         console.warn('WebGPU AI runtime skipped:', preflight.reason);
                         throw new Error(preflight.reason);
                     }
                     setStatus('正在启用 WebGPU AI 去水印...');
                     const webgpuOrt = await import('onnxruntime-web/webgpu');
+                    signal?.throwIfAborted();
                     return await createAllenkFdncnnOnnxRuntime({
                         ort: webgpuOrt,
                         modelBytes,
@@ -165,9 +171,11 @@ async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRunti
                         outputShape: profile.outputShape
                     });
                 } catch (error) {
+                    signal?.throwIfAborted();
                     console.warn('WebGPU AI runtime unavailable, falling back to WASM:', error);
                 }
             }
+            signal?.throwIfAborted();
             return createAllenkFdncnnOnnxRuntime({
                 modelBytes,
                 executionProvider: 'wasm',
@@ -188,12 +196,12 @@ async function loadAllenkFdncnnRuntime(runtimeProfile = resolveAllenkFdncnnRunti
     return allenkFdncnnRuntimePromises.get(profile.id);
 }
 
-async function resolveExportDenoiseRuntime(denoiseBackend, runtimeProfile = resolveAllenkFdncnnRuntimeProfile()) {
+async function resolveExportDenoiseRuntime(denoiseBackend, runtimeProfile = resolveAllenkFdncnnRuntimeProfile(), signal) {
     if (denoiseBackend !== VIDEO_DENOISE_BACKENDS.ALLENK_FDNCNN_BROWSER_SPIKE) {
         return null;
     }
     setStatus('正在加载 AI FDnCNN ONNX 模型，首次加载会稍慢...');
-    return loadAllenkFdncnnRuntime(runtimeProfile);
+    return loadAllenkFdncnnRuntime(runtimeProfile, signal);
 }
 
 function getAllenkFdncnnTemporalReuseConfig(runtime) {
@@ -285,12 +293,14 @@ function formatPlaybackTime(value) {
 
 function updateButtons() {
     const hasFile = Boolean(state.file);
-    els.detectBtn.disabled = !hasFile || state.running;
-    els.processBtn.disabled = !hasFile || state.running;
+    els.detectBtn.disabled = !hasFile || state.running || batch.processing;
+    els.processBtn.disabled = !hasFile || state.running || batch.processing;
     const canDownload = Boolean(state.processedUrl) && !state.running;
     els.downloadBtn.setAttribute('aria-disabled', canDownload ? 'false' : 'true');
     els.downloadBtn.tabIndex = canDownload ? 0 : -1;
-    els.resetBtn.disabled = state.running;
+    els.resetBtn.disabled = state.running || batch.processing;
+    els.cancelBtn.disabled = !state.controller || state.controller.signal.aborted;
+    els.fileInput.disabled = Boolean(state.controller?.signal.aborted) || (state.running && !batch.processing);
     updatePlaybackControls();
 }
 
@@ -534,6 +544,8 @@ function getDebugAlphaOptions() {
 
 async function runDetection() {
     if (!state.file || state.running) return;
+    const controller = new AbortController();
+    state.controller = controller;
     const jobId = ++state.jobId;
     state.running = true;
     updateButtons();
@@ -543,11 +555,13 @@ async function runDetection() {
     try {
         await yieldToBrowserFrame();
         const result = await detectGeminiVideoWatermark(state.file, {
+            signal: controller.signal,
             ...getDebugAlphaOptions(),
             sampleCount: Number(els.sampleCount.value) || DEFAULT_SAMPLE_COUNT,
             onProgress: createDetectionProgressHandler(jobId, { start: 0.05, span: 0.9 }),
             yieldToMainThread: yieldToBrowserFrame
         });
+        controller.signal.throwIfAborted();
         if (jobId !== state.jobId) return;
         state.metadata = result.metadata;
         state.detection = result.detection;
@@ -561,17 +575,24 @@ async function runDetection() {
             setStatus(result.detection.isConfident ? '检测完成，导出时会使用 AI 去水印。' : '检测置信度偏低，仍可尝试 AI 导出。', result.detection.isConfident ? 'success' : 'warn');
         }
     } catch (error) {
-        console.error(error);
-        setStatus(error.message || '检测失败', 'error');
-        setProgress(0, '检测失败');
+        if (!controller.signal.aborted) {
+            console.error(error);
+            setStatus(error.message || '检测失败', 'error');
+            setProgress(0, '检测失败');
+        }
     } finally {
         state.running = false;
+        state.controller = null;
+        if (controller.signal.aborted) finishCancellation();
         updateButtons();
     }
 }
 
-async function runExport() {
+async function runExport(signal) {
     if (!state.file || state.running) return;
+    const controller = signal ? null : new AbortController();
+    if (controller) state.controller = controller;
+    signal ??= controller.signal;
     const jobId = ++state.jobId;
     state.running = true;
     updateButtons();
@@ -579,12 +600,14 @@ async function runExport() {
     setStatus('正在本地逐帧处理，页面保持打开即可。');
 
     try {
+        signal.throwIfAborted();
         let detectionPayload = state.detection ? { metadata: state.metadata, detection: state.detection } : null;
         if (!detectionPayload) {
             setProgress(0.04, '检测中');
             setStatus('正在检测水印候选...');
             await yieldToBrowserFrame();
             const detected = await detectGeminiVideoWatermark(state.file, {
+                signal,
                 ...getDebugAlphaOptions(),
                 sampleCount: Number(els.sampleCount.value) || DEFAULT_SAMPLE_COUNT,
                 onProgress: createDetectionProgressHandler(jobId, { start: 0.04, span: 0.08 }),
@@ -608,12 +631,14 @@ async function runExport() {
             detectionPayload?.detection,
             allenkFdncnnRuntimeProfile
         );
-        const allenkFdncnnRuntime = await resolveExportDenoiseRuntime(denoiseBackend, allenkFdncnnRuntimeProfile);
+        const allenkFdncnnRuntime = await resolveExportDenoiseRuntime(denoiseBackend, allenkFdncnnRuntimeProfile, signal);
+        signal.throwIfAborted();
         const allenkFdncnnTemporalReuse = getAllenkFdncnnTemporalReuseConfig(allenkFdncnnRuntime);
         const debugAlphaOptions = getDebugAlphaOptions();
         if (jobId !== state.jobId) return;
 
         const result = await removeGeminiVideoWatermark(state.file, {
+            signal,
             alphaGain: Number(els.alphaGain.value) || DEFAULT_ALPHA_GAIN,
             adaptiveAlpha: els.adaptiveAlpha.checked,
             highQualityCleanup: els.highQualityCleanup.checked,
@@ -633,6 +658,7 @@ async function runExport() {
             allenkFdncnnTemporalReuse,
             yieldToMainThread: yieldToBrowserFrame,
             onProgress: ({ phase, progress, processedFrames, frameEstimate, metadata, detection, aiDenoiseFrames, aiReuseFrames }) => {
+                signal.throwIfAborted();
                 if (jobId !== state.jobId) return;
                 const cliProgress = phase === 'detect'
                     ? progress * 0.12
@@ -664,6 +690,7 @@ async function runExport() {
                 }
             }
         });
+        signal.throwIfAborted();
         if (jobId !== state.jobId) return;
 
         if (state.processedUrl) URL.revokeObjectURL(state.processedUrl);
@@ -685,10 +712,16 @@ async function runExport() {
         const aiNote = '';
         setStatus(`${cleanupNote}，已处理 ${result.processedFrames} 帧。${audioNote}`, 'success');
     } catch (error) {
-        console.error(error);
-        setStatus(error.message || '导出失败', 'error');
+        if (!signal.aborted) {
+            console.error(error);
+            setStatus(error.message || '导出失败', 'error');
+        }
     } finally {
         state.running = false;
+        if (controller) {
+            state.controller = null;
+            if (signal.aborted) finishCancellation();
+        }
         updateButtons();
     }
 }
@@ -742,11 +775,13 @@ function triggerDownload(href, filename) {
     anchor.remove();
 }
 
-async function exportQueuedVideo(file) {
+async function exportQueuedVideo(file, signal) {
     await setFile(file);
+    signal.throwIfAborted();
     if (getDebugFileKind(file) !== 'video' || !state.file) return { skipped: true };
 
-    await runExport();
+    await runExport(signal);
+    signal.throwIfAborted();
     const href = els.downloadBtn.getAttribute('href');
     if (!state.processedUrl || !href) return { ok: false };
 
@@ -758,12 +793,22 @@ async function exportQueuedVideo(file) {
 }
 
 async function runBatch() {
+    if (batch.processing) return;
+    const controller = new AbortController();
+    state.controller = controller;
     const summary = await processBatchQueue(batch, {
+        signal: controller.signal,
         processFile: exportQueuedVideo,
         downloadResult: ({ href, filename }) => triggerDownload(href, filename),
         onChange: renderBatchQueue,
         onError: (error) => console.error(error)
     });
+    state.controller = null;
+    updateButtons();
+    if (controller.signal.aborted) {
+        finishCancellation();
+        return;
+    }
     if (!summary) return;
 
     setStatus(
@@ -773,6 +818,7 @@ async function runBatch() {
 }
 
 function handleIncomingFiles(fileList) {
+    if (state.controller?.signal.aborted || (state.running && !batch.processing)) return;
     const list = Array.from(fileList || []).filter(Boolean);
     const videoFiles = list.filter((file) => getDebugFileKind(file) === 'video');
 
@@ -791,6 +837,7 @@ function handleIncomingFiles(fileList) {
     // so preset tuning and manual export still work. Rendering the now-empty
     // queue hides any stale batch UI.
     renderBatchQueue();
+    if (batch.processing) return;
     const file = pickDebugUploadFile(fileList);
     if (file) setFile(file);
 }
@@ -819,6 +866,19 @@ function reset() {
     setProgress(0, '等待视频');
     setStatus('');
     updateButtons();
+}
+
+function cancelProcessing() {
+    if (!state.controller || state.controller.signal.aborted) return;
+    state.controller.abort();
+    setStatus('正在停止处理并释放资源…');
+    updateButtons();
+}
+
+function finishCancellation() {
+    reset();
+    setStatus('已停止处理，剩余队列已取消。已下载的文件不受影响。');
+    setProgress(0, '已取消');
 }
 
 function setNumberControl(input, value) {
@@ -945,7 +1005,8 @@ function setupEvents() {
         setNumberControl(els.edgeDenoiseStrength, 1.8);
     });
     els.detectBtn.addEventListener('click', runDetection);
-    els.processBtn.addEventListener('click', runExport);
+    els.processBtn.addEventListener('click', () => runExport());
+    els.cancelBtn.addEventListener('click', cancelProcessing);
     els.resetBtn.addEventListener('click', reset);
     els.relocatedReviewPresetBtn.addEventListener('click', applyRelocatedReviewPreset);
     els.downloadBtn.addEventListener('click', (event) => {
