@@ -27,6 +27,43 @@ import {
 
 loadLocalEnv();
 
+test('processWatermarkImageData should select issue172 V2 medium geometry without creating a disjoint dark star', async () => {
+    const fixture = await decodeImageDataInNode(path.resolve('tests/fixtures/issue172-v2-medium-texture.png'));
+    const width = 768;
+    const height = 1376;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let offset = 0; offset < data.length; offset += 4) {
+        data.set([72, 72, 72, 255], offset);
+    }
+    for (let row = 0; row < fixture.height; row++) {
+        data.set(fixture.data.subarray(row * fixture.width * 4, (row + 1) * fixture.width * 4),
+            ((1120 + row) * width + 512) * 4);
+    }
+    const input = { width, height, data };
+    const result = removeWatermarkFromImageDataSync(input);
+    const position = { x: 647, y: 1255, width: 48, height: 48 };
+    assert.equal(result.meta.applied, true);
+    assert.deepEqual(result.meta.position, position);
+    assert.equal(result.meta.config.alphaVariant, 'v2');
+    assert.ok(result.meta.detection.originalSpatialScore > 0.95);
+    assert.ok(result.meta.detection.originalGradientScore > 0.8);
+    let changedPixels = 0;
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const offset = (y * width + x) * 4;
+            const changed = data[offset] !== result.imageData.data[offset] ||
+                data[offset + 1] !== result.imageData.data[offset + 1] ||
+                data[offset + 2] !== result.imageData.data[offset + 2];
+            if (!changed) continue;
+            changedPixels++;
+            assert.ok(x >= position.x && x < position.x + position.width &&
+                y >= position.y && y < position.y + position.height,
+            `unexpected content change at ${x},${y}`);
+        }
+    }
+    assert.ok(changedPixels > 100);
+});
+
 const EXTERNAL_SAMPLE_ROOT = path.resolve(process.env.GWR_SAMPLE_ROOT || 'sample-files/gemini-watermark');
 
 test('processWatermarkImageData should clear issue118 dotted edge residual on a smooth new-margin background', async () => {
