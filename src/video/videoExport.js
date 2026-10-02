@@ -32,6 +32,11 @@ import {
 } from './videoCleanupBackends.js';
 import { resolveAllenkFdncnnRuntimeProfile } from './videoDenoiseRuntimePolicy.js';
 import { resolveVideoMetadata } from './videoMetadata.js';
+import {
+    attachVideoDecodeDiagnostics,
+    createVideoDecodeStats,
+    iterateVideoSamplesWithDecoderRecovery
+} from './videoDecodeRecovery.js';
 
 const DEFAULT_SAMPLE_COUNT = 12;
 const DEFAULT_ALPHA_GAIN = 1;
@@ -977,6 +982,7 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
     let lastTimestamp = -Infinity;
     const trackStates = new Map();
     const fallbackDuration = metadata.frameRate > 0 ? 1 / metadata.frameRate : 1 / 30;
+    const decodeStats = createVideoDecodeStats();
 
     try {
         options.signal?.throwIfAborted();
@@ -990,9 +996,12 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
         // Audio runs alongside video; attach a handler immediately, then await
         // the original promise below so failures still fail the export.
         audioCopyPromise.catch(() => {});
-        const sink = new VideoSampleSink(videoTrack);
+        const samples = iterateVideoSamplesWithDecoderRecovery(() => new VideoSampleSink(videoTrack), {
+            stats: decodeStats,
+            signal: options.signal
+        });
 
-        for await (const sample of sink.samples()) {
+        for await (const sample of samples) {
             let timestamp = Math.max(0, sample.timestamp - metadata.firstTimestamp);
             if (timestamp < lastTimestamp) {
                 timestamp = lastTimestamp + fallbackDuration;
@@ -1098,13 +1107,14 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
             adaptiveFrames,
             seedFrames,
             aiDenoiseFrames,
-            aiReuseFrames
+            aiReuseFrames,
+            decoderRecoveries: decodeStats.recoveries
         };
     } catch (error) {
         if (output.state !== 'finalized' && output.state !== 'canceled') {
             await output.cancel().catch(() => {});
         }
-        throw error;
+        throw attachVideoDecodeDiagnostics(error, decodeStats, metadata);
     } finally {
         input.dispose();
         await audioCopyPromise?.catch(() => {});
