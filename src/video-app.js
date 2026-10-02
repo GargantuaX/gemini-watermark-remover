@@ -241,14 +241,44 @@ function setProgress(progress, label) {
     els.progressText.textContent = label || `${pct}%`;
 }
 
-function yieldToBrowserFrame() {
+function isDocumentHidden() {
+    return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+// MessageChannel tasks keep running in background tabs, where timers are throttled.
+function yieldToTask() {
     return new Promise((resolve) => {
-        const finish = () => setTimeout(resolve, 0);
-        if (typeof requestAnimationFrame === 'function') {
-            requestAnimationFrame(finish);
-        } else {
-            finish();
+        if (typeof MessageChannel !== 'function') {
+            setTimeout(resolve, 0);
+            return;
         }
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+            channel.port1.close();
+            resolve();
+        };
+        channel.port2.postMessage(null);
+    });
+}
+
+// requestAnimationFrame never fires in a hidden tab, so detection and export would stall there.
+function yieldToBrowserFrame() {
+    if (typeof requestAnimationFrame !== 'function' || isDocumentHidden()) {
+        return yieldToTask();
+    }
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            yieldToTask().then(resolve);
+        };
+        const onVisibilityChange = () => {
+            if (isDocumentHidden()) finish();
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        requestAnimationFrame(finish);
     });
 }
 
