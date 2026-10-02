@@ -165,14 +165,17 @@ function createConfirmedV2MediumRescueTrial({
         includeImageData: false
     });
     if (!trial?.accepted) return null;
+    const strongGeometry = isStrongLocalizedGeometryTrial(trial, originalImageData);
 
     // A strong 36px V2 prior is independent geometry evidence. Do not require
     // its 48px replacement to pass the initial texture-damage heuristic here:
     // the top-N executor still repairs, scores, and ranks the completed output.
-    // The confirmed bottle case begins with a false texture hard-reject but
-    // finishes without a damage warning after the normal repair pipeline.
+    // Strong localized source geometry supplies the same independent witness
+    // when a disjoint weak selection hides the medium mark (issue #172).
+    // The top-N executor still evaluates the completed output for damage.
     if (
         !hasV2SmallPrior &&
+        !strongGeometry &&
         (
             Number(trial.originalSpatialScore) <
                 CONFIRMED_V2_MEDIUM_MIN_RESCUE_SPATIAL ||
@@ -184,7 +187,7 @@ function createConfirmedV2MediumRescueTrial({
         return null;
     }
 
-    return trial;
+    return { trial, strongGeometry };
 }
 
 function createExact48R96SourceWitnessRescueTrial({
@@ -1053,13 +1056,14 @@ export function collectInitialWatermarkCandidates(input = {}) {
             allowAutomaticSearch: true,
             allowAggressiveStrongLocated: true
         });
-    const potentialV2MediumRescueTrial =
+    const v2MediumRescue =
         createConfirmedV2MediumRescueTrial({
             originalImageData: input.originalImageData,
             getAlphaMap: input.getAlphaMap,
             fixedSelection,
             automaticSelection
         });
+    const potentialV2MediumRescueTrial = v2MediumRescue?.trial ?? null;
     const fixedPresenceWitness = findWatermarkPresenceWitness(
         fixedSelection,
         input.originalImageData
@@ -1072,9 +1076,10 @@ export function collectInitialWatermarkCandidates(input = {}) {
         fixedPresenceWitness || automaticPresenceWitness
     );
     const confirmedV2MediumRescueTrial =
-        (
+        potentialV2MediumRescueTrial && (
             potentialV2MediumRescueTrial?.provenance?.rescueReason ===
                 'replace-confirmed-v2-small-geometry' ||
+            v2MediumRescue.strongGeometry ||
             !normalPresenceConfirmed
         )
             ? potentialV2MediumRescueTrial
@@ -1087,7 +1092,8 @@ export function collectInitialWatermarkCandidates(input = {}) {
         findStrongLocalizedGeometryTrial(
             automaticSelection,
             input.originalImageData
-        );
+        ) ??
+        (v2MediumRescue?.strongGeometry ? confirmedV2MediumRescueTrial : null);
     let presenceConfirmed = Boolean(
         normalPresenceConfirmed || confirmedV2MediumRescueTrial
     );

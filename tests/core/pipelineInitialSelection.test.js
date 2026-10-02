@@ -5,7 +5,11 @@ import {
     collectInitialWatermarkCandidates,
     selectInitialWatermarkCandidate
 } from '../../src/core/pipelineInitialSelection.js';
-import { interpolateAlphaMap } from '../../src/core/adaptiveDetector.js';
+import {
+    computeRegionGradientCorrelation,
+    computeRegionSpatialCorrelation,
+    interpolateAlphaMap
+} from '../../src/core/adaptiveDetector.js';
 import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
 
 function createBaseInput(selectCandidate) {
@@ -1258,8 +1262,110 @@ test('collectInitialWatermarkCandidates should not rescue an exact 768x1376 imag
     assert.equal(result.hypotheses.length, 0);
 });
 
-test('collectInitialWatermarkCandidates should only replace a sufficiently strong 36px V2 prior with the medium rescue', () => {
+test('collectInitialWatermarkCandidates should retain strong localized V2 medium geometry over a disjoint weak selection', () => {
     const imageData = createFlatImageData(768, 1376, 72);
+    const alpha48V2 = interpolateAlphaMap(getEmbeddedAlphaMap('36-v2'), 36, 48);
+    const position = { x: 647, y: 1255, width: 48, height: 48 };
+    applyWhiteWatermark(imageData, alpha48V2, position);
+    const weakTrial = {
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position: { x: 688, y: 1296, width: 48, height: 48 },
+        alphaMap: getEmbeddedAlphaMap(48),
+        alphaGain: 1,
+        accepted: true,
+        originalSpatialScore: 0.17,
+        originalGradientScore: 0.014,
+        processedSpatialScore: 0.01,
+        processedGradientScore: 0.01
+    };
+    const result = collectInitialWatermarkCandidates(
+        createV2MediumCollectionInput(imageData, () => ({
+            selectedTrial: weakTrial,
+            candidatePool: [weakTrial],
+            source: weakTrial.source,
+            decisionTier: 'validated-match'
+        }))
+    );
+
+    assert.equal(result.presenceConfirmed, true);
+    assert.ok(result.hypotheses.some(hypothesis => (
+        hypothesis.trial?.provenance?.confirmedV2MediumRescue === true
+    )));
+    assert.ok(result.hypotheses.every(hypothesis => (
+        hypothesis.trial?.position.x === position.x &&
+        hypothesis.trial?.position.y === position.y
+    )), 'strong source geometry must exclude the disjoint weak selection');
+});
+
+test('collectInitialWatermarkCandidates should preserve an existing strong geometry ahead of the V2 medium rescue', () => {
+    const imageData = createFlatImageData(768, 1376, 72);
+    const alpha48V2 = interpolateAlphaMap(getEmbeddedAlphaMap('36-v2'), 36, 48);
+    applyWhiteWatermark(imageData, alpha48V2, { x: 647, y: 1255, width: 48, height: 48 });
+    const position = { x: 688, y: 1296, width: 48, height: 48 };
+    const alphaMap = getEmbeddedAlphaMap(48);
+    applyWhiteWatermark(imageData, alphaMap, position);
+    const trial = {
+        source: 'standard',
+        config: { logoSize: 48, marginRight: 32, marginBottom: 32 },
+        position,
+        alphaMap,
+        alphaGain: 1,
+        accepted: true,
+        evaluation: { eligible: true },
+        originalSpatialScore: computeRegionSpatialCorrelation({ imageData, alphaMap, region: position }),
+        originalGradientScore: computeRegionGradientCorrelation({ imageData, alphaMap, region: position }),
+        processedSpatialScore: 0.01,
+        processedGradientScore: 0.01
+    };
+    assert.ok(trial.originalSpatialScore >= 0.95);
+    assert.ok(trial.originalGradientScore >= 0.8);
+    const result = collectInitialWatermarkCandidates(
+        createV2MediumCollectionInput(imageData, () => ({
+            selectedTrial: trial,
+            candidatePool: [trial],
+            source: trial.source,
+            decisionTier: 'direct-match'
+        }))
+    );
+    assert.ok(result.hypotheses.length > 0);
+    assert.ok(result.hypotheses.every(hypothesis => (
+        hypothesis.trial.position.x === position.x &&
+        hypothesis.trial.position.y === position.y
+    )));
+    assert.ok(!result.hypotheses.some(hypothesis => (
+        hypothesis.trial?.provenance?.confirmedV2MediumRescue === true
+    )));
+});
+
+test('collectInitialWatermarkCandidates should reject repeated V2 medium template controls', () => {
+    const imageData = createFlatImageData(768, 1376, 72);
+    const alpha48V2 = interpolateAlphaMap(getEmbeddedAlphaMap('36-v2'), 36, 48);
+    for (const [dx, dy] of [[0, 0], [-48, 0], [0, -48], [-48, -48], [-96, 0], [0, -96], [-96, -96]]) {
+        applyWhiteWatermark(imageData, alpha48V2, {
+            x: 647 + dx, y: 1255 + dy, width: 48, height: 48
+        });
+    }
+    const result = collectInitialWatermarkCandidates(
+        createV2MediumCollectionInput(imageData, () => ({
+            selectedTrial: null,
+            candidatePool: [],
+            source: 'skipped',
+            decisionTier: 'insufficient'
+        }))
+    );
+    assert.equal(result.hypotheses.length, 0);
+});
+
+test('collectInitialWatermarkCandidates should require a sufficiently strong 36px V2 prior for ambiguous medium geometry', () => {
+    const imageData = createFlatImageData(768, 1376, 72);
+    for (let y = 0; y < imageData.height; y++) {
+        for (let x = 0; x < imageData.width; x++) {
+            const offset = (y * imageData.width + x) * 4;
+            const value = 72 + (x * 7 + y * 11) % 80;
+            imageData.data.set([value, value, value, 255], offset);
+        }
+    }
     const alpha36V2 = getEmbeddedAlphaMap('36-v2');
     const alpha48V2 = interpolateAlphaMap(alpha36V2, 36, 48);
     applyWhiteWatermark(imageData, alpha48V2, {
