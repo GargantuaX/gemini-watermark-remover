@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.46 - Unreleased
+
+- Retain an existing strongly localized V2 medium candidate on 768×1376 images when
+  a weaker candidate at another position obscures it (#172, #174).
+- Preserve existing strong canonical geometry priority and moderate-evidence
+  protection rules. Fine outline residuals can remain; this is a localization fix,
+  not a guarantee of perfectly clean output.
+
 ## 1.0.45 - 2026-09-22
 
 - Stop an active detection/export and cancel the remaining video queue without downloading partial results; processing can resume with a new selection after cleanup.
