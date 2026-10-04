@@ -32,6 +32,7 @@ import {
 } from './videoCleanupBackends.js';
 import { resolveAllenkFdncnnRuntimeProfile } from './videoDenoiseRuntimePolicy.js';
 import { resolveVideoMetadata } from './videoMetadata.js';
+import { beginReclaimableVideoEncoding, createCodecReclaimStats } from './videoCodecReclaim.js';
 import {
     attachVideoDecodeDiagnostics,
     createVideoDecodeStats,
@@ -983,6 +984,8 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
     const trackStates = new Map();
     const fallbackDuration = metadata.frameRate > 0 ? 1 / metadata.frameRate : 1 / 30;
     const decodeStats = createVideoDecodeStats();
+    const codecReclaimStats = createCodecReclaimStats();
+    const endReclaimableEncoding = beginReclaimableVideoEncoding(codecReclaimStats);
 
     try {
         options.signal?.throwIfAborted();
@@ -998,7 +1001,8 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
         audioCopyPromise.catch(() => {});
         const samples = iterateVideoSamplesWithDecoderRecovery(() => new VideoSampleSink(videoTrack), {
             stats: decodeStats,
-            signal: options.signal
+            signal: options.signal,
+            codecReclaimStats
         });
 
         for await (const sample of samples) {
@@ -1108,14 +1112,23 @@ export async function removeGeminiVideoWatermark(file, options = {}) {
             seedFrames,
             aiDenoiseFrames,
             aiReuseFrames,
-            decoderRecoveries: decodeStats.recoveries
+            decoderRecoveries: decodeStats.recoveries,
+            codecReclaimRecoveries: codecReclaimStats.recoveries
         };
     } catch (error) {
         if (output.state !== 'finalized' && output.state !== 'canceled') {
             await output.cancel().catch(() => {});
         }
+        if (codecReclaimStats.recoveries > 0) {
+            try {
+                error.codecReclaimRecoveries = codecReclaimStats.recoveries;
+            } catch {
+                // Host errors may not be extensible.
+            }
+        }
         throw attachVideoDecodeDiagnostics(error, decodeStats, metadata);
     } finally {
+        endReclaimableEncoding();
         input.dispose();
         await audioCopyPromise?.catch(() => {});
     }

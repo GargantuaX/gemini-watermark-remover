@@ -1,3 +1,5 @@
+import { tryConsumeCodecReclaimRecovery } from './videoCodecReclaim.js';
+
 const DEFAULT_MAX_DECODER_RECOVERIES = 2;
 
 // WebKit reports "Decoder failure"; Chromium reports "Decoding error." or "Decoding task did not complete".
@@ -14,12 +16,14 @@ export function createVideoDecodeStats() {
  * Yields decoded samples like `sink.samples()`, but when the decoder fails mid-stream it opens a fresh sink
  * and resumes after the last sample it yielded. Hardware decoders (notably on iOS) can fail transiently;
  * a stream that fails again at the same point still throws once `maxRecoveries` is used up.
+ * A decoder that Chrome reclaimed in a background tab resumes the same way, drawing on `codecReclaimStats`.
  */
 export async function* iterateVideoSamplesWithDecoderRecovery(createSink, {
     stats = createVideoDecodeStats(),
     maxRecoveries = DEFAULT_MAX_DECODER_RECOVERIES,
     signal = null,
-    onRecovery = null
+    onRecovery = null,
+    codecReclaimStats = null
 } = {}) {
     while (true) {
         const resumeAfter = stats.lastTimestamp;
@@ -36,6 +40,7 @@ export async function* iterateVideoSamplesWithDecoderRecovery(createSink, {
             return;
         } catch (error) {
             signal?.throwIfAborted();
+            if (tryConsumeCodecReclaimRecovery(codecReclaimStats, error)) continue;
             if (!isRecoverableVideoDecodeError(error) || stats.recoveries >= maxRecoveries) {
                 throw error;
             }
