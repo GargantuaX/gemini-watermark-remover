@@ -46,6 +46,8 @@ export function createReclaimableVideoEncoding({ CustomVideoEncoder, EncodedPack
      * old one had not emitted yet is encoded again, starting with a key frame, so the output continues without a
      * gap. The MP4 track keeps the first encoder's avcC. A rebuilt encoder with different parameter sets (for
      * example a software fallback) would make the rest of the track undecodable, so that case fails the export.
+     * Only the rebuilt encoder's first description is compared: some hardware encoders re-emit a slightly
+     * different avcC mid-stream, which the muxer has always ignored.
      */
     class ReclaimableVideoEncoder extends CustomVideoEncoder {
         static supports(codec) {
@@ -61,6 +63,7 @@ export function createReclaimableVideoEncoding({ CustomVideoEncoder, EncodedPack
             this.pendingFrames = [];
             this.error = null;
             this.trackDescription = null;
+            this.checkRebuiltDescription = false;
             this.startEncoder();
         }
 
@@ -87,6 +90,7 @@ export function createReclaimableVideoEncoding({ CustomVideoEncoder, EncodedPack
             }
             try {
                 this.startEncoder();
+                this.checkRebuiltDescription = true;
                 this.pendingFrames.forEach((frame, index) => {
                     this.current.encoder.encode(frame, { keyFrame: index === 0 });
                 });
@@ -104,9 +108,13 @@ export function createReclaimableVideoEncoding({ CustomVideoEncoder, EncodedPack
 
             const description = toBytes(meta?.decoderConfig?.description);
             if (description) {
+                const rebuiltDescriptionChanged = this.checkRebuiltDescription
+                    && this.trackDescription
+                    && !sameBytes(this.trackDescription, description);
+                this.checkRebuiltDescription = false;
                 if (!this.trackDescription) {
                     this.trackDescription = description.slice();
-                } else if (!sameBytes(this.trackDescription, description)) {
+                } else if (rebuiltDescriptionChanged) {
                     this.error = new Error('Codec reclaimed due to inactivity; the rebuilt encoder changed the stream parameters.');
                     this.error.name = 'QuotaExceededError';
                     // close() does not run the error callback, so release anything waiting on this encoder.

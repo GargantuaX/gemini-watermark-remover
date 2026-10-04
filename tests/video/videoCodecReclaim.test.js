@@ -33,7 +33,7 @@ const flushTasks = () => new Promise((resolve) => setImmediate(resolve));
 
 // Mirrors Chrome: a reclaim closes the codec and runs the error callback in one task;
 // close() rejects a pending flush and never runs the error callback.
-function installFakeVideoEncoder({ latency = 2, descriptions = [] } = {}) {
+function installFakeVideoEncoder({ latency = 2, descriptions = [], laterDescription = null } = {}) {
     const instances = [];
     class FakeVideoEncoder {
         constructor({ output, error }) {
@@ -61,7 +61,8 @@ function installFakeVideoEncoder({ latency = 2, descriptions = [] } = {}) {
             while (this.state === 'configured' && this.inFlight.length > keep) {
                 const { timestamp, keyFrame } = this.inFlight.shift();
                 const type = keyFrame || this.emitted === 0 ? 'key' : 'delta';
-                const meta = this.emitted === 0 ? { decoderConfig: { codec: 'avc1', description: this.description } } : undefined;
+                const description = this.emitted === 0 ? this.description : (this.emitted === 1 ? laterDescription : null);
+                const meta = description ? { decoderConfig: { codec: 'avc1', description } } : undefined;
                 this.emitted++;
                 this.output({
                     type,
@@ -249,6 +250,21 @@ test('a rebuilt encoder with different parameter sets fails instead of writing a
         await assert.rejects(encoder.flush(), { name: 'QuotaExceededError', message: /changed the stream parameters/ });
         await assert.rejects(encoder.encode(frameSample(2), {}), { name: 'QuotaExceededError' });
         assert.deepEqual(microseconds(packets), [0]);
+    } finally {
+        end();
+        fake.restore();
+    }
+});
+
+test('an encoder that re-emits a different description without a reclaim keeps exporting', async () => {
+    const fake = installFakeVideoEncoder({ latency: 0, laterDescription: avcDescription(0x20) });
+    const { encoder, packets, end } = await createEncoder(createCodecReclaimStats());
+    try {
+        await encoder.encode(frameSample(0), { keyFrame: true });
+        await encoder.encode(frameSample(1), {});
+        await encoder.encode(frameSample(2), {});
+        await encoder.flush();
+        assert.deepEqual(microseconds(packets), [0, 1, 2]);
     } finally {
         end();
         fake.restore();
