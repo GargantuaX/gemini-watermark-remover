@@ -10,6 +10,12 @@ import { attachTopNSelectionMeta } from './pipelineMeta.js';
 import { createRejectedPipelineResult } from './pipelineResult.js';
 import { runAcceptedAlphaRepairPipeline } from './pipelineAcceptedExecutor.js';
 import { createAcceptedPipelineFinalResult } from './pipelineFinalization.js';
+import { interpolateAlphaMap, resizeAlphaMapArea } from './adaptiveDetector.js';
+
+const NATIVE_ALPHA_SIZES = new Set([48, 96]);
+// Below this the sharper area-averaged edge over-removed on small preview
+// anchors (issue99 fixture, 24px dark-halo fixtures) in the sample batch.
+const AREA_ALPHA_MIN_SIZE = 32;
 
 function createSelectedCandidate(best) {
     const hypothesis = best?.hypothesis ?? {};
@@ -118,6 +124,95 @@ function attachPresenceBestEffortMeta(meta, collection) {
     };
 }
 
+function sameAlphaMap(left, right) {
+    if (!left || !right || left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i++) {
+        if (left[i] !== right[i]) return false;
+    }
+    return true;
+}
+
+function samePosition(left, right) {
+    return Boolean(left && right) &&
+        left.x === right.x &&
+        left.y === right.y &&
+        left.width === right.width &&
+        left.height === right.height;
+}
+
+// Bilinear corner-aligned downsampling of the 96px template blurs the star
+// edge at non-native sizes and leaves a visible outline (issue #165). Detection
+// and ranking keep the interpolated map; only the selected winner is re-run
+// with an area-averaged map, and only when its geometry stays the same.
+function createAreaAlphaHypothesis(best, alpha96) {
+    const hypothesis = best?.hypothesis;
+    const trial = hypothesis?.trial;
+    const position = trial?.position;
+    const size = position?.width;
+    if (
+        !alpha96 ||
+        !trial?.alphaMap ||
+        !Number.isInteger(size) ||
+        size !== position.height ||
+        size < AREA_ALPHA_MIN_SIZE ||
+        size >= 96 ||
+        NATIVE_ALPHA_SIZES.has(size) ||
+        trial.templateWarp ||
+        hypothesis.alphaProfile !== 'default' ||
+        hypothesis.polarity !== 'light' ||
+        best.result?.meta?.applied !== true ||
+        best.result.meta.subpixelShift ||
+        !samePosition(best.result.meta.position, position) ||
+        !sameAlphaMap(trial.alphaMap, interpolateAlphaMap(alpha96, 96, size))
+    ) {
+        return null;
+    }
+
+    const alphaMap = resizeAlphaMapArea(alpha96, 96, size);
+    return {
+        ...hypothesis,
+        alphaMap,
+        trial: { ...trial, alphaMap }
+    };
+}
+
+function rerunWithAreaAlpha({
+    best,
+    alpha96,
+    runCandidateWithHypothesis,
+    measureRerunCandidate
+}) {
+    const hypothesis = createAreaAlphaHypothesis(best, alpha96);
+    if (!hypothesis) return best;
+
+    try {
+        const rerun = runCandidateWithHypothesis(hypothesis);
+        const meta = rerun?.result?.meta;
+        if (
+            !rerun?.result?.imageData ||
+            meta?.applied !== true ||
+            meta.size !== best.result.meta.size ||
+            !samePosition(meta.position, best.result.meta.position)
+        ) {
+            return best;
+        }
+
+        return {
+            ...best,
+            result: {
+                ...rerun.result,
+                meta: { ...meta, finalAlphaResample: 'area' }
+            },
+            pipelineState: rerun.pipelineState,
+            passState: rerun.passState,
+            traceState: rerun.traceState,
+            qualitySignals: measureRerunCandidate(rerun, hypothesis)
+        };
+    } catch {
+        return best;
+    }
+}
+
 export function runImageWatermarkPipeline({
     imageData,
     options = {},
@@ -208,44 +303,46 @@ export function runImageWatermarkPipeline({
     const completed = [];
     const failures = [];
     const executionStartedAt = nowMs();
+    const runCandidateWithHypothesis = (hypothesis) => runCandidate({
+        hypothesis,
+        originalImageData,
+        resolvedConfig,
+        options,
+        nowMs,
+        alpha96,
+        debugTimingsEnabled,
+        visualPostProcessingEnabled,
+        cleanupConfig,
+        createAcceptedPipelineDependencies: () => (
+            createAcceptedPipelineDependencies(hypothesis)
+        ),
+        runAcceptedPipeline,
+        createAcceptedFinalResult
+    });
+    const measureCompletedCandidate = (completedCandidate, hypothesis) => measureCandidate({
+        originalImageData,
+        candidateImageData: completedCandidate.result.imageData,
+        hypothesis,
+        finalCandidate: {
+            position: completedCandidate.pipelineState?.position,
+            alphaMap: completedCandidate.pipelineState?.alphaMap,
+            alphaGain: completedCandidate.pipelineState?.alphaGain,
+            darkBackgroundSupportConvergence:
+                findDarkBackgroundSupportConvergence(
+                    completedCandidate.result.meta
+                )
+        }
+    });
     for (const hypothesis of hypotheses) {
         try {
-            const completedCandidate = runCandidate({
-                hypothesis,
-                originalImageData,
-                resolvedConfig,
-                options,
-                nowMs,
-                alpha96,
-                debugTimingsEnabled,
-                visualPostProcessingEnabled,
-                cleanupConfig,
-                createAcceptedPipelineDependencies: () => (
-                    createAcceptedPipelineDependencies(hypothesis)
-                ),
-                runAcceptedPipeline,
-                createAcceptedFinalResult
-            });
+            const completedCandidate = runCandidateWithHypothesis(hypothesis);
             if (!completedCandidate?.result?.imageData) {
                 throw new Error(`Candidate ${hypothesis.id ?? 'unknown'} returned no pixels`);
             }
             const candidate = {
                 ...completedCandidate,
                 hypothesis,
-                qualitySignals: measureCandidate({
-                    originalImageData,
-                    candidateImageData: completedCandidate.result.imageData,
-                    hypothesis,
-                    finalCandidate: {
-                        position: completedCandidate.pipelineState?.position,
-                        alphaMap: completedCandidate.pipelineState?.alphaMap,
-                        alphaGain: completedCandidate.pipelineState?.alphaGain,
-                        darkBackgroundSupportConvergence:
-                            findDarkBackgroundSupportConvergence(
-                                completedCandidate.result.meta
-                            )
-                    }
-                })
+                qualitySignals: measureCompletedCandidate(completedCandidate, hypothesis)
             };
             completed.push(candidate);
             notifyCandidateCompleted({ options, candidate, debugTimings });
@@ -278,7 +375,12 @@ export function runImageWatermarkPipeline({
 
     const rankingStartedAt = nowMs();
     const ranked = rankCandidates(completed);
-    const best = ranked[0];
+    const best = rerunWithAreaAlpha({
+        best: ranked[0],
+        alpha96,
+        runCandidateWithHypothesis,
+        measureRerunCandidate: measureCompletedCandidate
+    });
     if (!best?.result?.imageData) {
         failures.push({
             hypothesis: null,

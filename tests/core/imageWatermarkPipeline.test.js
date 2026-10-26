@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { runImageWatermarkPipeline } from '../../src/core/imageWatermarkPipeline.js';
 import { detectWatermarkConfig } from '../../src/core/watermarkConfig.js';
+import { interpolateAlphaMap, resizeAlphaMapArea } from '../../src/core/adaptiveDetector.js';
 
 function createImageData(width = 128, height = 128, value = 0) {
     const data = new Uint8ClampedArray(width * height * 4);
@@ -554,4 +555,106 @@ test('runImageWatermarkPipeline should preserve collectors that predate explicit
 
     assert.deepEqual(executed, ['legacy-collector']);
     assert.equal(result.meta.applied, true);
+});
+
+function createRampAlpha96() {
+    const alpha = new Float32Array(96 * 96);
+    for (let y = 0; y < 96; y++) {
+        for (let x = 0; x < 96; x++) {
+            alpha[y * 96 + x] = Math.abs(Math.sin(x * 0.37) * Math.cos(y * 0.21)) * 0.5;
+        }
+    }
+    return alpha;
+}
+
+function createAreaAlphaInput({
+    size = 43,
+    alphaProfile = 'default',
+    rerunPosition = null
+} = {}) {
+    const alpha96 = createRampAlpha96();
+    const position = { x: 40, y: 40, width: size, height: size };
+    const hypothesis = {
+        id: 'winner',
+        family: 'geometry',
+        rankingKey: [1],
+        config: { logoSize: size, marginRight: 45, marginBottom: 45 },
+        position,
+        alphaGain: 0.6,
+        alphaProfile,
+        polarity: 'light',
+        trial: {
+            position,
+            config: { logoSize: size, marginRight: 45, marginBottom: 45 },
+            alphaGain: 0.6,
+            alphaMap: interpolateAlphaMap(alpha96, 96, size)
+        }
+    };
+    const { request } = createPipelineInput({
+        hypotheses: [hypothesis],
+        options: { alpha96 }
+    });
+    const runs = [];
+    request.runCandidate = ({ hypothesis: running }) => {
+        runs.push(running.trial.alphaMap);
+        const resultPosition = runs.length > 1 && rerunPosition ? rerunPosition : position;
+        return {
+            hypothesis: running,
+            result: {
+                imageData: createImageData(128, 128, runs.length),
+                meta: { applied: true, size: resultPosition.width, position: resultPosition }
+            },
+            pipelineState: {
+                position: resultPosition,
+                alphaMap: running.trial.alphaMap,
+                alphaGain: 0.6
+            }
+        };
+    };
+    const measuredAlphaMaps = [];
+    request.measureCandidate = ({ finalCandidate }) => {
+        measuredAlphaMaps.push(finalCandidate.alphaMap);
+        return { qualityStatus: 'clean', evidenceLoss: 0, residualLoss: 0, damageLoss: 0 };
+    };
+    return { request, runs, alpha96, measuredAlphaMaps };
+}
+
+test('runImageWatermarkPipeline should re-run a downsampled 96 winner with an area-averaged alpha map', () => {
+    const { request, runs, alpha96, measuredAlphaMaps } = createAreaAlphaInput();
+
+    const result = runImageWatermarkPipeline(request);
+
+    const areaAlpha = resizeAlphaMapArea(alpha96, 96, 43);
+    assert.equal(runs.length, 2);
+    assert.deepEqual(runs[0], interpolateAlphaMap(alpha96, 96, 43));
+    assert.deepEqual(runs[1], areaAlpha);
+    assert.notDeepEqual(runs[0], runs[1]);
+    assert.equal(result.imageData.data[0], 2);
+    assert.equal(result.meta.finalAlphaResample, 'area');
+    assert.deepEqual(result.meta.position, { x: 40, y: 40, width: 43, height: 43 });
+    assert.deepEqual(measuredAlphaMaps.at(-1), areaAlpha);
+});
+
+test('runImageWatermarkPipeline should keep the ranked output when the area-alpha re-run moves the anchor', () => {
+    const { request, runs } = createAreaAlphaInput({
+        rerunPosition: { x: 41, y: 40, width: 43, height: 43 }
+    });
+
+    const result = runImageWatermarkPipeline(request);
+
+    assert.equal(runs.length, 2);
+    assert.equal(result.imageData.data[0], 1);
+    assert.equal(result.meta.finalAlphaResample, undefined);
+    assert.deepEqual(result.meta.position, { x: 40, y: 40, width: 43, height: 43 });
+});
+
+test('runImageWatermarkPipeline should not re-run native-size, small or variant-profile winners', () => {
+    for (const input of [{ size: 48 }, { size: 27 }, { alphaProfile: '20260520' }]) {
+        const { request, runs } = createAreaAlphaInput(input);
+
+        const result = runImageWatermarkPipeline(request);
+
+        assert.equal(runs.length, 1);
+        assert.equal(result.meta.finalAlphaResample, undefined);
+    }
 });

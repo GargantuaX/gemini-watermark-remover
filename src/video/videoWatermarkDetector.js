@@ -1,7 +1,8 @@
 import { getEmbeddedAlphaMap } from '../core/embeddedAlphaMaps.js';
 import {
     computeRegionGradientCorrelation,
-    computeRegionSpatialCorrelation
+    computeRegionSpatialCorrelation,
+    resizeAlphaMapArea
 } from '../core/adaptiveDetector.js';
 import { resolveVideoWatermarkCandidates } from './videoWatermarkCatalog.js';
 import {
@@ -33,49 +34,11 @@ function normalizeVideoAlphaProfile(profile) {
     return Number.isInteger(numeric) && String(numeric) === text ? numeric : text;
 }
 
+export { resizeAlphaMapArea };
+
 function inferSquareAlphaSize(alphaMap, fallbackSize) {
     const size = Math.round(Math.sqrt(alphaMap.length));
     return size > 0 && size * size === alphaMap.length ? size : fallbackSize;
-}
-
-export function resizeAlphaMapArea(sourceAlpha, sourceSize, targetSize) {
-    if (targetSize <= 0) return new Float32Array(0);
-    if (sourceSize === targetSize) return new Float32Array(sourceAlpha);
-
-    const out = new Float32Array(targetSize * targetSize);
-    const scale = sourceSize / targetSize;
-
-    for (let y = 0; y < targetSize; y++) {
-        const yStart = y * scale;
-        const yEnd = (y + 1) * scale;
-        const y0 = Math.floor(yStart);
-        const y1 = Math.ceil(yEnd);
-
-        for (let x = 0; x < targetSize; x++) {
-            const xStart = x * scale;
-            const xEnd = (x + 1) * scale;
-            const x0 = Math.floor(xStart);
-            const x1 = Math.ceil(xEnd);
-
-            let sum = 0;
-            let areaSum = 0;
-            for (let sy = y0; sy < y1; sy++) {
-                if (sy < 0 || sy >= sourceSize) continue;
-                const wy = Math.max(0, Math.min(yEnd, sy + 1) - Math.max(yStart, sy));
-                for (let sx = x0; sx < x1; sx++) {
-                    if (sx < 0 || sx >= sourceSize) continue;
-                    const wx = Math.max(0, Math.min(xEnd, sx + 1) - Math.max(xStart, sx));
-                    const area = wx * wy;
-                    sum += sourceAlpha[sy * sourceSize + sx] * area;
-                    areaSum += area;
-                }
-            }
-
-            out[y * targetSize + x] = areaSum > 0 ? sum / areaSum : 0;
-        }
-    }
-
-    return out;
 }
 
 export function resolveVideoAlphaEdgeBoost(candidate = null) {
