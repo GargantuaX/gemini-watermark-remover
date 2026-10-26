@@ -6307,7 +6307,8 @@ export function processWatermarkImageData(imageData, options = {}) {
                 debugEnabled: options.debugTimings === true
             });
             if (hypothesis?.id != null) {
-                instrumentationByCandidateId.set(hypothesis.id, instrumentation);
+                const runs = instrumentationByCandidateId.get(hypothesis.id) ?? [];
+                instrumentationByCandidateId.set(hypothesis.id, [...runs, instrumentation]);
             }
             return createAcceptedPipelineDependencies({
                 localAlphaSearchInstrumentation: instrumentation
@@ -6327,6 +6328,10 @@ export function processWatermarkImageData(imageData, options = {}) {
         result,
         instrumentation: selectedCandidateId == null
             ? null
-            : instrumentationByCandidateId.get(selectedCandidateId) ?? null
+            // An adopted area-alpha re-run is the last run for this id;
+            // otherwise the ranked output came from the first run.
+            : (result.meta.finalAlphaResample === 'area'
+                ? instrumentationByCandidateId.get(selectedCandidateId)?.at(-1)
+                : instrumentationByCandidateId.get(selectedCandidateId)?.[0]) ?? null
     });
 }

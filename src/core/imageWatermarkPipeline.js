@@ -402,7 +402,13 @@ export function runImageWatermarkPipeline({
         };
     }
 
-    const candidateSummaries = createSummaries(ranked, failures);
+    if (best !== ranked[0]) {
+        notifyCandidateCompleted({ options, candidate: best, debugTimings });
+    }
+    const candidateSummaries = createSummaries(
+        best === ranked[0] ? ranked : [best, ...ranked.slice(1)],
+        failures
+    );
     const selectionMeta = attachSelectionMeta(best.result.meta, {
         qualityStatus: best.qualitySignals?.qualityStatus,
         selectionConfidence: best.selectionConfidence,

@@ -621,6 +621,13 @@ function createAreaAlphaInput({
 
 test('runImageWatermarkPipeline should re-run a downsampled 96 winner with an area-averaged alpha map', () => {
     const { request, runs, alpha96, measuredAlphaMaps } = createAreaAlphaInput();
+    const notified = [];
+    request.options.onCandidateCompleted = (candidate) => notified.push(candidate);
+    let summarizedBest = null;
+    request.createSummaries = (ranked) => {
+        summarizedBest = ranked[0];
+        return [];
+    };
 
     const result = runImageWatermarkPipeline(request);
 
@@ -633,6 +640,8 @@ test('runImageWatermarkPipeline should re-run a downsampled 96 winner with an ar
     assert.equal(result.meta.finalAlphaResample, 'area');
     assert.deepEqual(result.meta.position, { x: 40, y: 40, width: 43, height: 43 });
     assert.deepEqual(measuredAlphaMaps.at(-1), areaAlpha);
+    assert.deepEqual(notified.map((candidate) => candidate.result.imageData.data[0]), [1, 2]);
+    assert.equal(summarizedBest.result.imageData.data[0], 2);
 });
 
 test('runImageWatermarkPipeline should keep the ranked output when the area-alpha re-run moves the anchor', () => {

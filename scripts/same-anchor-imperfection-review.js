@@ -71,7 +71,9 @@ export function selectSameAnchorAlternative({
     damageTolerance = DEFAULT_DAMAGE_TOLERANCE
 }) {
     const candidates = Array.isArray(completedCandidates) ? completedCandidates : [];
-    const selected = candidates.find(
+    // The pipeline may report the selected id twice when it adopts a
+    // final re-run; the last report is the returned output.
+    const selected = candidates.findLast(
         (candidate) => getCandidateId(candidate) === selectedId
     );
     if (!selected) {
@@ -87,7 +89,7 @@ export function selectSameAnchorAlternative({
     const selectedEvidence = selectedSignals.evidenceLoss;
     const selectedDamage = selectedSignals.damageLoss;
     const plausible = candidates
-        .filter((candidate) => candidate !== selected)
+        .filter((candidate) => getCandidateId(candidate) !== selectedId)
         .filter((candidate) => hasSameAnchor(selected, candidate))
         .filter((candidate) => {
             const signals = candidate.qualitySignals ?? {};
