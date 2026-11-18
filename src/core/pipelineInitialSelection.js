@@ -56,6 +56,20 @@ const CONFIRMED_V2_MEDIUM_MARGIN = 73;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_SPATIAL = 0.4;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_GRADIENT = 0.5;
 const CONFIRMED_V2_SMALL_PRIOR_MIN_SPATIAL = 0.3;
+const LANDSCAPE_V2_MEDIUM_GAIN = 0.75;
+const LANDSCAPE_V2_MEDIUM_MIN_SIGNED_SPATIAL = 0.25;
+const LANDSCAPE_V2_MEDIUM_MIN_GRADIENT = 0.55;
+const LANDSCAPE_V2_MEDIUM_MIN_HIGHPASS = 0.42;
+const LANDSCAPE_V2_MEDIUM_MIN_QUADRANT_HIGHPASS = 0.25;
+const LANDSCAPE_V2_MEDIUM_MIN_PROMINENCE = 0.25;
+const LANDSCAPE_V2_MEDIUM_DECOYS = [
+    [-8, 0], [8, 0], [0, -8], [0, 8],
+    [-6, -6], [-6, 6], [6, -6], [6, 6],
+    [-16, 0], [16, 0], [0, -16], [0, 16],
+    [-12, -12], [-12, 12], [12, -12], [12, 12],
+    [-48, 0], [0, -48], [-48, -48], [48, 0], [0, 48], [48, 48]
+];
+const BINOMIAL_KERNEL = [1, 4, 6, 4, 1];
 const EXACT_48_R96_SOURCE_WITNESS_MIN_PRIMARY = 0.36;
 const EXACT_48_R96_SOURCE_WITNESS_MIN_EDGE_PROMINENCE = 2.5;
 const EXACT_48_R96_SOURCE_WITNESS_MIN_GRADIENT_PERCENTILE = 0.9;
@@ -100,17 +114,95 @@ function isConfirmedV2SmallSelection(trial) {
         );
 }
 
+function subtractLocalBlur(values, size) {
+    const highpass = new Float32Array(values.length);
+    for (let y = 2; y < size - 2; y++) {
+        for (let x = 2; x < size - 2; x++) {
+            let weightedSum = 0;
+            for (let dy = -2; dy <= 2; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                    weightedSum += values[(y + dy) * size + x + dx] *
+                        BINOMIAL_KERNEL[dy + 2] * BINOMIAL_KERNEL[dx + 2];
+                }
+            }
+            const index = y * size + x;
+            highpass[index] = values[index] - weightedSum / 256;
+        }
+    }
+    return highpass;
+}
+
+function measureLandscapeV2Highpass(image, template, {x, y, width: size}) {
+    const luminance = new Float32Array(size * size);
+    for (let row = 0; row < size; row++) {
+        for (let col = 0; col < size; col++) {
+            const offset = ((y + row) * image.width + x + col) * 4;
+            luminance[row * size + col] = (image.data[offset] +
+                2 * image.data[offset + 1] + image.data[offset + 2]) / 4;
+        }
+    }
+    const highpass = subtractLocalBlur(luminance, size);
+    const quadrants = Array.from({length: 4}, () => ({dot: 0, templateEnergy: 0, sourceEnergy: 0}));
+    for (let row = 0; row < size; row++) {
+        for (let col = 0; col < size; col++) {
+            const index = row * size + col;
+            const quadrant = quadrants[(row >= size / 2 ? 2 : 0) + (col >= size / 2 ? 1 : 0)];
+            const source = highpass[index];
+            const reference = template[index];
+            quadrant.dot += source * reference;
+            quadrant.sourceEnergy += source * source;
+            quadrant.templateEnergy += reference * reference;
+        }
+    }
+    const correlation = ({dot, templateEnergy, sourceEnergy}) =>
+        dot / Math.sqrt(templateEnergy * sourceEnergy) || 0;
+    const combined = quadrants.reduce((total, quadrant) => ({
+        dot: total.dot + quadrant.dot,
+        sourceEnergy: total.sourceEnergy + quadrant.sourceEnergy,
+        templateEnergy: total.templateEnergy + quadrant.templateEnergy
+    }), {dot: 0, sourceEnergy: 0, templateEnergy: 0});
+    return {correlation: correlation(combined), quadrants: quadrants.map(correlation)};
+}
+
+function hasLocalizedLandscapeV2MediumSource(image, trial) {
+    if (
+        trial.originalSpatialScore < LANDSCAPE_V2_MEDIUM_MIN_SIGNED_SPATIAL ||
+        trial.originalGradientScore < LANDSCAPE_V2_MEDIUM_MIN_GRADIENT ||
+        trial.damage?.safe !== true
+    ) {
+        return false;
+    }
+    const position = trial.position;
+    // Slow background variation can hide a bright star in the spatial score.
+    // Require the signed contour in every quadrant and against shifted controls.
+    const template = subtractLocalBlur(trial.alphaMap, position.width);
+    const target = measureLandscapeV2Highpass(image, template, position);
+    if (
+        target.correlation < LANDSCAPE_V2_MEDIUM_MIN_HIGHPASS ||
+        target.quadrants.some(score => score < LANDSCAPE_V2_MEDIUM_MIN_QUADRANT_HIGHPASS)
+    ) {
+        return false;
+    }
+    return LANDSCAPE_V2_MEDIUM_DECOYS.every(([dx, dy]) =>
+        target.correlation - measureLandscapeV2Highpass(image, template, {
+            ...position,
+            x: position.x + dx,
+            y: position.y + dy
+        }).correlation >= LANDSCAPE_V2_MEDIUM_MIN_PROMINENCE
+    );
+}
+
 function createConfirmedV2MediumRescueTrial({
     originalImageData,
     getAlphaMap,
     fixedSelection,
     automaticSelection
 }) {
-    if (
-        originalImageData?.width !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH ||
-        originalImageData?.height !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT ||
-        typeof getAlphaMap !== 'function'
-    ) {
+    const isPortrait = originalImageData?.width === CONFIRMED_V2_MEDIUM_IMAGE_WIDTH &&
+        originalImageData.height === CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT;
+    const isLandscape = originalImageData?.width === CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT &&
+        originalImageData.height === CONFIRMED_V2_MEDIUM_IMAGE_WIDTH;
+    if ((!isPortrait && !isLandscape) || typeof getAlphaMap !== 'function') {
         return null;
     }
 
@@ -150,7 +242,7 @@ function createConfirmedV2MediumRescueTrial({
             originalImageData,
             position
         ),
-        alphaGain: 1,
+        alphaGain: isLandscape ? LANDSCAPE_V2_MEDIUM_GAIN : 1,
         provenance: {
             catalogVariant: true,
             fixedVariant: true,
@@ -165,6 +257,11 @@ function createConfirmedV2MediumRescueTrial({
         includeImageData: false
     });
     if (!trial?.accepted) return null;
+    if (isLandscape) {
+        return hasLocalizedLandscapeV2MediumSource(originalImageData, trial)
+            ? { trial, strongGeometry: true }
+            : null;
+    }
     const strongGeometry = isStrongLocalizedGeometryTrial(trial, originalImageData);
 
     // A strong 36px V2 prior is independent geometry evidence. Do not require

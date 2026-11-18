@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeImageDataInNode } from '../../scripts/sample-benchmark.js';
+import { interpolateAlphaMap, warpAlphaMap } from '../../src/core/adaptiveDetector.js';
 import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
 import { removeWatermarkFromImageDataSync } from '../../src/sdk/image-data.js';
 import { applySyntheticWatermark } from './syntheticWatermarkTestUtils.js';
@@ -67,4 +68,44 @@ test('adding an exact48 witness must preserve the existing conservative candidat
     ), 'the supplementary witness must not evict the established weak-strength candidate');
     assert.deepEqual(result.meta.position, { x: 1232, y: 624, width: 48, height: 48 });
     assert.equal(result.meta.alphaGain, 0.25);
+});
+
+test('localize a white landscape V2 medium watermark on texture without altering the surrounding pixels', async () => {
+    const source = await decodeImageDataInNode('src/assets/samples/4-3.png');
+    const width = 1376;
+    const height = 768;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < data.length; i += 4) data.set([135, 129, 121, 255], i);
+    for (let row = 0; row < 178; row++) {
+        // Use the upper-left texture, outside the sample's watermark area.
+        const start = ((row + 26) * source.width + 30) * 4;
+        data.set(source.data.subarray(start, start + 200 * 4),
+            ((height - 178 + row) * width + width - 200) * 4);
+    }
+    const clean = { width, height, data };
+    const input = { ...clean, data: data.slice() };
+    const position = { x: 1255, y: 647, width: 48, height: 48 };
+    const template = interpolateAlphaMap(getEmbeddedAlphaMap('36-v2'), 36, 48);
+    const shifted = warpAlphaMap(template, 48, { dx: 0.18, dy: 0.37, scale: 0.99 });
+    applySyntheticWatermark(input, shifted.map(value => 0.78 * value), position);
+
+    const result = removeWatermarkFromImageDataSync(input);
+    assert.deepEqual(result.meta.position, position);
+    assert.equal(result.meta.config.alphaVariant, 'v2');
+    assert.ok(measureError(result.imageData, clean, position) <
+        measureError(input, clean, position) * 0.2);
+    for (let y = 0; y < height; y++) {
+        const row = y * width * 4;
+        const end = row + width * 4;
+        const outside = y < position.y || y >= position.y + position.height
+            ? [[row, end]]
+            : [[row, row + position.x * 4], [row + (position.x + 48) * 4, end]];
+        for (const [start, stop] of outside) {
+            assert.deepEqual(result.imageData.data.subarray(start, stop), data.subarray(start, stop));
+        }
+    }
+
+    const unmarked = removeWatermarkFromImageDataSync(clean);
+    assert.equal(unmarked.meta.applied, false);
+    assert.deepEqual(unmarked.imageData.data, data);
 });
