@@ -49,7 +49,9 @@ jobs:
         run: pnpm test:sdk-smoke
 
       - name: Install Playwright Chromium
-        run: pnpm exec playwright install --with-deps chromium
+        run: |
+          pnpm exec playwright install chromium
+          node --input-type=module -e "import { chromium } from 'playwright'; await (await chromium.launch()).close();"
 
       - name: Test
         run: pnpm test
