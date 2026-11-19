@@ -33,6 +33,7 @@ import {
     measurePreviewBoundaryMetrics
 } from './previewAlphaCalibration.js';
 import { runImageWatermarkPipeline } from './imageWatermarkPipeline.js';
+import { refineV2MediumEdge } from './v2MediumEdgeRefinement.js';
 import {
     createImageWatermarkPipelineCleanupConfig,
     createImageWatermarkPipelineRequest
@@ -6324,7 +6325,7 @@ export function processWatermarkImageData(imageData, options = {}) {
         visualPostProcessingEnabled: ENABLE_VISUAL_POST_PROCESSING
     }));
     const selectedCandidateId = result?.meta?.selectedCandidate?.id;
-    return attachLocalAlphaSearchDiagnostics({
+    const finalized = attachLocalAlphaSearchDiagnostics({
         result,
         instrumentation: selectedCandidateId == null
             ? null
@@ -6334,4 +6335,6 @@ export function processWatermarkImageData(imageData, options = {}) {
                 ? instrumentationByCandidateId.get(selectedCandidateId)?.at(-1)
                 : instrumentationByCandidateId.get(selectedCandidateId)?.[0]) ?? null
     });
+    refineV2MediumEdge(imageData, finalized.imageData, finalized.meta);
+    return finalized;
 }
