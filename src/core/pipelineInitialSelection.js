@@ -1,5 +1,7 @@
 import {
     evaluateRestorationCandidate,
+    findBestTemplateWarp,
+    pickBetterCandidate,
     selectInitialCandidate
 } from './candidateSelector.js';
 import {
@@ -17,6 +19,7 @@ import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
 import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.js';
 import { measureRowAlphaEvidence, supportsRowAlphaGain } from './rowAlphaEvidence.js';
 import { measurePlaneAlphaEvidence } from './planeAlphaEvidence.js';
+import { findVerifiedV2LocalGeometry } from './v2LocalGeometry.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
 const AGGRESSIVE_FALLBACK_MAX_NEAR_BLACK_INCREASE = 0.05;
@@ -53,6 +56,7 @@ const CONFIRMED_V2_MEDIUM_IMAGE_WIDTH = 768;
 const CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT = 1376;
 const CONFIRMED_V2_MEDIUM_LOGO_SIZE = 48;
 const CONFIRMED_V2_MEDIUM_MARGIN = 73;
+const V2_LOCAL_MIN_SEED_SIZE = 26;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_SPATIAL = 0.4;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_GRADIENT = 0.5;
 const CONFIRMED_V2_SMALL_PRIOR_MIN_SPATIAL = 0.3;
@@ -1139,6 +1143,86 @@ function findWatermarkPresenceWitness(selection, originalImageData) {
         null;
 }
 
+function isWhiteV2LocalTrial(trial) {
+    const size = trial?.position?.width;
+    return trial?.provenance?.localShift === true &&
+        trial.config?.alphaVariant === 'v2' && trial.provenance.darkPolarity !== true &&
+        size >= V2_LOCAL_MIN_SEED_SIZE && size < CONFIRMED_V2_MEDIUM_LOGO_SIZE;
+}
+
+function createVerifiedV2LocalTrial(input, seed, position) {
+    const image = input.originalImageData;
+    const config = {
+        logoSize: position.width,
+        marginRight: image.width - position.x - position.width,
+        marginBottom: image.height - position.y - position.height,
+        alphaVariant: 'v2'
+    };
+    const provenance = {
+        catalogVariant: true,
+        catalogEvidenceGate: seed.provenance.catalogEvidenceGate,
+        localShift: true,
+        alphaVariant: 'v2',
+        verifiedV2LocalGeometry: true
+    };
+    const baselineNearBlackRatio = calculateNearBlackRatio(image, position);
+    const evaluateGain = (alphaMap, alphaGain, source) => evaluateRestorationCandidate({
+        originalImageData: image,
+        alphaMap,
+        position,
+        config,
+        source,
+        baselineNearBlackRatio,
+        alphaGain,
+        provenance,
+        includeImageData: false
+    });
+    // Reuse the normal alpha alignment and validation at the verified location.
+    const source = 'standard+catalog+local-v2-verified-48';
+    const base = evaluateGain(input.alpha48, 1, source);
+    const warp = findBestTemplateWarp({
+        originalImageData: image,
+        alphaMap: input.alpha48,
+        position,
+        baselineSpatialScore: base.originalSpatialScore,
+        baselineGradientScore: base.originalGradientScore
+    });
+    let best = null;
+    for (const gain of new Set([1, ...(input.alphaGainCandidates ?? [])])) {
+        const trial = gain === 1 ? base : evaluateGain(input.alpha48, gain, source);
+        best = pickBetterCandidate(best, trial, 0.002);
+        if (warp) best = pickBetterCandidate(best, evaluateGain(warp.alphaMap, gain, `${source}+warp`), 0.002);
+    }
+    if (best && best.alphaMap === warp?.alphaMap) best.templateWarp = warp.shift;
+    return best;
+}
+
+function refineV2LocalSelection(input, selection) {
+    const image = input.originalImageData;
+    const seed = selection.selectedTrial;
+    // The 48px search was validated on the landscape V2 1K layout.
+    if (image?.width !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT || image.height !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH ||
+        !isWhiteV2LocalTrial(seed) ||
+        input.alpha48?.length !== CONFIRMED_V2_MEDIUM_LOGO_SIZE ** 2) return selection;
+
+    const {position, seedVerified} = findVerifiedV2LocalGeometry(image, seed.position);
+    const verifiedTrial = position?.width === CONFIRMED_V2_MEDIUM_LOGO_SIZE
+        ? createVerifiedV2LocalTrial(input, seed, position) : null;
+    const selectedTrial = verifiedTrial ?? (seedVerified ? seed : null);
+    return {
+        ...selection,
+        selectedTrial,
+        candidatePool: (selection.candidatePool ?? []).filter(trial => !isWhiteV2LocalTrial(trial)),
+        source: selectedTrial?.source ?? 'skipped',
+        decisionTier: selectedTrial ? selection.decisionTier : 'insufficient',
+        position: selectedTrial?.position ?? selection.position,
+        config: selectedTrial?.config ?? selection.config,
+        alphaMap: selectedTrial?.alphaMap ?? selection.alphaMap,
+        alphaGain: selectedTrial?.alphaGain ?? selection.alphaGain,
+        templateWarp: verifiedTrial ? verifiedTrial.templateWarp ?? null : selection.templateWarp
+    };
+}
+
 export function collectInitialWatermarkCandidates(input = {}) {
     const selectCandidate = input.selectCandidate ?? selectInitialCandidate;
     const fixedSelection = selectCandidate({
@@ -1146,7 +1230,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
         allowAutomaticSearch: false,
         allowAggressiveStrongLocated: false
     });
-    const automaticSelection = input.allowAdaptiveSearch === false
+    let automaticSelection = input.allowAdaptiveSearch === false
         ? fixedSelection
         : selectCandidate({
             ...createSelectorRequest(input),
@@ -1161,14 +1245,17 @@ export function collectInitialWatermarkCandidates(input = {}) {
             automaticSelection
         });
     const potentialV2MediumRescueTrial = v2MediumRescue?.trial ?? null;
+    if (automaticSelection !== fixedSelection && !v2MediumRescue?.strongGeometry) {
+        automaticSelection = refineV2LocalSelection(input, automaticSelection);
+    }
     const fixedPresenceWitness = findWatermarkPresenceWitness(
         fixedSelection,
         input.originalImageData
     );
-    const automaticPresenceWitness = findWatermarkPresenceWitness(
-        automaticSelection,
-        input.originalImageData
-    );
+    const verifiedLocalTrial = automaticSelection.selectedTrial?.provenance?.verifiedV2LocalGeometry === true
+        ? automaticSelection.selectedTrial : null;
+    const automaticPresenceWitness = verifiedLocalTrial ??
+        findWatermarkPresenceWitness(automaticSelection, input.originalImageData);
     const normalPresenceConfirmed = Boolean(
         fixedPresenceWitness || automaticPresenceWitness
     );
@@ -1190,7 +1277,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
             automaticSelection,
             input.originalImageData
         ) ??
-        (v2MediumRescue?.strongGeometry ? confirmedV2MediumRescueTrial : null);
+        (v2MediumRescue?.strongGeometry ? confirmedV2MediumRescueTrial : null) ?? verifiedLocalTrial;
     let presenceConfirmed = Boolean(
         normalPresenceConfirmed || confirmedV2MediumRescueTrial
     );

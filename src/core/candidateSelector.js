@@ -2017,7 +2017,7 @@ function shouldPreferPreviewAnchorCandidate(currentBest, candidate) {
         candidateSpatial >= currentSpatial + 0.05;
 }
 
-function findBestTemplateWarp({
+export function findBestTemplateWarp({
     originalImageData,
     alphaMap,
     position,
