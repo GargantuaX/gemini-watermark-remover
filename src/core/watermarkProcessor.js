@@ -6335,6 +6335,6 @@ export function processWatermarkImageData(imageData, options = {}) {
                 ? instrumentationByCandidateId.get(selectedCandidateId)?.at(-1)
                 : instrumentationByCandidateId.get(selectedCandidateId)?.[0]) ?? null
     });
-    refineV2MediumEdge(imageData, finalized.imageData, finalized.meta);
+    refineV2MediumEdge(imageData, finalized.imageData, finalized.meta, options.alpha48);
     return finalized;
 }

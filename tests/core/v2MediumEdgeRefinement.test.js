@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { refineV2MediumEdge } from '../../src/core/v2MediumEdgeRefinement.js';
-import { interpolateAlphaMap } from '../../src/core/adaptiveDetector.js';
+import { interpolateAlphaMap, warpAlphaMap } from '../../src/core/adaptiveDetector.js';
 import { removeWatermark } from '../../src/core/blendModes.js';
 import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
 import { applySyntheticWatermark } from './syntheticWatermarkTestUtils.js';
@@ -79,4 +79,28 @@ test('shared V2 edge fit leaves a well-matched V2 alpha and other routes alone',
     refineV2MediumEdge(other.source, other.baseline, other.meta);
     assert.equal(other.meta.edgeRefinement, undefined);
     assert.deepEqual(other.baseline.data, unrefined);
+});
+
+test('verified local V2 alignment reduces contour error without editing additional pixels', () => {
+    const alpha = getEmbeddedAlphaMap(48);
+    const shifted = warpAlphaMap(alpha, 48, { dx: -0.25, dy: 0.5, scale: 0.99 });
+    const { truth, source, meta } = makeSample(shifted.map(value => value * 0.7));
+    const output = { ...source, data: source.data.slice() };
+    removeWatermark(output, alpha, position, { alphaGain: 0.7 });
+    const previous = output.data.slice();
+    const priorError = error(output, truth);
+    meta.source = 'standard+catalog+local-v2-verified-48';
+    meta.alphaGain = 0.7;
+
+    refineV2MediumEdge(source, output, meta, alpha);
+
+    assert.match(meta.source, /v2-local-alignment$/);
+    assert.ok(error(output, truth) < priorError);
+    assert.deepEqual(meta.position, position);
+    assert.equal(meta.alphaGain, 0.7);
+    for (let i = 0; i < source.data.length; i += 4) {
+        const unchanged = [0, 1, 2].every(channel => source.data[i + channel] === previous[i + channel]);
+        if (unchanged) assert.equal(output.data[i] === previous[i] && output.data[i + 1] === previous[i + 1] &&
+            output.data[i + 2] === previous[i + 2], true);
+    }
 });
