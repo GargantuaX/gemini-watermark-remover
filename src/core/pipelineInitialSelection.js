@@ -1245,6 +1245,48 @@ function createNearbyV2MediumSourceWitness(input) {
     return trial?.damage?.safe === true ? trial : null;
 }
 
+function createWeakV2SmallSourceWitness(input, fixedSelection, automaticSelection) {
+    const image = input.originalImageData;
+    if (input.allowAdaptiveSearch === false || image?.width !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT ||
+        image.height !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH) return null;
+
+    const seed = [...(fixedSelection.candidatePool ?? []), ...(automaticSelection.candidatePool ?? [])]
+        .find(trial => isConfirmedV2SmallSelection(trial) && trial.provenance?.localShift !== true &&
+            trial.provenance?.darkPolarity !== true && trial.alphaMap?.length === 36 ** 2 &&
+            trial.position?.width === 36 && trial.position.height === 36 &&
+            trial.position.x === image.width - 132 && trial.position.y === image.height - 132);
+    if (!seed) return null;
+
+    const witness = measureOutputResidualLocalization({
+        imageData: image,
+        position: seed.position,
+        alphaMap: seed.alphaMap,
+        decoyShifts: EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS
+    });
+    if (!(witness.gradientSignedTarget > 0) || witness.spatialLocalProminence < MIN_LOCALIZED_PEAK_PROMINENCE) return null;
+
+    // This witness localizes a weak mark at the catalog anchor. Prefer the
+    // least correction that passes the regular restoration and damage gates.
+    const sourceWitnessReason = 'weak-v2-small-source-witness';
+    const baselineNearBlackRatio = calculateNearBlackRatio(image, seed.position);
+    const weakGains = (input.alphaGainCandidates ?? []).filter(gain => gain > 0 && gain < 1).sort((a, b) => a - b);
+    for (const alphaGain of weakGains) {
+        const trial = evaluateRestorationCandidate({
+            originalImageData: image,
+            alphaMap: seed.alphaMap,
+            position: seed.position,
+            config: seed.config,
+            source: `standard+${sourceWitnessReason}`,
+            baselineNearBlackRatio,
+            alphaGain,
+            provenance: {...seed.provenance, sourceWitnessRescue: true, sourceWitnessReason},
+            includeImageData: false
+        });
+        if (trial?.accepted && trial.damage?.safe === true) return trial;
+    }
+    return null;
+}
+
 export function collectInitialWatermarkCandidates(input = {}) {
     const selectCandidate = input.selectCandidate ?? selectInitialCandidate;
     const fixedSelection = selectCandidate({
@@ -1385,7 +1427,8 @@ export function collectInitialWatermarkCandidates(input = {}) {
                 )
             ));
     if (!presenceConfirmed && !sourceWitnessRescueTrial && bestEffortSelections.length === 0) {
-        sourceWitnessRescueTrial = createNearbyV2MediumSourceWitness(input);
+        sourceWitnessRescueTrial = createNearbyV2MediumSourceWitness(input) ??
+            createWeakV2SmallSourceWitness(input, fixedSelection, automaticSelection);
     }
     const bestEffortFallback = !presenceConfirmed && Boolean(
         sourceWitnessRescueTrial ||
