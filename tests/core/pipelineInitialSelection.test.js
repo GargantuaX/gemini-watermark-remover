@@ -55,6 +55,23 @@ function applyWhiteWatermark(imageData, alphaMap, position) {
     }
 }
 
+test('empty landscape selection recovers a verified off-anchor 48px V2 contour', () => {
+    const input = createBaseInput(() => ({selectedTrial: null, candidatePool: [], source: 'skipped'}));
+    input.originalImageData = createFlatImageData(1376, 768);
+    input.alpha48 = getEmbeddedAlphaMap(48);
+    input.alphaGainCandidates = [0.7, 0.85, 1];
+    input.getAlphaMap = getEmbeddedAlphaMap;
+    const position = {x: 1249, y: 643, width: 48, height: 48};
+    const alpha = interpolateAlphaMap(getEmbeddedAlphaMap('36-v2'), 36, 48).map(value => value * 0.85);
+
+    assert.equal(collectInitialWatermarkCandidates(input).hypotheses.length, 0);
+    applyWhiteWatermark(input.originalImageData, alpha, position);
+    const result = collectInitialWatermarkCandidates(input);
+    assert.equal(result.bestEffortReason, 'nearby-v2-medium-source-witness');
+    assert.deepEqual(result.hypotheses[0].position, position);
+    assert.equal(collectInitialWatermarkCandidates({...input, allowAdaptiveSearch: false}).hypotheses.length, 0);
+});
+
 function applyBlackWatermark(imageData, alphaMap, position) {
     for (let y = 0; y < position.height; y++) {
         for (let x = 0; x < position.width; x++) {

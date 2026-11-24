@@ -1150,7 +1150,7 @@ function isWhiteV2LocalTrial(trial) {
         size >= V2_LOCAL_MIN_SEED_SIZE && size < CONFIRMED_V2_MEDIUM_LOGO_SIZE;
 }
 
-function createVerifiedV2LocalTrial(input, seed, position) {
+function createVerifiedV2LocalTrial(input, position, alphaMap, source, provenance) {
     const image = input.originalImageData;
     const config = {
         logoSize: position.width,
@@ -1158,38 +1158,30 @@ function createVerifiedV2LocalTrial(input, seed, position) {
         marginBottom: image.height - position.y - position.height,
         alphaVariant: 'v2'
     };
-    const provenance = {
-        catalogVariant: true,
-        catalogEvidenceGate: seed.provenance.catalogEvidenceGate,
-        localShift: true,
-        alphaVariant: 'v2',
-        verifiedV2LocalGeometry: true
-    };
     const baselineNearBlackRatio = calculateNearBlackRatio(image, position);
-    const evaluateGain = (alphaMap, alphaGain, source) => evaluateRestorationCandidate({
+    const evaluateGain = (trialAlphaMap, alphaGain, trialSource) => evaluateRestorationCandidate({
         originalImageData: image,
-        alphaMap,
+        alphaMap: trialAlphaMap,
         position,
         config,
-        source,
+        source: trialSource,
         baselineNearBlackRatio,
         alphaGain,
         provenance,
         includeImageData: false
     });
     // Reuse the normal alpha alignment and validation at the verified location.
-    const source = 'standard+catalog+local-v2-verified-48';
-    const base = evaluateGain(input.alpha48, 1, source);
+    const base = evaluateGain(alphaMap, 1, source);
     const warp = findBestTemplateWarp({
         originalImageData: image,
-        alphaMap: input.alpha48,
+        alphaMap,
         position,
         baselineSpatialScore: base.originalSpatialScore,
         baselineGradientScore: base.originalGradientScore
     });
     let best = null;
     for (const gain of new Set([1, ...(input.alphaGainCandidates ?? [])])) {
-        const trial = gain === 1 ? base : evaluateGain(input.alpha48, gain, source);
+        const trial = gain === 1 ? base : evaluateGain(alphaMap, gain, source);
         best = pickBetterCandidate(best, trial, 0.002);
         if (warp) best = pickBetterCandidate(best, evaluateGain(warp.alphaMap, gain, `${source}+warp`), 0.002);
     }
@@ -1207,7 +1199,13 @@ function refineV2LocalSelection(input, selection) {
 
     const {position, seedVerified} = findVerifiedV2LocalGeometry(image, seed.position);
     const verifiedTrial = position?.width === CONFIRMED_V2_MEDIUM_LOGO_SIZE
-        ? createVerifiedV2LocalTrial(input, seed, position) : null;
+        ? createVerifiedV2LocalTrial(input, position, input.alpha48, 'standard+catalog+local-v2-verified-48', {
+            catalogVariant: true,
+            catalogEvidenceGate: seed.provenance.catalogEvidenceGate,
+            localShift: true,
+            alphaVariant: 'v2',
+            verifiedV2LocalGeometry: true
+        }) : null;
     const selectedTrial = verifiedTrial ?? (seedVerified ? seed : null);
     return {
         ...selection,
@@ -1221,6 +1219,30 @@ function refineV2LocalSelection(input, selection) {
         alphaGain: selectedTrial?.alphaGain ?? selection.alphaGain,
         templateWarp: verifiedTrial ? verifiedTrial.templateWarp ?? null : selection.templateWarp
     };
+}
+
+function createNearbyV2MediumSourceWitness(input) {
+    const image = input.originalImageData;
+    if (input.allowAdaptiveSearch === false || image?.width !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT ||
+        image.height !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH) return null;
+    const smallAlpha = input.getAlphaMap?.('36-v2');
+    if (smallAlpha?.length !== 36 ** 2) return null;
+    const size = CONFIRMED_V2_MEDIUM_LOGO_SIZE;
+    const inset = CONFIRMED_V2_MEDIUM_MARGIN + size;
+    const anchor = {x: image.width - inset, y: image.height - inset, width: size, height: size};
+    const {position} = findVerifiedV2LocalGeometry(image, anchor);
+    if (position?.width !== size) return null;
+
+    const alphaMap = interpolateAlphaMap(smallAlpha, 36, size);
+    const trial = createVerifiedV2LocalTrial(input, position, alphaMap, 'standard+nearby-v2-medium-source-witness', {
+        catalogVariant: true,
+        catalogEvidenceGate: 'medium',
+        localShift: true,
+        alphaVariant: 'v2',
+        sourceWitnessRescue: true,
+        sourceWitnessReason: 'nearby-v2-medium-source-witness'
+    });
+    return trial?.damage?.safe === true ? trial : null;
 }
 
 export function collectInitialWatermarkCandidates(input = {}) {
@@ -1347,7 +1369,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
         automaticSelection,
         catalogPriorConfig: input.catalogPriorConfig
     });
-    const sourceWitnessRescueTrial =
+    let sourceWitnessRescueTrial =
         exact48R96SourceWitnessRescueTrial ??
         exact96SourceWitnessTrial ??
         createPlaneSourceWitnessTrial(input, fixedSelection, automaticSelection);
@@ -1362,6 +1384,9 @@ export function collectInitialWatermarkCandidates(input = {}) {
                     input.originalImageData
                 )
             ));
+    if (!presenceConfirmed && !sourceWitnessRescueTrial && bestEffortSelections.length === 0) {
+        sourceWitnessRescueTrial = createNearbyV2MediumSourceWitness(input);
+    }
     const bestEffortFallback = !presenceConfirmed && Boolean(
         sourceWitnessRescueTrial ||
         bestEffortSelections.length > 0
