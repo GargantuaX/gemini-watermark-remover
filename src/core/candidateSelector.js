@@ -4,8 +4,7 @@ import {
     computeRegionSpatialCorrelation,
     detectAdaptiveWatermarkRegion,
     interpolateAlphaMap,
-    shouldAttemptAdaptiveFallback,
-    warpAlphaMap
+    shouldAttemptAdaptiveFallback
 } from './adaptiveDetector.js';
 import {
     assessReferenceTextureAlignment,
@@ -40,6 +39,7 @@ import {
     resolveGeminiWatermarkSearchCatalogEntries
 } from './geminiSizeCatalog.js';
 import { repairDarkOutlineContour } from './darkOutlineContourRepair.js';
+import { findBestTemplateWarp } from './templateAlignment.js';
 
 const MAX_NEAR_BLACK_RATIO_INCREASE = 0.05;
 const VALIDATION_MIN_IMPROVEMENT = 0.08;
@@ -158,8 +158,6 @@ const OUTLINE_DARK_MIN_BODY_GAIN = 0.5;
 const OUTLINE_DARK_BODY_GAIN_GRADIENT_WEIGHT = 0.6;
 const OUTLINE_DARK_BODY_GAIN_MIN_COST_IMPROVEMENT = 0.015;
 const OUTLINE_DARK_BODY_GAIN_SEARCH_MAX_FULL_BODY_SPATIAL = -0.05;
-const TEMPLATE_ALIGN_SHIFTS = [-0.5, -0.25, 0, 0.25, 0.5];
-const TEMPLATE_ALIGN_SCALES = [0.99, 1, 1.01];
 const STANDARD_NEARBY_SHIFTS = [-12, -8, -4, 0, 4, 8, 12];
 const STANDARD_FINE_LOCAL_SHIFTS = [-2, -1, 0, 1, 2];
 const STANDARD_SIZE_JITTERS = [-12, -10, -8, -6, -4, -2, 2, 4, 6, 8, 10, 12];
@@ -2017,65 +2015,6 @@ function shouldPreferPreviewAnchorCandidate(currentBest, candidate) {
         candidateSpatial >= currentSpatial + 0.05;
 }
 
-export function findBestTemplateWarp({
-    originalImageData,
-    alphaMap,
-    position,
-    baselineSpatialScore,
-    baselineGradientScore,
-    shiftCandidates = TEMPLATE_ALIGN_SHIFTS,
-    scaleCandidates = TEMPLATE_ALIGN_SCALES
-}) {
-    const size = position.width;
-    if (!size || size <= 8) return null;
-
-    let best = {
-        spatialScore: baselineSpatialScore,
-        gradientScore: baselineGradientScore,
-        shift: { dx: 0, dy: 0, scale: 1 },
-        alphaMap
-    };
-
-    for (const scale of scaleCandidates) {
-        for (const dy of shiftCandidates) {
-            for (const dx of shiftCandidates) {
-                if (dx === 0 && dy === 0 && scale === 1) continue;
-                const warped = warpAlphaMap(alphaMap, size, { dx, dy, scale });
-                const spatialScore = computeRegionSpatialCorrelation({
-                    imageData: originalImageData,
-                    alphaMap: warped,
-                    region: { x: position.x, y: position.y, size }
-                });
-                const gradientScore = computeRegionGradientCorrelation({
-                    imageData: originalImageData,
-                    alphaMap: warped,
-                    region: { x: position.x, y: position.y, size }
-                });
-
-                const confidence =
-                    Math.max(0, spatialScore) * 0.7 +
-                    Math.max(0, gradientScore) * 0.3;
-                const bestConfidence =
-                    Math.max(0, best.spatialScore) * 0.7 +
-                    Math.max(0, best.gradientScore) * 0.3;
-
-                if (confidence > bestConfidence + 0.01) {
-                    best = {
-                        spatialScore,
-                        gradientScore,
-                        shift: { dx, dy, scale },
-                        alphaMap: warped
-                    };
-                }
-            }
-        }
-    }
-
-    const improvedSpatial = best.spatialScore >= baselineSpatialScore + 0.01;
-    const improvedGradient = best.gradientScore >= baselineGradientScore + 0.01;
-    return improvedSpatial || improvedGradient ? best : null;
-}
-
 function searchNearbyStandardCandidate({
     originalImageData,
     candidateSeeds,
@@ -3084,10 +3023,10 @@ function refineSelectedAnchorCandidate({
             baselineGradientScore: selectedTrial.originalGradientScore,
             shiftCandidates: selectedTrial.provenance?.previewAnchor === true
                 ? PREVIEW_TEMPLATE_ALIGN_SHIFTS
-                : TEMPLATE_ALIGN_SHIFTS,
+                : undefined,
             scaleCandidates: selectedTrial.provenance?.previewAnchor === true
                 ? PREVIEW_TEMPLATE_ALIGN_SCALES
-                : TEMPLATE_ALIGN_SCALES
+                : undefined
         })
         : null;
     if (warpCandidate) {

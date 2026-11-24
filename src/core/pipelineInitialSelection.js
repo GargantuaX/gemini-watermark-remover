@@ -1,6 +1,5 @@
 import {
     evaluateRestorationCandidate,
-    findBestTemplateWarp,
     pickBetterCandidate,
     selectInitialCandidate
 } from './candidateSelector.js';
@@ -20,6 +19,7 @@ import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.
 import { measureRowAlphaEvidence, supportsRowAlphaGain } from './rowAlphaEvidence.js';
 import { measurePlaneAlphaEvidence } from './planeAlphaEvidence.js';
 import { findVerifiedV2LocalGeometry } from './v2LocalGeometry.js';
+import { findBestTemplateWarp } from './templateAlignment.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
 const AGGRESSIVE_FALLBACK_MAX_NEAR_BLACK_INCREASE = 0.05;
