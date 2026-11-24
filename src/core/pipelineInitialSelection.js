@@ -18,7 +18,7 @@ import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
 import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.js';
 import { measureRowAlphaEvidence, supportsRowAlphaGain } from './rowAlphaEvidence.js';
 import { measurePlaneAlphaEvidence } from './planeAlphaEvidence.js';
-import { findVerifiedV2LocalGeometry } from './v2LocalGeometry.js';
+import { findVerifiedV2LocalGeometry, verifyFixedV2WhiteSource } from './v2LocalGeometry.js';
 import { findBestTemplateWarp } from './templateAlignment.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
@@ -804,6 +804,31 @@ function hasLocalizedPreviewRefinement(trial, originalImageData) {
         witness.gradientPercentile === 1;
 }
 
+function isFixedLandscapeWhiteCatalogTrial(trial, image, size) {
+    const position = trial?.position;
+    const margin = 96;
+    return image?.width === CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT &&
+        image.height === CONFIRMED_V2_MEDIUM_IMAGE_WIDTH &&
+        position?.width === size && position.height === size &&
+        position.x === image.width - margin - size &&
+        position.y === image.height - margin - size &&
+        trial.provenance?.darkPolarity !== true;
+}
+
+function hasFixedSmallWhitePolarity(trial, image) {
+    return trial?.provenance?.catalogFamily !== 'gemini-v2-small' ||
+        trial.provenance.localShift === true ||
+        !isFixedLandscapeWhiteCatalogTrial(trial, image, 36) ||
+        verifyFixedV2WhiteSource(image, trial.position);
+}
+
+function hasDefaultMediumWhiteOutline(trial, image) {
+    return trial?.provenance?.catalogFamily !== 'known-current-variant' ||
+        !(trial.alphaGain < 1) ||
+        !isFixedLandscapeWhiteCatalogTrial(trial, image, 48) ||
+        verifyFixedV2WhiteSource(image, trial.position, {requireLocalPeak: true});
+}
+
 function isSafeSelectorBestEffortSelection(selection, originalImageData) {
     const trial = selection?.selectedTrial;
     const isSmallV2 =
@@ -825,6 +850,8 @@ function isSafeSelectorBestEffortSelection(selection, originalImageData) {
         !hasNonlocalizedSpatialCollision(trial, originalImageData) &&
         hasMeasurableRestorationEffect(trial) &&
         hasCompleteBestEffortTrial(trial, originalImageData) &&
+        hasFixedSmallWhitePolarity(trial, originalImageData) &&
+        hasDefaultMediumWhiteOutline(trial, originalImageData) &&
         (
             trial.provenance?.previewAnchorLocalRefine !== true ||
             hasLocalizedPreviewRefinement(trial, originalImageData)
@@ -863,7 +890,7 @@ function hasValidatedRestorationEvidence(trial) {
         originalSpatial - processedSpatial >= MIN_VALIDATED_SPATIAL_SUPPRESSION;
 }
 
-function hasEvidenceGatedSmallV2CatalogPresence(trial) {
+function hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData) {
     if (
         trial?.provenance?.alphaVariant !== 'v2' ||
         trial?.provenance?.catalogFamily !== 'gemini-v2-small' ||
@@ -877,7 +904,8 @@ function hasEvidenceGatedSmallV2CatalogPresence(trial) {
         Number.isFinite(processedSpatial) &&
         originalSpatial >= SMALL_V2_MIN_SPATIAL_SCORE &&
         processedSpatial <= SMALL_V2_MAX_ABS_SPATIAL_RESIDUAL &&
-        originalSpatial - processedSpatial >= SMALL_V2_MIN_SPATIAL_SUPPRESSION;
+        originalSpatial - processedSpatial >= SMALL_V2_MIN_SPATIAL_SUPPRESSION &&
+        hasFixedSmallWhitePolarity(trial, originalImageData);
 }
 
 function measurePresenceLocalization(originalImageData, trial) {
@@ -989,7 +1017,7 @@ function hasSelectorConfirmedTarget(selection, originalImageData) {
                 hasCompleteRestorationDecision &&
                 (
                     hasStrongRestorationEvidence(trial) ||
-                    hasEvidenceGatedSmallV2CatalogPresence(trial)
+                    hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData)
                 )
             );
     }
@@ -1000,7 +1028,7 @@ function hasSelectorConfirmedTarget(selection, originalImageData) {
         return true;
     }
     return hasStrongRestorationEvidence(trial) ||
-        hasEvidenceGatedSmallV2CatalogPresence(trial) ||
+        hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData) ||
         (
             localizedPresence &&
             hasValidatedRestorationEvidence(trial)
@@ -1022,7 +1050,7 @@ function findEligiblePresenceTrial(selection, originalImageData) {
         }
         const localizedPresence = localization.localized;
         return hasStrongRestorationEvidence(trial) ||
-            hasEvidenceGatedSmallV2CatalogPresence(trial) || (
+            hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData) || (
             localizedPresence &&
             (directMatch || hasValidatedRestorationEvidence(trial))
         );

@@ -5,6 +5,7 @@ const MEDIUM_SIZE = 48;
 const SMALL_SIZE = 36;
 const BLUR_KERNEL = [1, 4, 6, 4, 1];
 const FOLDS = [[0, 3], [1, 2]];
+const WHOLE_PROFILE = [[0, 1, 2, 3]];
 const profilesBySize = new Map();
 
 function highPass(values, width, height) {
@@ -96,7 +97,7 @@ function measureSource(image, seed, maxRadius) {
     return {left, top, width, values: highPass(values, width, height)};
 }
 
-function score(source, probes, x, y) {
+function score(source, probes, x, y, groups = FOLDS) {
     const sums = Array.from({length: 4}, () => [0, 0, 0]);
     const start = (y - source.top) * source.width + x - source.left;
     for (const {x: dx, y: dy, weight, quadrant} of probes) {
@@ -108,17 +109,24 @@ function score(source, probes, x, y) {
     }
     return {
         allPositive: sums.every(sum => sum[0] > 0),
-        folds: FOLDS.map(([a, b]) => {
-            const [dotA, profileA, sourceA] = sums[a];
-            const [dotB, profileB, sourceB] = sums[b];
-            return (dotA + dotB) / Math.sqrt((profileA + profileB) * (sourceA + sourceB)) || 0;
+        folds: groups.map(group => {
+            let dot = 0;
+            let profilePower = 0;
+            let sourcePower = 0;
+            for (const quadrant of group) {
+                const [quadrantDot, quadrantProfile, quadrantSource] = sums[quadrant];
+                dot += quadrantDot;
+                profilePower += quadrantProfile;
+                sourcePower += quadrantSource;
+            }
+            return dot / Math.sqrt(profilePower * sourcePower) || 0;
         })
     };
 }
 
-function verifyAgainstControls(image, source, profile, position, target) {
+function verifyAgainstControls(image, source, profile, position, target, groups = FOLDS) {
     const {x, y, width: size} = position;
-    const rotation = score(source, profile.rotation, x, y).folds;
+    const rotation = score(source, profile.rotation, x, y, groups).folds;
     let margin = Math.min(...target.folds.map((value, fold) => value - rotation[fold]));
     if (margin <= 0) return null;
     for (const step of [Math.max(5, Math.round(size / 8)), Math.round(size / 4), size]) {
@@ -126,13 +134,23 @@ function verifyAgainstControls(image, source, profile, position, target) {
             for (const dy of [-step, 0, step]) {
                 if ((!dx && !dy) || x + dx < 0 || y + dy < 0 ||
                     x + dx + size > image.width || y + dy + size > image.height) continue;
-                const control = score(source, profile.target, x + dx, y + dy).folds;
+                const control = score(source, profile.target, x + dx, y + dy, groups).folds;
                 margin = Math.min(margin, ...target.folds.map((value, fold) => value - control[fold]));
                 if (margin <= 0) return null;
             }
         }
     }
     return {margin, folds: target.folds};
+}
+
+export function verifyFixedV2WhiteSource(image, position, {requireLocalPeak = false} = {}) {
+    const source = measureSource(image, position, 0);
+    const {x, y, width} = position;
+    return getProfiles(width).every(profile => {
+        const target = score(source, profile.target, x, y, WHOLE_PROFILE);
+        return target.folds[0] > 0 && (!requireLocalPeak ||
+            verifyAgainstControls(image, source, profile, position, target, WHOLE_PROFILE) !== null);
+    });
 }
 
 function isBetter(candidate, previous) {
