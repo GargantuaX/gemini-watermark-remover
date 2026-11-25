@@ -1,6 +1,13 @@
 # Changelog
 
-## 1.0.46 - Unreleased
+## 1.0.47 - 2026-11-24
+
+- Improve 48×48 V2 watermark localization and edge cleanup on supported landscape 1376×768 images (#181, #184, #187).
+- Check original-image evidence before applying weak 36×36 and low-gain 48×48 catalog candidates, reducing changes to unwatermarked textures.
+- Keep area-averaged alpha maps and diagnostics consistent when a downsampled 96×96 candidate is run again.
+- Recover video export from transient decode failures and bounded WebCodecs resource reclaim, including when Chrome puts the tab in the background (#178).
+
+## 1.0.46 - 2026-10-02
 
 - Retain an existing strongly localized V2 medium candidate on 768×1376 images when
   a weaker candidate at another position obscures it (#172, #174).
