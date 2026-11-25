@@ -127,6 +127,15 @@ export interface WatermarkMeta {
     passCount: number;
     attemptedPassCount: number;
     passStopReason: string | null;
+    edgeRefinement?: {
+        mix: number;
+        changedPixels: number;
+        beforeLoss: [number, number];
+        afterLoss: [number, number];
+        beforeSpatialScore: number | null;
+        beforeGradientScore: number | null;
+        measurementProfile: 'v2-medium';
+    };
     selectionDebug?: WatermarkSelectionDebug | null;
     presenceConfirmed?: boolean;
     bestEffort?: boolean;

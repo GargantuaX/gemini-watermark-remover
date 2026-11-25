@@ -1,5 +1,6 @@
 import {
     evaluateRestorationCandidate,
+    pickBetterCandidate,
     selectInitialCandidate
 } from './candidateSelector.js';
 import {
@@ -17,6 +18,8 @@ import { hasReliableStandardWatermarkSignal } from './watermarkPresence.js';
 import { shouldPreferFullStrengthNewMarginVariant } from './candidateEvaluation.js';
 import { measureRowAlphaEvidence, supportsRowAlphaGain } from './rowAlphaEvidence.js';
 import { measurePlaneAlphaEvidence } from './planeAlphaEvidence.js';
+import { findVerifiedV2LocalGeometry, verifyFixedV2WhiteSource } from './v2LocalGeometry.js';
+import { findBestTemplateWarp } from './templateAlignment.js';
 
 const AGGRESSIVE_FALLBACK_MAX_ABS_SPATIAL = 0.22;
 const AGGRESSIVE_FALLBACK_MAX_NEAR_BLACK_INCREASE = 0.05;
@@ -53,6 +56,7 @@ const CONFIRMED_V2_MEDIUM_IMAGE_WIDTH = 768;
 const CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT = 1376;
 const CONFIRMED_V2_MEDIUM_LOGO_SIZE = 48;
 const CONFIRMED_V2_MEDIUM_MARGIN = 73;
+const V2_LOCAL_MIN_SEED_SIZE = 26;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_SPATIAL = 0.4;
 const CONFIRMED_V2_MEDIUM_MIN_RESCUE_GRADIENT = 0.5;
 const CONFIRMED_V2_SMALL_PRIOR_MIN_SPATIAL = 0.3;
@@ -800,6 +804,31 @@ function hasLocalizedPreviewRefinement(trial, originalImageData) {
         witness.gradientPercentile === 1;
 }
 
+function isFixedLandscapeWhiteCatalogTrial(trial, image, size) {
+    const position = trial?.position;
+    const margin = 96;
+    return image?.width === CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT &&
+        image.height === CONFIRMED_V2_MEDIUM_IMAGE_WIDTH &&
+        position?.width === size && position.height === size &&
+        position.x === image.width - margin - size &&
+        position.y === image.height - margin - size &&
+        trial.provenance?.darkPolarity !== true;
+}
+
+function hasFixedSmallWhitePolarity(trial, image) {
+    return trial?.provenance?.catalogFamily !== 'gemini-v2-small' ||
+        trial.provenance.localShift === true ||
+        !isFixedLandscapeWhiteCatalogTrial(trial, image, 36) ||
+        verifyFixedV2WhiteSource(image, trial.position);
+}
+
+function hasDefaultMediumWhiteOutline(trial, image) {
+    return trial?.provenance?.catalogFamily !== 'known-current-variant' ||
+        !(trial.alphaGain < 1) ||
+        !isFixedLandscapeWhiteCatalogTrial(trial, image, 48) ||
+        verifyFixedV2WhiteSource(image, trial.position, {requireLocalPeak: true});
+}
+
 function isSafeSelectorBestEffortSelection(selection, originalImageData) {
     const trial = selection?.selectedTrial;
     const isSmallV2 =
@@ -821,6 +850,8 @@ function isSafeSelectorBestEffortSelection(selection, originalImageData) {
         !hasNonlocalizedSpatialCollision(trial, originalImageData) &&
         hasMeasurableRestorationEffect(trial) &&
         hasCompleteBestEffortTrial(trial, originalImageData) &&
+        hasFixedSmallWhitePolarity(trial, originalImageData) &&
+        hasDefaultMediumWhiteOutline(trial, originalImageData) &&
         (
             trial.provenance?.previewAnchorLocalRefine !== true ||
             hasLocalizedPreviewRefinement(trial, originalImageData)
@@ -859,7 +890,7 @@ function hasValidatedRestorationEvidence(trial) {
         originalSpatial - processedSpatial >= MIN_VALIDATED_SPATIAL_SUPPRESSION;
 }
 
-function hasEvidenceGatedSmallV2CatalogPresence(trial) {
+function hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData) {
     if (
         trial?.provenance?.alphaVariant !== 'v2' ||
         trial?.provenance?.catalogFamily !== 'gemini-v2-small' ||
@@ -873,7 +904,8 @@ function hasEvidenceGatedSmallV2CatalogPresence(trial) {
         Number.isFinite(processedSpatial) &&
         originalSpatial >= SMALL_V2_MIN_SPATIAL_SCORE &&
         processedSpatial <= SMALL_V2_MAX_ABS_SPATIAL_RESIDUAL &&
-        originalSpatial - processedSpatial >= SMALL_V2_MIN_SPATIAL_SUPPRESSION;
+        originalSpatial - processedSpatial >= SMALL_V2_MIN_SPATIAL_SUPPRESSION &&
+        hasFixedSmallWhitePolarity(trial, originalImageData);
 }
 
 function measurePresenceLocalization(originalImageData, trial) {
@@ -985,7 +1017,7 @@ function hasSelectorConfirmedTarget(selection, originalImageData) {
                 hasCompleteRestorationDecision &&
                 (
                     hasStrongRestorationEvidence(trial) ||
-                    hasEvidenceGatedSmallV2CatalogPresence(trial)
+                    hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData)
                 )
             );
     }
@@ -996,7 +1028,7 @@ function hasSelectorConfirmedTarget(selection, originalImageData) {
         return true;
     }
     return hasStrongRestorationEvidence(trial) ||
-        hasEvidenceGatedSmallV2CatalogPresence(trial) ||
+        hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData) ||
         (
             localizedPresence &&
             hasValidatedRestorationEvidence(trial)
@@ -1018,7 +1050,7 @@ function findEligiblePresenceTrial(selection, originalImageData) {
         }
         const localizedPresence = localization.localized;
         return hasStrongRestorationEvidence(trial) ||
-            hasEvidenceGatedSmallV2CatalogPresence(trial) || (
+            hasEvidenceGatedSmallV2CatalogPresence(trial, originalImageData) || (
             localizedPresence &&
             (directMatch || hasValidatedRestorationEvidence(trial))
         );
@@ -1139,6 +1171,150 @@ function findWatermarkPresenceWitness(selection, originalImageData) {
         null;
 }
 
+function isWhiteV2LocalTrial(trial) {
+    const size = trial?.position?.width;
+    return trial?.provenance?.localShift === true &&
+        trial.config?.alphaVariant === 'v2' && trial.provenance.darkPolarity !== true &&
+        size >= V2_LOCAL_MIN_SEED_SIZE && size < CONFIRMED_V2_MEDIUM_LOGO_SIZE;
+}
+
+function createVerifiedV2LocalTrial(input, position, alphaMap, source, provenance) {
+    const image = input.originalImageData;
+    const config = {
+        logoSize: position.width,
+        marginRight: image.width - position.x - position.width,
+        marginBottom: image.height - position.y - position.height,
+        alphaVariant: 'v2'
+    };
+    const baselineNearBlackRatio = calculateNearBlackRatio(image, position);
+    const evaluateGain = (trialAlphaMap, alphaGain, trialSource) => evaluateRestorationCandidate({
+        originalImageData: image,
+        alphaMap: trialAlphaMap,
+        position,
+        config,
+        source: trialSource,
+        baselineNearBlackRatio,
+        alphaGain,
+        provenance,
+        includeImageData: false
+    });
+    // Reuse the normal alpha alignment and validation at the verified location.
+    const base = evaluateGain(alphaMap, 1, source);
+    const warp = findBestTemplateWarp({
+        originalImageData: image,
+        alphaMap,
+        position,
+        baselineSpatialScore: base.originalSpatialScore,
+        baselineGradientScore: base.originalGradientScore
+    });
+    let best = null;
+    for (const gain of new Set([1, ...(input.alphaGainCandidates ?? [])])) {
+        const trial = gain === 1 ? base : evaluateGain(alphaMap, gain, source);
+        best = pickBetterCandidate(best, trial, 0.002);
+        if (warp) best = pickBetterCandidate(best, evaluateGain(warp.alphaMap, gain, `${source}+warp`), 0.002);
+    }
+    if (best && best.alphaMap === warp?.alphaMap) best.templateWarp = warp.shift;
+    return best;
+}
+
+function refineV2LocalSelection(input, selection) {
+    const image = input.originalImageData;
+    const seed = selection.selectedTrial;
+    // The 48px search was validated on the landscape V2 1K layout.
+    if (image?.width !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT || image.height !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH ||
+        !isWhiteV2LocalTrial(seed) ||
+        input.alpha48?.length !== CONFIRMED_V2_MEDIUM_LOGO_SIZE ** 2) return selection;
+
+    const {position, seedVerified} = findVerifiedV2LocalGeometry(image, seed.position);
+    const verifiedTrial = position?.width === CONFIRMED_V2_MEDIUM_LOGO_SIZE
+        ? createVerifiedV2LocalTrial(input, position, input.alpha48, 'standard+catalog+local-v2-verified-48', {
+            catalogVariant: true,
+            catalogEvidenceGate: seed.provenance.catalogEvidenceGate,
+            localShift: true,
+            alphaVariant: 'v2',
+            verifiedV2LocalGeometry: true
+        }) : null;
+    const selectedTrial = verifiedTrial ?? (seedVerified ? seed : null);
+    return {
+        ...selection,
+        selectedTrial,
+        candidatePool: (selection.candidatePool ?? []).filter(trial => !isWhiteV2LocalTrial(trial)),
+        source: selectedTrial?.source ?? 'skipped',
+        decisionTier: selectedTrial ? selection.decisionTier : 'insufficient',
+        position: selectedTrial?.position ?? selection.position,
+        config: selectedTrial?.config ?? selection.config,
+        alphaMap: selectedTrial?.alphaMap ?? selection.alphaMap,
+        alphaGain: selectedTrial?.alphaGain ?? selection.alphaGain,
+        templateWarp: verifiedTrial ? verifiedTrial.templateWarp ?? null : selection.templateWarp
+    };
+}
+
+function createNearbyV2MediumSourceWitness(input) {
+    const image = input.originalImageData;
+    if (input.allowAdaptiveSearch === false || image?.width !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT ||
+        image.height !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH) return null;
+    const smallAlpha = input.getAlphaMap?.('36-v2');
+    if (smallAlpha?.length !== 36 ** 2) return null;
+    const size = CONFIRMED_V2_MEDIUM_LOGO_SIZE;
+    const inset = CONFIRMED_V2_MEDIUM_MARGIN + size;
+    const anchor = {x: image.width - inset, y: image.height - inset, width: size, height: size};
+    const {position} = findVerifiedV2LocalGeometry(image, anchor);
+    if (position?.width !== size) return null;
+
+    const alphaMap = interpolateAlphaMap(smallAlpha, 36, size);
+    const trial = createVerifiedV2LocalTrial(input, position, alphaMap, 'standard+nearby-v2-medium-source-witness', {
+        catalogVariant: true,
+        catalogEvidenceGate: 'medium',
+        localShift: true,
+        alphaVariant: 'v2',
+        sourceWitnessRescue: true,
+        sourceWitnessReason: 'nearby-v2-medium-source-witness'
+    });
+    return trial?.damage?.safe === true ? trial : null;
+}
+
+function createWeakV2SmallSourceWitness(input, fixedSelection, automaticSelection) {
+    const image = input.originalImageData;
+    if (input.allowAdaptiveSearch === false || image?.width !== CONFIRMED_V2_MEDIUM_IMAGE_HEIGHT ||
+        image.height !== CONFIRMED_V2_MEDIUM_IMAGE_WIDTH) return null;
+
+    const seed = [...(fixedSelection.candidatePool ?? []), ...(automaticSelection.candidatePool ?? [])]
+        .find(trial => isConfirmedV2SmallSelection(trial) && trial.provenance?.localShift !== true &&
+            trial.provenance?.darkPolarity !== true && trial.alphaMap?.length === 36 ** 2 &&
+            trial.position?.width === 36 && trial.position.height === 36 &&
+            trial.position.x === image.width - 132 && trial.position.y === image.height - 132);
+    if (!seed) return null;
+
+    const witness = measureOutputResidualLocalization({
+        imageData: image,
+        position: seed.position,
+        alphaMap: seed.alphaMap,
+        decoyShifts: EXACT_48_R96_SOURCE_WITNESS_DECOY_SHIFTS
+    });
+    if (!(witness.gradientSignedTarget > 0) || witness.spatialLocalProminence < MIN_LOCALIZED_PEAK_PROMINENCE) return null;
+
+    // This witness localizes a weak mark at the catalog anchor. Prefer the
+    // least correction that passes the regular restoration and damage gates.
+    const sourceWitnessReason = 'weak-v2-small-source-witness';
+    const baselineNearBlackRatio = calculateNearBlackRatio(image, seed.position);
+    const weakGains = (input.alphaGainCandidates ?? []).filter(gain => gain > 0 && gain < 1).sort((a, b) => a - b);
+    for (const alphaGain of weakGains) {
+        const trial = evaluateRestorationCandidate({
+            originalImageData: image,
+            alphaMap: seed.alphaMap,
+            position: seed.position,
+            config: seed.config,
+            source: `standard+${sourceWitnessReason}`,
+            baselineNearBlackRatio,
+            alphaGain,
+            provenance: {...seed.provenance, sourceWitnessRescue: true, sourceWitnessReason},
+            includeImageData: false
+        });
+        if (trial?.accepted && trial.damage?.safe === true) return trial;
+    }
+    return null;
+}
+
 export function collectInitialWatermarkCandidates(input = {}) {
     const selectCandidate = input.selectCandidate ?? selectInitialCandidate;
     const fixedSelection = selectCandidate({
@@ -1146,7 +1322,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
         allowAutomaticSearch: false,
         allowAggressiveStrongLocated: false
     });
-    const automaticSelection = input.allowAdaptiveSearch === false
+    let automaticSelection = input.allowAdaptiveSearch === false
         ? fixedSelection
         : selectCandidate({
             ...createSelectorRequest(input),
@@ -1161,14 +1337,17 @@ export function collectInitialWatermarkCandidates(input = {}) {
             automaticSelection
         });
     const potentialV2MediumRescueTrial = v2MediumRescue?.trial ?? null;
+    if (automaticSelection !== fixedSelection && !v2MediumRescue?.strongGeometry) {
+        automaticSelection = refineV2LocalSelection(input, automaticSelection);
+    }
     const fixedPresenceWitness = findWatermarkPresenceWitness(
         fixedSelection,
         input.originalImageData
     );
-    const automaticPresenceWitness = findWatermarkPresenceWitness(
-        automaticSelection,
-        input.originalImageData
-    );
+    const verifiedLocalTrial = automaticSelection.selectedTrial?.provenance?.verifiedV2LocalGeometry === true
+        ? automaticSelection.selectedTrial : null;
+    const automaticPresenceWitness = verifiedLocalTrial ??
+        findWatermarkPresenceWitness(automaticSelection, input.originalImageData);
     const normalPresenceConfirmed = Boolean(
         fixedPresenceWitness || automaticPresenceWitness
     );
@@ -1190,7 +1369,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
             automaticSelection,
             input.originalImageData
         ) ??
-        (v2MediumRescue?.strongGeometry ? confirmedV2MediumRescueTrial : null);
+        (v2MediumRescue?.strongGeometry ? confirmedV2MediumRescueTrial : null) ?? verifiedLocalTrial;
     let presenceConfirmed = Boolean(
         normalPresenceConfirmed || confirmedV2MediumRescueTrial
     );
@@ -1260,7 +1439,7 @@ export function collectInitialWatermarkCandidates(input = {}) {
         automaticSelection,
         catalogPriorConfig: input.catalogPriorConfig
     });
-    const sourceWitnessRescueTrial =
+    let sourceWitnessRescueTrial =
         exact48R96SourceWitnessRescueTrial ??
         exact96SourceWitnessTrial ??
         createPlaneSourceWitnessTrial(input, fixedSelection, automaticSelection);
@@ -1275,6 +1454,10 @@ export function collectInitialWatermarkCandidates(input = {}) {
                     input.originalImageData
                 )
             ));
+    if (!presenceConfirmed && !sourceWitnessRescueTrial && bestEffortSelections.length === 0) {
+        sourceWitnessRescueTrial = createNearbyV2MediumSourceWitness(input) ??
+            createWeakV2SmallSourceWitness(input, fixedSelection, automaticSelection);
+    }
     const bestEffortFallback = !presenceConfirmed && Boolean(
         sourceWitnessRescueTrial ||
         bestEffortSelections.length > 0

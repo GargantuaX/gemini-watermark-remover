@@ -11,6 +11,7 @@ import {
     interpolateAlphaMap
 } from '../../src/core/adaptiveDetector.js';
 import { getEmbeddedAlphaMap } from '../../src/core/embeddedAlphaMaps.js';
+import { evaluateRestorationCandidate } from '../../src/core/candidateSelector.js';
 
 function createBaseInput(selectCandidate) {
     return {
@@ -54,6 +55,58 @@ function applyWhiteWatermark(imageData, alphaMap, position) {
         }
     }
 }
+
+test('empty landscape selection recovers a verified off-anchor 48px V2 contour', () => {
+    const input = createBaseInput(() => ({selectedTrial: null, candidatePool: [], source: 'skipped'}));
+    input.originalImageData = createFlatImageData(1376, 768);
+    input.alpha48 = getEmbeddedAlphaMap(48);
+    input.alphaGainCandidates = [0.7, 0.85, 1];
+    input.getAlphaMap = getEmbeddedAlphaMap;
+    const position = {x: 1249, y: 643, width: 48, height: 48};
+    const alpha = interpolateAlphaMap(getEmbeddedAlphaMap('36-v2'), 36, 48).map(value => value * 0.85);
+
+    assert.equal(collectInitialWatermarkCandidates(input).hypotheses.length, 0);
+    applyWhiteWatermark(input.originalImageData, alpha, position);
+    const result = collectInitialWatermarkCandidates(input);
+    assert.equal(result.bestEffortReason, 'nearby-v2-medium-source-witness');
+    assert.deepEqual(result.hypotheses[0].position, position);
+    assert.equal(collectInitialWatermarkCandidates({...input, allowAdaptiveSearch: false}).hypotheses.length, 0);
+});
+
+test('a localized fixed 36px source can recover a weak trial dropped at full gain', () => {
+    let seed;
+    const input = createBaseInput(() => ({selectedTrial: null, candidatePool: seed ? [seed] : [], source: 'skipped'}));
+    input.originalImageData = createFlatImageData(1376, 768);
+    input.alpha48 = getEmbeddedAlphaMap(48);
+    input.alphaGainCandidates = [0.45, 0.55, 1];
+    input.getAlphaMap = getEmbeddedAlphaMap;
+    const position = {x: 1244, y: 636, width: 36, height: 36};
+    const alpha = getEmbeddedAlphaMap('36-v2');
+    // A flat field makes the normal strong-geometry witness win before the weak path runs.
+    let state = 1403;
+    const {width, data} = input.originalImageData;
+    for (let y = 580; y < 740; y += 2) {
+        for (let x = 1180; x < 1340; x += 2) {
+            state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+            const value = 120 + 28 * (state / 2 ** 31 - 1);
+            for (const offset of [0, 4, width * 4, (width + 1) * 4]) {
+                data.set([value, value, value, 255], (y * width + x) * 4 + offset);
+            }
+        }
+    }
+    applyWhiteWatermark(input.originalImageData, alpha.map(value => value * 0.45), position);
+    seed = evaluateRestorationCandidate({
+        originalImageData: input.originalImageData, alphaMap: alpha, position, source: 'standard',
+        config: {logoSize: 36, marginRight: 96, marginBottom: 96, alphaVariant: 'v2'},
+        baselineNearBlackRatio: 0, alphaGain: 1, includeImageData: false
+    });
+
+    assert.equal(seed.accepted, false);
+    const result = collectInitialWatermarkCandidates(input);
+    assert.equal(result.bestEffortReason, 'weak-v2-small-source-witness');
+    assert.deepEqual(result.hypotheses[0].position, position);
+    assert.ok(result.hypotheses[0].alphaGain < 1);
+});
 
 function applyBlackWatermark(imageData, alphaMap, position) {
     for (let y = 0; y < position.height; y++) {
