@@ -17,6 +17,17 @@ const DEFAULT_EDGE_DENOISE_STRENGTH = 0.65;
 const DEFAULT_ALLENK_FDNCNN_SIGMA = 25;
 const DEFAULT_ALLENK_FDNCNN_REUSE_THRESHOLD = 6.5;
 
+// Soft residual cleanup replaces footprint pixels with an inpainted and blurred
+// copy. Over a flat background that hides the rim left by alpha-map error and
+// costs nothing, because there is no detail to lose. Over a detailed background
+// it wipes texture the reverse alpha blend already recovered, and the resulting
+// smudge reads far worse than the residual it was meant to hide - while the
+// residual itself is masked by that same detail. So scale the cleanup down by
+// how much detail surrounds the footprint, measured as the RMS of the local
+// high-pass luma outside it.
+const CLEANUP_FLAT_TEXTURE_RMS = 12;   // at or below: flat, keep full cleanup
+const CLEANUP_BUSY_TEXTURE_RMS = 30;   // at or above: detailed, skip cleanup
+
 const VIDEO_CLEANUP_BACKENDS = Object.freeze({
     CANVAS_SOFT: 'canvas-soft',
     CANVAS_BILATERAL: 'canvas-bilateral'
@@ -598,6 +609,31 @@ export function buildEdgeCoreDenoiseWeightMap(alphaMap, width, height, strength)
     return gaussianBlurFloatMap(weights, width, height, 0.35, 1);
 }
 
+/**
+ * RMS of the high-pass luma outside the watermark footprint, i.e. how much real
+ * detail sits around it. Reuses the caller's blurred copy as the low-pass term.
+ */
+export function measureSurroundingTextureRms(padded, textureBase, weights) {
+    let sum = 0;
+    let count = 0;
+
+    for (let pixel = 0; pixel < weights.length; pixel++) {
+        if (weights[pixel] > 0.02) continue;
+
+        const idx = pixel * 4;
+        const detail = lumaAt(padded.data, idx) - lumaAt(textureBase, idx);
+        sum += detail * detail;
+        count++;
+    }
+
+    return count > 0 ? Math.sqrt(sum / count) : 0;
+}
+
+export function resolveContentTextureGate(textureRms) {
+    if (!Number.isFinite(textureRms)) return 1;
+    return 1 - smoothstep(CLEANUP_FLAT_TEXTURE_RMS, CLEANUP_BUSY_TEXTURE_RMS, textureRms);
+}
+
 function applySoftResidualCleanup(
     ctx,
     position,
@@ -620,6 +656,14 @@ function applySoftResidualCleanup(
     const paddedWeights = mapRoiWeightsToPaddedWeights(roiWeights, position, padded, padX, padY);
     const weights = gaussianBlurFloatMap(paddedWeights, padded.width, padded.height, 1);
     const textureBase = gaussianBlurPaddedImageData(padded, 2.2, 5);
+    const contentTextureGate = resolveContentTextureGate(
+        measureSurroundingTextureRms(padded, textureBase, weights)
+    );
+
+    // Detailed background: smoothing would cost more than the residual it hides.
+    // Bail out before the inpaint, which is the expensive part of this pass.
+    if (contentTextureGate <= 0.01) return;
+
     const structureGuard = protectStructure
         ? buildLumaStructureGuard(padded, highQuality ? 0.55 : 0.78)
         : null;
@@ -656,7 +700,7 @@ function applySoftResidualCleanup(
         const structureFactor = structureGuard
             ? Math.max(0.28, 1 - effectiveStructureGuard)
             : 1;
-        const blendWeight = baseBlendWeight * structureFactor;
+        const blendWeight = baseBlendWeight * structureFactor * contentTextureGate;
         if (blendWeight <= 0.01) continue;
 
         const idx = pixel * 4;
@@ -1399,6 +1443,8 @@ export async function applyVideoResidualCleanupAsync(ctx, position, alphaMap, op
 export {
     borrowCleanHighpassTexture,
     buildLumaStructureGuard,
+    CLEANUP_BUSY_TEXTURE_RMS,
+    CLEANUP_FLAT_TEXTURE_RMS,
     DEFAULT_DENOISE_BACKEND,
     DEFAULT_EDGE_DENOISE_STRENGTH,
     DEFAULT_HIGH_QUALITY_CLEANUP,
